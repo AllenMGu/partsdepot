@@ -1,0 +1,934 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>仓库管理 - 备件管理系统</title>
+    <!-- Tailwind CSS v3 -->
+    <link href="assets/css/tailwind.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="assets/css/font-awesome.min.css" rel="stylesheet">
+    <!-- 统一的 Tailwind 配置 -->
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+    <!-- 顶部状态栏 -->
+    <header class="bg-white shadow-sm z-10">
+        <div class="flex items-center justify-between px-4 py-3">
+            <!-- 左侧：Logo和菜单按钮 -->
+            <div class="flex items-center">
+                <button id="sidebarToggle" class="mr-4 text-gray-600 focus:outline-none lg:hidden">
+                    <i class="fa fa-bars text-xl"></i>
+                </button>
+                <div class="flex items-center">
+                    <img src="assets/images/logo.png" alt="Logo" class="h-8 w-8">
+                    <span class="ml-2 text-lg font-semibold text-gray-800 hidden sm:block">备件管理系统</span>
+                </div>
+            </div>
+            
+            <!-- 右侧：仓库选择、通知和用户信息 -->
+            <div class="flex items-center space-x-4">
+                <!-- 仓库选择 -->
+                <div class="relative" id="warehouseSelector">
+                    <button class="flex items-center text-gray-700 hover:text-primary focus:outline-none">
+                        <i class="fa fa-building-o mr-2"></i>
+                        <span id="currentWarehouse">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs"></i>
+                    </button>
+                    <div id="warehouseDropdown" class="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <div class="px-4 py-2 text-sm text-gray-400">选择仓库</div>
+                            <div id="warehouseList" class="max-h-64 overflow-y-auto">
+                                <!-- 仓库列表将通过JS动态生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 通知 -->
+                <div class="relative">
+                    <button class="text-gray-600 hover:text-primary focus:outline-none">
+                        <i class="fa fa-bell-o text-xl"></i>
+                        <span class="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full"></span>
+                    </button>
+                </div>
+                
+                <!-- 用户信息 -->
+                <div class="relative" id="userMenu">
+                    <button class="flex items-center focus:outline-none">
+                        <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center">
+                            <span id="userInitials">U</span>
+                        </div>
+                        <span class="ml-2 text-sm font-medium text-gray-700 hidden md:block" id="userName">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs text-gray-500 hidden md:block"></i>
+                    </button>
+                    <div id="userDropdown" class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-user-circle mr-2"></i> 个人资料
+                            </a>
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-cog mr-2"></i> 设置
+                            </a>
+                            <hr class="my-1">
+                            <a href="#" id="logoutButton" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-sign-out mr-2"></i> 退出登录
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- 侧边导航栏 -->
+        <aside id="sidebar" class="bg-white w-64 shadow-md hidden lg:block flex-shrink-0 transition-all-300">
+            <nav class="mt-5 px-2">
+                <a href="dashboard.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-dashboard sidebar-icon"></i>
+                    <span>仪表盘</span>
+                </a>
+                <a href="warehouse.html" class="sidebar-active flex items-center px-4 py-3 rounded-md mb-1">
+                    <i class="fa fa-building sidebar-icon"></i>
+                    <span>仓库管理</span>
+                </a>
+                <a href="location.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-map-marker sidebar-icon"></i>
+                    <span>库位管理</span>
+                </a>
+                <a href="goods.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-cubes sidebar-icon"></i>
+                    <span>货物管理</span>
+                </a>
+                <a href="stock.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-list sidebar-icon"></i>
+                    <span>库存查询</span>
+                </a>
+                <a href="scan.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-qrcode sidebar-icon"></i>
+                    <span>扫码出入库</span>
+                </a>
+                <a href="inbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-down sidebar-icon"></i>
+                    <span>入库单管理</span>
+                </a>
+                <a href="outbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-up sidebar-icon"></i>
+                    <span>出库单管理</span>
+                </a>
+                <a href="check.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-check-square-o sidebar-icon"></i>
+                    <span>盘点管理</span>
+                </a>
+                <a href="user.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-users sidebar-icon"></i>
+                    <span>用户管理</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="flex-1 overflow-y-auto p-6">
+            <!-- 页面标题和操作按钮 -->
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">仓库管理</h1>
+                    <p class="text-gray-600">管理所有仓库信息</p>
+                </div>
+                <div class="mt-4 md:mt-0">
+                    <button id="addWarehouseBtn" class="bg-primary text-white px-4 py-2 rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300 flex items-center">
+                        <i class="fa fa-plus mr-2"></i>
+                        <span>新增仓库</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 搜索和筛选 -->
+            <div class="bg-white rounded-lg shadow p-4 mb-6">
+                <div class="flex flex-col md:flex-row md:items-center md:space-x-4">
+                    <div class="flex-1 mb-4 md:mb-0">
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500">
+                                <i class="fa fa-search"></i>
+                            </span>
+                            <input type="text" id="searchInput" class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="搜索仓库名称或编码">
+                        </div>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="filterBtn" class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300 flex items-center">
+                            <i class="fa fa-filter mr-2"></i>
+                            <span>筛选</span>
+                        </button>
+                        <button id="refreshBtn" class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300 flex items-center">
+                            <i class="fa fa-refresh mr-2"></i>
+                            <span>刷新</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 仓库列表 -->
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    仓库编码
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    仓库名称
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    地址
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    状态
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    操作
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200" id="warehouseTableBody">
+                            <!-- 仓库数据将通过JS动态生成 -->
+                            <tr>
+                                <td colspan="5" class="px-6 py-4 text-center text-gray-500">加载中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- 分页 -->
+                <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+                    <div class="flex-1 flex justify-between sm:hidden">
+                        <a href="#" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                            上一页
+                        </a>
+                        <a href="#" class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                            下一页
+                        </a>
+                    </div>
+                    <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                        <div>
+                            <p class="text-sm text-gray-700">
+                                显示 <span id="startRange" class="font-medium">1</span> 到 <span id="endRange" class="font-medium">10</span> 条，共 <span id="totalCount" class="font-medium">0</span> 条记录
+                            </p>
+                        </div>
+                        <div>
+                            <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px pagination" aria-label="Pagination">
+                                <a href="#" class="prev relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                    <span class="sr-only">上一页</span>
+                                    <i class="fa fa-chevron-left"></i>
+                                </a>
+                                <div class="page-numbers">
+                                    <!-- 页码按钮将通过JavaScript动态生成 -->
+                                </div>
+                                <a href="#" class="next relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                    <span class="sr-only">下一页</span>
+                                    <i class="fa fa-chevron-right"></i>
+                                </a>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 新增/编辑仓库模态框 -->
+    <div id="warehouseModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-800" id="modalTitle">新增仓库</h3>
+            </div>
+            <div class="px-6 py-4">
+                <form id="warehouseForm">
+                    <input type="hidden" id="warehouseId">
+                    <div class="mb-4">
+                        <label for="warehouseCode" class="block text-sm font-medium text-gray-700 mb-1">仓库编码 <span class="text-red-500">*</span></label>
+                        <input type="text" id="warehouseCode" class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="请输入仓库编码" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="warehouseName" class="block text-sm font-medium text-gray-700 mb-1">仓库名称 <span class="text-red-500">*</span></label>
+                        <input type="text" id="warehouseName" class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="请输入仓库名称" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="warehouseAddress" class="block text-sm font-medium text-gray-700 mb-1">仓库地址</label>
+                        <input type="text" id="warehouseAddress" class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="请输入仓库地址">
+                    </div>
+                    <div class="mb-4">
+                        <label for="warehouseStatus" class="block text-sm font-medium text-gray-700 mb-1">状态</label>
+                        <select id="warehouseStatus" class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300">
+                            <option value="true">启用</option>
+                            <option value="false">禁用</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button id="cancelBtn" class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300">
+                    取消
+                </button>
+                <button id="saveBtn" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300">
+                    保存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 确认删除模态框 -->
+    <div id="deleteModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-800">确认删除</h3>
+            </div>
+            <div class="px-6 py-4">
+                <p class="text-gray-700">您确定要删除仓库 "<span id="deleteWarehouseName" class="font-medium"></span>" 吗？此操作无法撤销。</p>
+                <p class="text-red-500 text-sm mt-2">注意：删除仓库将同时删除该仓库下的所有库位和库存记录。</p>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button id="cancelDeleteBtn" class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300">
+                    取消
+                </button>
+                <button id="confirmDeleteBtn" class="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all-300">
+                    确认删除
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通用脚本 -->
+    <script src="assets/js/common.js"></script>
+
+    <!-- 页面特定脚本 -->
+    <script>
+
+        // 页面特定变量
+        let currentEditId = null;
+        let currentDeleteId = null;
+        let currentPage = 1;
+        const pageSize = 10;
+        
+        // DOM元素
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+        const warehouseSelector = document.getElementById('warehouseSelector');
+        const warehouseDropdown = document.getElementById('warehouseDropdown');
+        const warehouseList = document.getElementById('warehouseList');
+        const currentWarehouseEl = document.getElementById('currentWarehouse');
+        const userMenu = document.getElementById('userMenu');
+        const userDropdown = document.getElementById('userDropdown');
+        const userName = document.getElementById('userName');
+        const userInitials = document.getElementById('userInitials');
+        const logoutButton = document.getElementById('logoutButton');
+        const addWarehouseBtn = document.getElementById('addWarehouseBtn');
+        const warehouseModal = document.getElementById('warehouseModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const warehouseForm = document.getElementById('warehouseForm');
+        const warehouseId = document.getElementById('warehouseId');
+        const warehouseCode = document.getElementById('warehouseCode');
+        const warehouseName = document.getElementById('warehouseName');
+        const warehouseAddress = document.getElementById('warehouseAddress');
+        const warehouseStatus = document.getElementById('warehouseStatus');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const deleteModal = document.getElementById('deleteModal');
+        const deleteWarehouseName = document.getElementById('deleteWarehouseName');
+        const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+        const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toastMessage');
+        const searchInput = document.getElementById('searchInput');
+        const filterBtn = document.getElementById('filterBtn');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const warehouseTableBody = document.getElementById('warehouseTableBody');
+        
+        // 检查认证状态
+        function checkAuth() {
+            console.log('进入checkAuth函数');
+            const localAuth = {
+                token: localStorage.getItem('access_token'),
+                userStr: localStorage.getItem('user'),
+                expiry: localStorage.getItem('token_expiry')
+            };
+            const sessionAuth = {
+                token: sessionStorage.getItem('access_token'),
+                userStr: sessionStorage.getItem('user'),
+                expiry: sessionStorage.getItem('token_expiry')
+            };
+            const isComplete = (auth) => !!(auth.token && auth.userStr);
+            const isExpired = (auth) => !!(auth.expiry && new Date() >= new Date(auth.expiry));
+
+            let auth = null;
+            if (isComplete(localAuth) && !isExpired(localAuth)) {
+                auth = localAuth;
+            } else if (isComplete(sessionAuth) && !isExpired(sessionAuth)) {
+                auth = sessionAuth;
+            } else if (isComplete(localAuth)) {
+                auth = localAuth;
+            } else if (isComplete(sessionAuth)) {
+                auth = sessionAuth;
+            }
+
+            const token = auth ? auth.token : null;
+            const userStr = auth ? auth.userStr : null;
+            const expiry = auth ? auth.expiry : null;
+
+            console.log('localStorage中的token:', token);
+            console.log('localStorage中的用户信息:', userStr);
+            console.log('localStorage中的过期时间:', expiry);
+
+            if (!token || !userStr) {
+                console.log('未找到有效的token或用户信息');
+                return false;
+            }
+
+            if (expiry && new Date() >= new Date(expiry)) {
+                console.log('token已过期');
+                // token已过期，清除
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('user');
+                localStorage.removeItem('token_expiry');
+                sessionStorage.removeItem('access_token');
+                sessionStorage.removeItem('user');
+                sessionStorage.removeItem('token_expiry');
+                return false;
+            }
+
+            try {
+                currentUser = JSON.parse(userStr);
+                console.log('解析用户信息成功:', currentUser);
+                return true;
+            } catch (e) {
+                console.error('解析用户信息失败:', e);
+                return false;
+            }
+        }
+
+        // 初始化函数
+        async function init() {
+            // 检查登录状态
+            if (!checkAuth()) {
+                window.location.href = 'index.html';
+                return;
+            }
+
+            console.log('当前用户:', currentUser);
+            console.log('当前用户角色:', currentUser.role);
+
+            // 检查用户是否为管理员，只有管理员可以访问仓库管理页面
+            if (currentUser.role !== 'admin') {
+                // 显示无权限访问的提示
+                const mainContent = document.querySelector('main');
+                mainContent.innerHTML = `
+                    <div class="flex items-center justify-center h-64">
+                        <div class="text-center">
+                            <i class="fa fa-lock text-5xl text-gray-400 mb-4"></i>
+                            <h1 class="text-2xl font-bold text-gray-800 mb-2">无权限访问</h1>
+                            <p class="text-gray-600">只有管理员用户可以访问仓库管理页面</p>
+                        </div>
+                    </div>
+                `;
+                console.log('用户不是管理员，显示无权限访问提示');
+                return;
+            }
+
+            console.log('用户是管理员，继续执行');
+            setupEventListeners();
+            loadWarehouseData();
+        }
+
+        // 加载仓库数据
+        async function loadWarehouseData() {
+            try {
+                // 显示加载状态
+                warehouseTableBody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">加载中...</td></tr>';
+
+                // 从后端API获取仓库数据
+                const response = await fetch(`${API_BASE_URL}/warehouses/`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取仓库数据失败');
+                }
+
+                const data = await response.json();
+
+                // 更新表格
+                renderWarehouseTable(data);
+            } catch (error) {
+                console.error('加载仓库数据失败:', error);
+                warehouseTableBody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-red-500">加载失败，请重试</td></tr>';
+            }
+        }
+        
+        
+        // 更新分页信息
+        function updatePagination(dataLength) {
+            const totalPages = Math.ceil(dataLength / pageSize);
+            const startRange = dataLength > 0 ? (currentPage - 1) * pageSize + 1 : 0;
+            const endRange = Math.min(currentPage * pageSize, dataLength);
+
+            document.getElementById('startRange').textContent = startRange;
+            document.getElementById('endRange').textContent = endRange;
+            document.getElementById('totalCount').textContent = dataLength;
+
+            // 生成页码按钮
+            const paginationContainer = document.querySelector('.pagination');
+            if (paginationContainer) {
+                const pageNumbers = generatePageNumbers(totalPages);
+                renderPageNumbers(paginationContainer, pageNumbers, totalPages);
+            }
+        }
+
+        // 生成页码数组
+        function generatePageNumbers(totalPages) {
+            const maxVisiblePages = 5;
+            const pageNumbers = [];
+
+            if (totalPages <= maxVisiblePages) {
+                // 总页数小于等于最大可见页数，显示所有页码
+                for (let i = 1; i <= totalPages; i++) {
+                    pageNumbers.push(i);
+                }
+            } else {
+                // 总页数大于最大可见页数，显示当前页附近的页码
+                let startPage = Math.max(1, currentPage - 2);
+                let endPage = Math.min(totalPages, currentPage + 2);
+
+                if (currentPage <= 3) {
+                    endPage = 5;
+                } else if (currentPage >= totalPages - 2) {
+                    startPage = totalPages - 4;
+                }
+
+                for (let i = startPage; i <= endPage; i++) {
+                    pageNumbers.push(i);
+                }
+
+                // 添加省略号
+                if (startPage > 1) {
+                    pageNumbers.unshift('ellipsis');
+                    pageNumbers.unshift(1);
+                }
+
+                if (endPage < totalPages) {
+                    pageNumbers.push('ellipsis');
+                    pageNumbers.push(totalPages);
+                }
+            }
+
+            return pageNumbers;
+        }
+
+        // 渲染页码按钮
+        function renderPageNumbers(container, pageNumbers, totalPages) {
+            // 找到页码按钮容器
+            let pageNumberContainer = container.querySelector('.page-numbers');
+            if (!pageNumberContainer) {
+                // 如果没有页码按钮容器，创建一个
+                const prevBtn = container.querySelector('.prev');
+                const nextBtn = container.querySelector('.next');
+                pageNumberContainer = document.createElement('div');
+                pageNumberContainer.className = 'page-numbers';
+                pageNumberContainer.style.display = 'flex';
+                pageNumberContainer.style.alignItems = 'center';
+                container.insertBefore(pageNumberContainer, nextBtn);
+            }
+
+            // 清空现有页码按钮
+            pageNumberContainer.innerHTML = '';
+
+            // 渲染页码按钮
+            pageNumbers.forEach(page => {
+                if (page === 'ellipsis') {
+                    // 渲染省略号
+                    const ellipsis = document.createElement('span');
+                    ellipsis.className = 'relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700';
+                    ellipsis.textContent = '...';
+                    pageNumberContainer.appendChild(ellipsis);
+                } else {
+                    // 渲染页码按钮
+                    const pageBtn = document.createElement('a');
+                    pageBtn.href = '#';
+                    pageBtn.className = `relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium hover:bg-gray-50 ${page === currentPage ? 'bg-primary text-white' : 'bg-white text-gray-700'}`;
+                    pageBtn.textContent = page;
+                    pageBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        currentPage = page;
+                        loadWarehouseData();
+                    });
+                    pageNumberContainer.appendChild(pageBtn);
+                }
+            });
+
+            // 禁用/启用上一页和下一页按钮
+            const prevBtn = container.querySelector('.prev');
+            const nextBtn = container.querySelector('.next');
+
+            if (prevBtn) {
+                prevBtn.classList.toggle('opacity-50', currentPage === 1);
+                prevBtn.classList.toggle('pointer-events-none', currentPage === 1);
+            }
+
+            if (nextBtn) {
+                nextBtn.classList.toggle('opacity-50', currentPage === totalPages);
+                nextBtn.classList.toggle('pointer-events-none', currentPage === totalPages);
+            }
+        }
+
+        // 渲染仓库表格
+        function renderWarehouseTable(data) {
+            if (!data || data.length === 0) {
+                warehouseTableBody.innerHTML = '<tr><td colspan="5" class="px-6 py-4 text-center text-gray-500">暂无数据</td></tr>';
+                updatePagination(0);
+                return;
+            }
+
+            // 更新分页信息
+            updatePagination(data.length);
+
+            // 获取当前页的数据
+            const startIndex = (currentPage - 1) * pageSize;
+            const endIndex = startIndex + pageSize;
+            const pageData = data.slice(startIndex, endIndex);
+
+            warehouseTableBody.innerHTML = '';
+
+            pageData.forEach(warehouse => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50 transition-all-300';
+
+                // 仓库编码
+                const codeCell = document.createElement('td');
+                codeCell.className = 'px-6 py-4 whitespace-nowrap';
+                codeCell.innerHTML = `<div class="text-sm font-medium text-gray-900">${warehouse.code || '-'}</div>`;
+                row.appendChild(codeCell);
+
+                // 仓库名称
+                const nameCell = document.createElement('td');
+                nameCell.className = 'px-6 py-4 whitespace-nowrap';
+                nameCell.innerHTML = `<div class="text-sm text-gray-900">${warehouse.name || '-'}</div>`;
+                row.appendChild(nameCell);
+
+                // 地址
+                const addressCell = document.createElement('td');
+                addressCell.className = 'px-6 py-4';
+                addressCell.innerHTML = `<div class="text-sm text-gray-900">${warehouse.address || '-'}</div>`;
+                row.appendChild(addressCell);
+
+                // 状态
+                const statusCell = document.createElement('td');
+                statusCell.className = 'px-6 py-4 whitespace-nowrap';
+                const statusText = warehouse.is_active ? '启用' : '禁用';
+                const statusClass = warehouse.is_active ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
+                statusCell.innerHTML = `<span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}">${statusText}</span>`;
+                row.appendChild(statusCell);
+
+                // 操作
+                const actionCell = document.createElement('td');
+                actionCell.className = 'px-6 py-4 whitespace-nowrap text-sm font-medium';
+
+                // 只有管理员可以编辑和删除
+                if (currentUser.role === 'admin') {
+                    actionCell.innerHTML = `
+                        <div class="flex space-x-2">
+                            <button class="text-primary hover:text-secondary edit-btn" data-id="${warehouse.id}">
+                                <i class="fa fa-pencil"></i> 编辑
+                            </button>
+                            <button class="text-red-500 hover:text-red-600 delete-btn" data-id="${warehouse.id}" data-name="${warehouse.name}">
+                                <i class="fa fa-trash"></i> 删除
+                            </button>
+                        </div>
+                    `;
+                } else {
+                    actionCell.innerHTML = '<span class="text-gray-500">无权限</span>';
+                }
+
+                row.appendChild(actionCell);
+
+                warehouseTableBody.appendChild(row);
+            });
+
+            // 添加编辑和删除按钮的事件监听
+            document.querySelectorAll('.edit-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const id = parseInt(this.dataset.id);
+                    editWarehouse(id);
+                });
+            });
+
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.addEventListener('click', function() {
+                    const id = parseInt(this.dataset.id);
+                    const name = this.dataset.name;
+                    confirmDelete(id, name);
+                });
+            });
+        }
+        
+        // 打开新增仓库模态框
+        function openAddModal() {
+            modalTitle.textContent = '新增仓库';
+            warehouseForm.reset();
+            warehouseId.value = '';
+            warehouseStatus.value = 'true';
+            currentEditId = null;
+            warehouseModal.classList.remove('hidden');
+        }
+        
+        // 打开编辑仓库模态框
+        async function editWarehouse(id) {
+            try {
+                // 获取仓库详情
+                const response = await fetch(`${API_BASE_URL}/warehouses/${id}`, {
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取仓库详情失败');
+                }
+                
+                const warehouse = await response.json();
+                
+                // 填充表单
+                modalTitle.textContent = '编辑仓库';
+                warehouseId.value = warehouse.id;
+                warehouseCode.value = warehouse.code;
+                warehouseName.value = warehouse.name;
+                warehouseAddress.value = warehouse.address || '';
+                warehouseStatus.value = warehouse.is_active ? 'true' : 'false';
+                currentEditId = id;
+                
+                // 显示模态框
+                warehouseModal.classList.remove('hidden');
+            } catch (error) {
+                console.error('编辑仓库失败:', error);
+                showToast('获取仓库详情失败', 'error');
+            }
+        }
+        
+        // 保存仓库
+        async function saveWarehouse() {
+            // 表单验证
+            if (!warehouseCode.value.trim()) {
+                showToast('请输入仓库编码', 'error');
+                warehouseCode.focus();
+                return;
+            }
+
+            if (!warehouseName.value.trim()) {
+                showToast('请输入仓库名称', 'error');
+                warehouseName.focus();
+                return;
+            }
+
+            try {
+                const warehouseData = {
+                    code: warehouseCode.value.trim(),
+                    name: warehouseName.value.trim(),
+                    address: warehouseAddress.value.trim(),
+                    is_active: warehouseStatus.value === 'true'
+                };
+                
+                let response;
+                
+                if (currentEditId) {
+                    // 更新仓库
+                    response = await fetch(`${API_BASE_URL}/warehouses/${currentEditId}`, {
+                        method: 'PUT',
+                        headers: getHeaders(),
+                        body: JSON.stringify(warehouseData)
+                    });
+                } else {
+                    // 新增仓库
+                    response = await fetch(`${API_BASE_URL}/warehouses/`, {
+                        method: 'POST',
+                        headers: getHeaders(),
+                        body: JSON.stringify(warehouseData)
+                    });
+                }
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '保存失败');
+                }
+                
+                // 关闭模态框
+                warehouseModal.classList.add('hidden');
+                
+                // 重新加载数据
+                await loadWarehouseData();
+                
+                // 显示成功提示
+                showToast(currentEditId ? '仓库更新成功' : '仓库创建成功');
+            } catch (error) {
+                console.error('保存仓库失败:', error);
+                showToast(error.message || '保存失败', 'error');
+            }
+        }
+        
+        // 确认删除
+        function confirmDelete(id, name) {
+            currentDeleteId = id;
+            deleteWarehouseName.textContent = name;
+            deleteModal.classList.remove('hidden');
+        }
+        
+        // 删除仓库
+        async function deleteWarehouse() {
+            if (!currentDeleteId) return;
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/warehouses/${currentDeleteId}`, {
+                    method: 'DELETE',
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '删除失败');
+                }
+
+                // 关闭模态框
+                deleteModal.classList.add('hidden');
+
+                // 重新加载数据
+                await loadWarehouseData();
+
+                // 显示成功提示
+                showToast('仓库删除成功');
+            } catch (error) {
+                console.error('删除仓库失败:', error);
+                showToast(error.message || '删除失败', 'error');
+            }
+        }
+        
+        // 提示消息功能已在 common.js 中实现
+        
+        // 设置事件监听器
+        function setupEventListeners() {
+            // 侧边栏切换
+            sidebarToggle.addEventListener('click', function() {
+                sidebar.classList.toggle('hidden');
+            });
+
+            // 仓库选择器下拉菜单
+            const warehouseSelectorBtn = warehouseSelector.querySelector('button');
+            if (warehouseSelectorBtn) {
+                warehouseSelectorBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    warehouseDropdown.classList.toggle('hidden');
+                    userDropdown.classList.add('hidden');
+                });
+            }
+
+            // 阻止仓库下拉菜单内的点击事件冒泡
+            warehouseDropdown.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+
+            // 用户菜单下拉
+            const userMenuBtn = userMenu.querySelector('button');
+            if (userMenuBtn) {
+                userMenuBtn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    userDropdown.classList.toggle('hidden');
+                    warehouseDropdown.classList.add('hidden');
+                });
+            }
+
+            // 阻止用户下拉菜单内的点击事件冒泡
+            userDropdown.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+
+            // 点击页面其他地方关闭下拉菜单
+            document.addEventListener('click', function() {
+                warehouseDropdown.classList.add('hidden');
+                userDropdown.classList.add('hidden');
+            });
+            
+            // 退出登录
+            logoutButton.addEventListener('click', function(e) {
+                e.preventDefault();
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('user');
+                localStorage.removeItem('token_expiry');
+                sessionStorage.removeItem('access_token');
+                sessionStorage.removeItem('user');
+                sessionStorage.removeItem('token_expiry');
+                window.location.href = 'index.html';
+            });
+            
+            // 新增仓库按钮
+            addWarehouseBtn.addEventListener('click', openAddModal);
+            
+            // 取消按钮
+            cancelBtn.addEventListener('click', function() {
+                warehouseModal.classList.add('hidden');
+            });
+            
+            // 保存按钮
+            saveBtn.addEventListener('click', saveWarehouse);
+            
+            // 取消删除按钮
+            cancelDeleteBtn.addEventListener('click', function() {
+                deleteModal.classList.add('hidden');
+            });
+            
+            // 确认删除按钮
+            confirmDeleteBtn.addEventListener('click', deleteWarehouse);
+            
+            // 刷新按钮
+            refreshBtn.addEventListener('click', loadWarehouseData);
+            
+            // 分页按钮事件监听器
+            const prevPageBtn = document.querySelector('.pagination .prev');
+            const nextPageBtn = document.querySelector('.pagination .next');
+
+            if (prevPageBtn) {
+                prevPageBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    if (currentPage > 1) {
+                        currentPage--;
+                        loadWarehouseData();
+                    }
+                });
+            }
+
+            if (nextPageBtn) {
+                nextPageBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    // 在加载数据后会更新分页信息，所以这里可以直接增加页码
+                    currentPage++;
+                    loadWarehouseData();
+                });
+            }
+
+            // 搜索输入
+            searchInput.addEventListener('input', function() {
+                // 简单的客户端搜索过滤
+                const searchTerm = this.value.toLowerCase();
+                const rows = warehouseTableBody.querySelectorAll('tr');
+
+                rows.forEach(row => {
+                    const code = row.querySelector('td:nth-child(1)').textContent.toLowerCase();
+                    const name = row.querySelector('td:nth-child(2)').textContent.toLowerCase();
+
+                    if (code.includes(searchTerm) || name.includes(searchTerm)) {
+                        row.classList.remove('hidden');
+                    } else {
+                        row.classList.add('hidden');
+                    }
+                });
+            });
+        }
+        
+        // 页面加载完成后，调用init函数
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

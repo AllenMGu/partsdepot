@@ -1,0 +1,87 @@
+<view class="container">
+  <view class="card">
+    <view class="subtitle" wx:if="{{currentWarehouseName}}">{{labels.currentWarehouse}}{{currentWarehouseName}}</view>
+    <view class="row" style="margin-top: 10rpx;">
+      <button class="{{mode==='inventory' ? 'btn-primary' : 'btn-ghost'}}" size="mini" bindtap="setInventoryMode">{{labels.inventory}}</button>
+      <button class="{{mode==='check' ? 'btn-primary' : 'btn-ghost'}}" size="mini" bindtap="setCheckMode">{{labels.check}}</button>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{mode==='inventory'}}">
+    <picker mode="selector" range="{{invTypes}}" range-key="label" bindchange="onTypeChange">
+      <view class="type-selector">
+        <text>{{labels.type}}</text>
+        <text class="type-pill {{selectedType.value==='入库' ? 'type-in' : 'type-out'}}">{{selectedType.label}}</text>
+        <text class="type-arrow">?</text>
+      </view>
+    </picker>
+
+    <input class="input" placeholder="{{labels.goodsBarcode}}" value="{{inventory.goods_barcode}}" bindinput="onGoodsInput" />
+    <button class="btn-ghost" size="mini" bindtap="scanGoodsCode">{{labels.scanGoods}}</button>
+
+    <input class="input" placeholder="{{labels.locationCode}}" value="{{inventory.location_code}}" bindinput="onLocationInput" bindfocus="onLocationFocus" />
+    <button class="btn-ghost" size="mini" bindtap="scanLocationCode">{{labels.scanLocation}}</button>
+
+    <view class="dropdown" wx:if="{{showLocationDropdown}}">
+      <view class="dropdown-item" wx:for="{{visibleLocationOptions}}" wx:key="id" data-code="{{item.location_code}}" bindtap="chooseLocation">
+        <view>{{item.location_code}}</view>
+        <view class="subtitle">{{item.name}}</view>
+      </view>
+      <view class="dropdown-expand" wx:if="{{hasMoreLocationOptions}}">
+        <button class="btn-ghost" size="mini" bindtap="toggleLocationExpand">{{locationExpanded ? labels.lessLocation : labels.moreLocation}}</button>
+      </view>
+    </view>
+
+    <view class="stock-highlight" wx:if="{{selectedType.value==='出库'}}">{{labels.currentStock}}{{currentStock}}</view>
+    <input class="input" type="digit" placeholder="{{labels.quantity}}" value="{{inventory.quantity}}" bindinput="onQuantityInput" />
+    <input class="input" placeholder="{{labels.remark}}" value="{{inventory.remark}}" bindinput="onRemarkInput" />
+    <button class="btn-primary" loading="{{loading}}" bindtap="submitInventory">{{labels.submitInventory}}</button>
+  </view>
+
+  <view class="card" wx:if="{{mode==='check'}}">
+    <view class="subtitle" style="margin-bottom: 8rpx;">{{labels.checkGuide}}</view>
+    <input class="input" placeholder="{{labels.checkRemark}}" value="{{checkRemark}}" bindinput="onCheckRemarkInput" />
+    <button class="btn-primary" loading="{{loading}}" bindtap="createCheckOrder">{{labels.createCheckOrder}}</button>
+
+    <view class="subtitle" style="margin-top: 14rpx;">{{labels.checkOrderList}}</view>
+    <view class="order-item" wx:for="{{checkOrders}}" wx:key="id">
+      <view class="row"><text>{{item.order_no}}</text><text class="tag {{item.status==='COMPLETED' ? 'tag-in' : 'tag-out'}}">{{item.status}}</text></view>
+      <view class="subtitle">{{item.warehouse_name}} / {{labels.detailCount}} {{item.item_count}}</view>
+      <button class="btn-ghost" size="mini" data-id="{{item.id}}" bindtap="selectCheckOrder">{{labels.scanCheck}}</button>
+    </view>
+
+    <view wx:if="{{checkOrder}}" class="current-order" style="margin-top: 14rpx;">{{labels.currentCheckOrder}}{{checkOrder.order_no}} - {{checkOrder.warehouse_name}}</view>
+
+    <view wx:if="{{checkOrder && checkExpanded && checkOrder.status!=='COMPLETED'}}" style="margin-top: 14rpx;">
+      <input class="input" placeholder="{{labels.goodsBarcode}}" value="{{checkForm.goods_barcode}}" bindinput="onCheckGoodsInput" />
+      <button class="btn-ghost" size="mini" bindtap="scanCheckGoodsCode">{{labels.scanGoods}}</button>
+      <view class="info-ok" wx:if="{{checkGoodsMatched}}">{{checkGoodsInfo}}</view>
+      <view class="info-warn" wx:if="{{checkForm.goods_barcode && !checkGoodsMatched}}">{{checkGoodsInfo}}</view>
+
+      <input class="input" placeholder="{{labels.checkLocationCode}}" value="{{checkForm.location_code}}" bindinput="onCheckLocationInput" />
+      <button class="btn-ghost" size="mini" bindtap="scanCheckLocationCode">{{labels.scanLocation}}</button>
+      <view class="info-ok" wx:if="{{checkLocationMatched}}">{{checkLocationInfo}}</view>
+      <view class="info-warn" wx:if="{{checkForm.location_code && !checkLocationMatched}}">{{checkLocationInfo}}</view>
+
+      <view class="stock-line">{{labels.systemStock}}<text class="stock-value">{{checkCurrentStock}}</text></view>
+      <input class="input" type="digit" placeholder="{{labels.checkQty}}" value="{{checkForm.check_quantity}}" bindinput="onCheckQtyInput" />
+      <view class="row" style="margin-top: 6rpx;">
+        <button class="btn-primary" loading="{{loading}}" bindtap="confirmCheckItem">{{labels.confirmQty}}</button>
+        <button class="btn-ghost" loading="{{loading}}" bindtap="completeCheckOrder">{{labels.completeCheck}}</button>
+        <button class="btn-ghost" loading="{{loading}}" bindtap="saveAndCollapseCheck">{{labels.saveCollapse}}</button>
+      </view>
+    </view>
+
+    <view wx:if="{{checkOrder}}" style="margin-top: 14rpx;">
+      <view class="subtitle">{{labels.checkItems}}</view>
+      <view class="order-item" wx:for="{{checkOrderItems}}" wx:key="id">
+        <view>{{item.goods_name}} ({{item.goods_barcode}})</view>
+        <view class="subtitle">{{labels.checkLocationCode}}?{{item.location_code}}</view>
+        <view class="subtitle">系统：{{item.actual_quantity}} / 盘点：{{item.check_quantity}} / 差异：{{item.diff_quantity}}</view>
+      </view>
+      <view class="subtitle" wx:if="{{!checkOrderItems.length}}">{{labels.noCheckItems}}</view>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{result}}"><view class="subtitle">结果</view><view style="margin-top: 8rpx;">{{result}}</view></view>
+</view>

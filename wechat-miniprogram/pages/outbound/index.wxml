@@ -1,0 +1,68 @@
+<view class="container">
+  <view class="card">
+    <view class="subtitle" style="margin-bottom: 12rpx;">创建出库单</view>
+    <input class="input" placeholder="客户(选填)" value="{{createForm.customer}}" bindinput="onCustomerInput" />
+    <input class="input" placeholder="备注(选填)" value="{{createForm.remark}}" bindinput="onCreateRemarkInput" />
+    <button class="btn-primary" loading="{{loadingCreate}}" bindtap="createOrder">新建草稿单</button>
+  </view>
+
+  <view class="card">
+    <view class="row">
+      <text>出库单列表</text>
+      <button class="btn-ghost" size="mini" bindtap="loadOrders">刷新</button>
+    </view>
+    <view class="order-item" wx:for="{{orders}}" wx:key="id">
+      <view class="row">
+        <text>{{item.order_no}}</text>
+        <text class="tag {{item.status==='COMPLETED' ? 'tag-in' : 'tag-out'}}">{{item.status}}</text>
+      </view>
+      <view class="subtitle">客户：{{item.customer || '-'}}</view>
+      <view class="subtitle">仓库：{{item.warehouse_name}} / 明细：{{item.item_count}}</view>
+      <view class="subtitle">金额：{{item.total_amount}}</view>
+      <view style="margin-top: 10rpx;">
+        <button size="mini" class="btn-primary" data-id="{{item.id}}" bindtap="openDetail">处理</button>
+      </view>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{selected.id}}">
+    <view class="row">
+      <view>
+        <view>{{selected.order_no}}</view>
+        <view class="subtitle">{{selected.status}} / {{selected.warehouse_name}}</view>
+      </view>
+      <button size="mini" class="btn-ghost" bindtap="closeDetail">关闭</button>
+    </view>
+
+    <view wx:if="{{selected.status==='DRAFT'}}" style="margin-top: 16rpx;">
+      <view class="subtitle" style="margin-bottom: 8rpx;">新增明细</view>
+      <input class="input" placeholder="货物条码" value="{{itemForm.goods_barcode}}" bindinput="onItemBarcodeInput" />
+      <input class="input" placeholder="库位编码" value="{{itemForm.location_code}}" bindinput="onItemLocationInput" />
+      <input class="input" type="digit" placeholder="数量" value="{{itemForm.quantity}}" bindinput="onItemQtyInput" />
+      <input class="input" type="digit" placeholder="单价(留空取默认)" value="{{itemForm.unit_price}}" bindinput="onItemPriceInput" />
+      <input class="input" placeholder="备注" value="{{itemForm.remark}}" bindinput="onItemRemarkInput" />
+      <button class="btn-primary" loading="{{loadingAddItem}}" bindtap="addItem">添加明细</button>
+    </view>
+
+    <view style="margin-top: 16rpx;">
+      <view class="subtitle">明细列表</view>
+      <view class="order-item" wx:for="{{selected.items}}" wx:key="id">
+        <view>{{item.goods_name}} ({{item.goods_barcode}})</view>
+        <view class="subtitle">库位：{{item.location_code}}</view>
+        <view class="subtitle">数量：{{item.quantity}} / 单价：{{item.unit_price}} / 小计：{{item.total_price}}</view>
+        <button
+          wx:if="{{selected.status==='DRAFT'}}"
+          size="mini"
+          class="btn-ghost"
+          data-itemid="{{item.id}}"
+          bindtap="deleteItem"
+        >删除明细</button>
+      </view>
+    </view>
+
+    <view class="row" style="margin-top: 18rpx;">
+      <button wx:if="{{selected.status==='DRAFT'}}" class="btn-primary" loading="{{loadingSubmit}}" bindtap="submitOrder">提交出库单</button>
+      <button wx:if="{{selected.status==='DRAFT'}}" class="btn-ghost" loading="{{loadingDelete}}" bindtap="deleteOrder">删除草稿单</button>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,21 @@
+<view class="container">
+  <view class="card">
+    <view class="subtitle" wx:if="{{currentWarehouseName}}" style="margin-bottom: 10rpx;">当前仓库：{{currentWarehouseName}}</view>
+    <input class="input" placeholder="搜索条码/货名/库位" value="{{keyword}}" bindinput="onKeywordInput" />
+    <button class="btn-ghost" bindtap="loadStock">刷新</button>
+  </view>
+
+  <block wx:if="{{list.length}}">
+    <view class="card" wx:for="{{list}}" wx:key="id">
+      <view class="row">
+        <text>{{item.goods_name}}</text>
+        <text>{{item.quantity}}</text>
+      </view>
+      <view class="subtitle" style="margin-top:8rpx;">条码：{{item.goods_barcode}}</view>
+      <view class="subtitle">仓库：{{item.warehouse_name}} / 库位：{{item.location_code}}</view>
+      <view class="subtitle">更新时间：{{item.update_time_fmt}}</view>
+    </view>
+  </block>
+
+  <view class="subtitle" wx:else style="text-align:center;padding: 40rpx;">暂无数据</view>
+</view>

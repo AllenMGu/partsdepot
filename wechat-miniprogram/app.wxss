@@ -1,0 +1,76 @@
+page {
+  background: #f3f6fb;
+  color: #1e293b;
+  font-size: 28rpx;
+}
+
+.container {
+  padding: 24rpx;
+}
+
+.card {
+  background: #ffffff;
+  border-radius: 18rpx;
+  padding: 24rpx;
+  margin-bottom: 20rpx;
+  box-shadow: 0 8rpx 24rpx rgba(0, 0, 0, 0.04);
+}
+
+.title {
+  font-size: 34rpx;
+  font-weight: 600;
+  margin-bottom: 16rpx;
+}
+
+.subtitle {
+  font-size: 24rpx;
+  color: #64748b;
+}
+
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1rpx solid #d8e0ea;
+  border-radius: 12rpx;
+  padding: 24rpx 20rpx;
+  min-height: 92rpx;
+  font-size: 32rpx;
+  margin-bottom: 16rpx;
+  background: #fff;
+}
+
+.btn-primary {
+  background: #1f6feb;
+  color: #fff;
+  border-radius: 12rpx;
+  border: none;
+}
+
+.btn-ghost {
+  background: #eff6ff;
+  color: #1f6feb;
+  border: 1rpx solid #bfdbfe;
+  border-radius: 12rpx;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tag {
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  font-size: 22rpx;
+}
+
+.tag-in {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.tag-out {
+  background: #fee2e2;
+  color: #991b1b;
+}

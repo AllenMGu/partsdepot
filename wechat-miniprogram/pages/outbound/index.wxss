@@ -1,0 +1,4 @@
+.order-item {
+  border-top: 1rpx solid #edf2f7;
+  padding: 14rpx 0;
+}

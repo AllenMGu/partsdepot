@@ -1,0 +1,58 @@
+<view class="container">
+  <view class="card">
+    <view class="subtitle" style="margin-bottom: 12rpx;">{{labels.createHint}}</view>
+    <input class="input" placeholder="{{labels.remark}}" value="{{createForm.remark}}" bindinput="onCreateRemarkInput" />
+    <button class="btn-primary" loading="{{loadingCreate}}" bindtap="createOrder">{{labels.createOrder}}</button>
+  </view>
+
+  <view class="card">
+    <view class="row">
+      <text>{{labels.orderList}}</text>
+      <button class="btn-ghost" size="mini" bindtap="loadOrders">{{labels.refresh}}</button>
+    </view>
+    <view class="order-item" wx:for="{{orders}}" wx:key="id">
+      <view class="row">
+        <text>{{item.order_no}}</text>
+        <text class="tag {{item.status==='COMPLETED' ? 'tag-in' : 'tag-out'}}">{{item.status}}</text>
+      </view>
+      <view class="subtitle">{{labels.warehouse}}{{item.warehouse_name}} / {{labels.itemCount}}{{item.item_count}}</view>
+      <view class="subtitle">{{labels.createTime}}{{item.create_time_fmt}}</view>
+      <button size="mini" class="btn-primary" data-id="{{item.id}}" bindtap="openDetail">{{labels.process}}</button>
+    </view>
+  </view>
+
+  <view class="card" wx:if="{{selectedHeader.id}}">
+    <view class="current-order">{{labels.currentOrder}}{{selectedHeader.order_no}} - {{selectedHeader.warehouse_name}}</view>
+
+    <view wx:if="{{selectedHeader.status!=='COMPLETED'}}" style="margin-top: 16rpx;">
+      <input class="input" placeholder="{{labels.goodsBarcode}}" value="{{itemForm.goods_barcode}}" bindinput="onItemBarcodeInput" />
+      <button class="btn-ghost" size="mini" bindtap="scanGoodsCode">{{labels.scanGoods}}</button>
+      <view class="info-ok" wx:if="{{goodsMatched}}">{{goodsInfoText}}</view>
+      <view class="info-warn" wx:if="{{itemForm.goods_barcode && !goodsMatched}}">{{goodsInfoText}}</view>
+
+      <input class="input" placeholder="{{labels.locationCode}}" value="{{itemForm.location_code}}" bindinput="onItemLocationInput" />
+      <button class="btn-ghost" size="mini" bindtap="scanLocationCode">{{labels.scanLocation}}</button>
+      <view class="info-ok" wx:if="{{locationMatched}}">{{locationInfoText}}</view>
+      <view class="info-warn" wx:if="{{itemForm.location_code && !locationMatched}}">{{locationInfoText}}</view>
+
+      <view class="stock-line">{{labels.stock}}<text class="stock-value">{{currentStock}}</text></view>
+      <input class="input" type="digit" placeholder="{{labels.checkQty}}" value="{{itemForm.check_quantity}}" bindinput="onItemQtyInput" />
+
+      <view class="row" style="margin-top: 8rpx;">
+        <button class="btn-primary" loading="{{loadingAddItem}}" bindtap="addItem">{{labels.confirmQty}}</button>
+        <button class="btn-ghost" loading="{{loadingComplete}}" bindtap="completeOrder">{{labels.complete}}</button>
+      </view>
+    </view>
+
+    <view style="margin-top: 16rpx;">
+      <view class="subtitle">{{labels.items}}</view>
+      <view class="order-item" wx:for="{{selectedItems}}" wx:key="id">
+        <view>{{item.goods_name}} ({{item.goods_barcode}})</view>
+        <view class="subtitle">{{labels.locationCode}}?{{item.location_code}}</view>
+        <view class="subtitle">{{labels.system}}{{item.actual_quantity}} / {{labels.checked}}{{item.check_quantity}}</view>
+        <view class="diff {{item.diff_class==='ok' ? 'diff-ok' : 'diff-warn'}}">{{labels.diff}}{{item.diff_quantity}}</view>
+      </view>
+      <view class="subtitle" wx:if="{{!selectedItems.length}}">{{labels.noItems}}</view>
+    </view>
+  </view>
+</view>

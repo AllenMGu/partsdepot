@@ -1,0 +1,23 @@
+<view class="container">
+  <view class="card">
+    <view class="row">
+      <text class="subtitle">最近 {{limit}} 条记录</text>
+      <button class="btn-ghost" size="mini" bindtap="loadLogs">刷新</button>
+    </view>
+  </view>
+
+  <block wx:if="{{list.length}}">
+    <view class="card" wx:for="{{list}}" wx:key="id">
+      <view class="row">
+        <text>{{item.goods_name}} / {{item.location_code}}</text>
+        <text class="tag {{item.type==='入库' ? 'tag-in' : 'tag-out'}}">{{item.type}}</text>
+      </view>
+      <view class="subtitle" style="margin-top:8rpx;">数量：{{item.quantity}}</view>
+      <view class="subtitle">仓库：{{item.warehouse_name}} / 操作员：{{item.operator_name}}</view>
+      <view class="subtitle">时间：{{item.create_time_fmt}}</view>
+      <view class="subtitle" wx:if="{{item.remark}}">备注：{{item.remark}}</view>
+    </view>
+  </block>
+
+  <view class="subtitle" wx:else style="text-align:center;padding: 40rpx;">暂无日志</view>
+</view>

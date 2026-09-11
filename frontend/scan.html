@@ -1,0 +1,1107 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>扫码出入库 - 备件管理系统</title>
+    <!-- Tailwind CSS v3 -->
+    <link href="assets/css/tailwind.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="assets/css/font-awesome.min.css" rel="stylesheet">
+    <!-- ZXing JavaScript Library for barcode/qr code scanning -->
+    <script src="https://unpkg.com/@zxing/library@0.21.3"></script>
+    <!-- 统一的 Tailwind 配置 -->
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+    <!-- 顶部状态栏 -->
+    <header class="bg-white shadow-sm z-10">
+        <div class="flex items-center justify-between px-4 py-3">
+            <!-- 左侧：Logo和菜单按钮 -->
+            <div class="flex items-center">
+                <button id="sidebarToggle" class="mr-4 text-gray-600 focus:outline-none lg:hidden">
+                    <i class="fa fa-bars text-xl"></i>
+                </button>
+                <div class="flex items-center">
+                    <img src="assets/images/logo.png" alt="Logo" class="h-8 w-8">
+                    <span class="ml-2 text-lg font-semibold text-gray-800 hidden sm:block">备件管理系统</span>
+                </div>
+            </div>
+            
+            <!-- 右侧：仓库选择、通知和用户信息 -->
+            <div class="flex items-center space-x-4">
+                <!-- 仓库选择 -->
+                <div class="relative" id="warehouseSelector">
+                    <button class="flex items-center text-gray-700 hover:text-primary focus:outline-none">
+                        <i class="fa fa-building-o mr-2"></i>
+                        <span id="currentWarehouse">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs"></i>
+                    </button>
+                    <div id="warehouseDropdown" class="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg hidden z-20 dropdown">
+                        <div class="py-1">
+                            <div class="px-4 py-2 text-sm text-gray-400">选择仓库</div>
+                            <div id="warehouseList" class="max-h-64 overflow-y-auto">
+                                <!-- 仓库列表将通过JS动态生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 通知 -->
+                <div class="relative">
+                    <button class="text-gray-600 hover:text-primary focus:outline-none">
+                        <i class="fa fa-bell-o text-xl"></i>
+                        <span class="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full"></span>
+                    </button>
+                </div>
+                
+                <!-- 用户信息 -->
+                <div class="relative" id="userMenu">
+                    <button class="flex items-center focus:outline-none">
+                        <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center">
+                            <span id="userInitials">U</span>
+                        </div>
+                        <span class="ml-2 text-sm font-medium text-gray-700 hidden md:block" id="userName">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs text-gray-500 hidden md:block"></i>
+                    </button>
+                    <div id="userDropdown" class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg hidden z-20 dropdown">
+                        <div class="py-1">
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-user-circle mr-2"></i> 个人资料
+                            </a>
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-cog mr-2"></i> 设置
+                            </a>
+                            <hr class="my-1">
+                            <a href="#" id="logoutButton" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-sign-out mr-2"></i> 退出登录
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- 侧边导航栏 -->
+        <aside id="sidebar" class="bg-white w-64 shadow-md hidden lg:block flex-shrink-0 transition-all-300">
+            <nav class="mt-5 px-2">
+                <a href="dashboard.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-dashboard sidebar-icon"></i>
+                    <span>仪表盘</span>
+                </a>
+                <a href="warehouse.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-building sidebar-icon"></i>
+                    <span>仓库管理</span>
+                </a>
+                <a href="location.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-map-marker sidebar-icon"></i>
+                    <span>库位管理</span>
+                </a>
+                <a href="goods.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-cubes sidebar-icon"></i>
+                    <span>货物管理</span>
+                </a>
+                <a href="stock.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-list sidebar-icon"></i>
+                    <span>库存查询</span>
+                </a>
+                <a href="scan.html" class="sidebar-active flex items-center px-4 py-3 rounded-md mb-1">
+                    <i class="fa fa-qrcode sidebar-icon"></i>
+                    <span>扫码出入库</span>
+                </a>
+                <a href="inbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-down sidebar-icon"></i>
+                    <span>入库单管理</span>
+                </a>
+                <a href="outbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-up sidebar-icon"></i>
+                    <span>出库单管理</span>
+                </a>
+                <a href="check.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-check-square-o sidebar-icon"></i>
+                    <span>盘点管理</span>
+                </a>
+                <a href="user.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-users sidebar-icon"></i>
+                    <span>用户管理</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="flex-1 overflow-y-auto p-6">
+            <!-- 页面标题 -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">扫码出入库</h1>
+                <p class="text-gray-600">快速进行货物的入库和出库操作</p>
+            </div>
+            
+            <!-- 操作类型选择 -->
+            <div class="flex items-center justify-center mb-8">
+                <div class="inline-flex rounded-md shadow-sm" role="group">
+                    <button type="button" id="inboundTypeBtn" class="bg-primary text-white py-2 px-4 rounded-r-none hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all-300">
+                        <i class="fa fa-arrow-down mr-2"></i>
+                        入库
+                    </button>
+                    <button type="button" id="outboundTypeBtn" class="bg-gray-200 text-gray-800 py-2 px-4 rounded-l-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-all-300">
+                        <i class="fa fa-arrow-up mr-2"></i>
+                        出库
+                    </button>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- 左侧：扫码区域 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">扫码区域</h3>
+
+                    <!-- 扫码方式选择 -->
+                    <div class="flex items-center justify-center mb-4">
+                        <div class="inline-flex rounded-md shadow-sm" role="group">
+                            <button type="button" id="cameraScanBtn" class="bg-primary text-white py-2 px-4 rounded-r-none hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all-300">
+                                <i class="fa fa-camera mr-2"></i>
+                                摄像头扫码
+                            </button>
+                            <button type="button" id="manualInputBtn" class="bg-gray-200 text-gray-800 py-2 px-4 rounded-l-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-all-300">
+                                <i class="fa fa-keyboard-o mr-2"></i>
+                                手动输入
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 摄像头扫码区域 -->
+                    <div id="cameraScanArea" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center">
+                        <div id="qr-reader" class="mx-auto"></div>
+                        <p class="text-sm text-gray-500 mt-4">请将二维码对准摄像头</p>
+                    </div>
+
+                    <!-- 手动输入区域 -->
+                    <div id="manualInputArea" class="hidden">
+                        <div class="space-y-4">
+                            <div class="mb-4">
+                                <label for="manualGoodsBarcode" class="block text-sm font-medium text-gray-700 mb-1">货物条码</label>
+                                <input type="text" id="manualGoodsBarcode" placeholder="请输入货物条码" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300">
+                            </div>
+                            <div class="mb-4">
+                                <label for="manualLocationCode" class="block text-sm font-medium text-gray-700 mb-1">库位编码</label>
+                                <input type="text" id="manualLocationCode" placeholder="请输入库位编码" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300">
+                            </div>
+                            <button id="manualSubmitBtn" class="bg-primary text-white py-2 px-4 rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all-300 w-full">
+                                <i class="fa fa-check mr-2"></i>
+                                确认输入
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- 扫码结果显示 -->
+                    <div id="scanResult" class="mt-4 hidden">
+                        <div class="bg-gray-50 p-4 rounded-lg">
+                            <h4 class="font-medium text-gray-800 mb-2">扫码结果</h4>
+                            <div class="space-y-2 text-sm">
+                                <p><strong>扫描类型：</strong><span id="scanTypeText">货物条码</span></p>
+                                <p><strong>扫描结果：</strong><span id="scanResultText">-</span></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 右侧：操作表单 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">操作信息</h3>
+
+                    <!-- 货物信息 -->
+                    <div id="goodsInfo" class="mb-6 pb-6 border-b border-gray-200">
+                        <h4 class="font-medium text-gray-800 mb-4">货物信息</h4>
+                        <div class="space-y-4">
+                            <div class="mb-4">
+                                <label for="goodsBarcode" class="block text-sm font-medium text-gray-700 mb-1">货物条码</label>
+                                <input type="text" id="goodsBarcode" readonly class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300 bg-gray-50">
+                            </div>
+                            <div class="mb-4">
+                                <label for="goodsName" class="block text-sm font-medium text-gray-700 mb-1">货物名称</label>
+                                <input type="text" id="goodsName" readonly class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300 bg-gray-50">
+                            </div>
+                            <div class="grid grid-cols-3 gap-4">
+                                <div class="mb-4">
+                                    <label for="goodsSpec" class="block text-sm font-medium text-gray-700 mb-1">规格</label>
+                                    <input type="text" id="goodsSpec" readonly class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300 bg-gray-50">
+                                </div>
+                                <div class="mb-4">
+                                    <label for="goodsUnit" class="block text-sm font-medium text-gray-700 mb-1">单位</label>
+                                    <input type="text" id="goodsUnit" readonly class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300 bg-gray-50">
+                                </div>
+                                <div class="mb-4">
+                                    <label for="stockQuantity" class="block text-sm font-medium text-gray-700 mb-1">可用库存</label>
+                                    <input type="text" id="stockQuantity" readonly class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300 bg-gray-50">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 库位信息 -->
+                    <div id="locationInfo" class="mb-6 pb-6 border-b border-gray-200">
+                        <h4 class="font-medium text-gray-800 mb-4">库位信息</h4>
+                        <div class="space-y-4">
+                            <div class="mb-4">
+                                <label for="locationSelect" class="block text-sm font-medium text-gray-700 mb-1">选择库位</label>
+                                <select id="locationSelect" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300">
+                                    <option value="">请选择库位</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 操作信息 -->
+                    <div id="operationInfo">
+                        <h4 class="font-medium text-gray-800 mb-4">操作信息</h4>
+                        <div class="space-y-4">
+                            <div class="mb-4">
+                                <label for="operationType" class="block text-sm font-medium text-gray-700 mb-1">操作类型</label>
+                                <select id="operationType" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300">
+                                    <option value="入库">入库</option>
+                                    <option value="出库">出库</option>
+                                </select>
+                            </div>
+                            <div class="mb-4">
+                                <label for="quantity" class="block text-sm font-medium text-gray-700 mb-1">数量</label>
+                                <input type="number" id="quantity" min="0.01" step="0.01" value="1" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300">
+                            </div>
+                            <div class="mb-4">
+                                <label for="remark" class="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                                <textarea id="remark" rows="3" placeholder="请输入备注信息..." class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"></textarea>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 提交按钮 -->
+                    <div class="mt-6 flex items-center justify-center">
+                        <button id="submitBtn" class="bg-primary text-white py-2 px-4 rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all-300 flex items-center" disabled>
+                            <i class="fa fa-check-circle mr-2"></i>
+                            确认操作
+                        </button>
+                        <button id="resetBtn" class="bg-gray-200 text-gray-800 py-2 px-4 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-all-300 flex items-center ml-4">
+                            <i class="fa fa-refresh mr-2"></i>
+                            重置
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 操作记录 -->
+            <div class="mt-6 bg-white rounded-lg shadow">
+                <div class="px-6 py-4 border-b border-gray-200">
+                    <h3 class="text-lg font-semibold text-gray-800">最近操作记录</h3>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    操作时间
+                                </th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    操作类型
+                                </th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    货物信息
+                                </th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    库位
+                                </th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    数量
+                                </th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    操作员
+                                </th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    状态
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="operationLogTable" class="bg-white divide-y divide-gray-200">
+                            <!-- 操作记录将通过JS动态生成 -->
+                            <tr>
+                                <td colspan="7" class="px-4 py-4 text-center text-gray-500">暂无操作记录</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <!-- 翻页控件 -->
+                <div id="pagination" class="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
+                    <div class="text-sm text-gray-700">
+                        显示第 <span id="startRecord">0</span> - <span id="endRecord">0</span> 条，共 <span id="totalRecords">0</span> 条记录
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button id="prevPage" class="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            上一页
+                        </button>
+                        <div id="pageNumbers" class="flex items-center space-x-1">
+                            <!-- 页码按钮将通过JS动态生成 -->
+                        </div>
+                        <button id="nextPage" class="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                            下一页
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 通用脚本 -->
+    <script src="assets/js/common.js"></script>
+    
+    <script>
+        // 全局变量
+        let currentOperationType = '入库';
+        let isCameraScanMode = true;
+        let html5QrcodeScanner = null;
+        let scannedGoodsBarcode = '';
+        let scannedLocationCode = '';
+        let goodsData = [];
+        let locationData = [];
+        let scanStep = 0; // 0: 等待扫描货物, 1: 等待扫描库位
+
+        // 翻页相关变量
+        let currentPage = 1;
+        let pageSize = 10;
+        let totalPages = 0;
+        let totalRecords = 0;
+
+        // DOM元素
+        const inboundTypeBtn = document.getElementById('inboundTypeBtn');
+        const outboundTypeBtn = document.getElementById('outboundTypeBtn');
+        const cameraScanBtn = document.getElementById('cameraScanBtn');
+        const manualInputBtn = document.getElementById('manualInputBtn');
+        const cameraScanArea = document.getElementById('cameraScanArea');
+        const manualInputArea = document.getElementById('manualInputArea');
+        const manualSubmitBtn = document.getElementById('manualSubmitBtn');
+        const scanResult = document.getElementById('scanResult');
+        const scanTypeText = document.getElementById('scanTypeText');
+        const scanResultText = document.getElementById('scanResultText');
+        const submitBtn = document.getElementById('submitBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const operationLogTable = document.getElementById('operationLogTable');
+
+        // 翻页控件元素
+        const pagination = document.getElementById('pagination');
+        const prevPageBtn = document.getElementById('prevPage');
+        const nextPageBtn = document.getElementById('nextPage');
+        const pageNumbers = document.getElementById('pageNumbers');
+        const startRecord = document.getElementById('startRecord');
+        const endRecord = document.getElementById('endRecord');
+        const totalRecordsElement = document.getElementById('totalRecords');
+
+        // 货物信息输入框
+        const goodsBarcodeInput = document.getElementById('goodsBarcode');
+        const goodsNameInput = document.getElementById('goodsName');
+        const goodsSpecInput = document.getElementById('goodsSpec');
+        const goodsUnitInput = document.getElementById('goodsUnit');
+
+        // 库位信息输入框
+        const locationCodeInput = document.getElementById('locationCode');
+        const locationNameInput = document.getElementById('locationName');
+
+        // 操作信息输入框
+        const operationTypeSelect = document.getElementById('operationType');
+        const quantityInput = document.getElementById('quantity');
+        const remarkInput = document.getElementById('remark');
+
+        // 手动输入框
+        const manualGoodsBarcodeInput = document.getElementById('manualGoodsBarcode');
+        const manualLocationCodeInput = document.getElementById('manualLocationCode');
+
+        // 页面初始化函数
+        function pageInit() {
+            // 加载基础数据
+            Promise.all([
+                loadGoodsData(),
+                loadLocationData()
+            ]).then(() => {
+                // 加载操作记录
+                loadOperationLogs();
+                // 初始化扫码器
+                initScanner();
+                // 设置事件监听器
+                setupEventListeners();
+                // 检查URL参数
+                checkUrlParams();
+            });
+        }
+        
+        // 检查URL参数
+        function checkUrlParams() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const type = urlParams.get('type');
+
+            if (type === 'in') {
+                setOperationType('入库');
+            } else if (type === 'out') {
+                setOperationType('出库');
+            }
+        }
+
+        // 加载货物数据
+        async function loadGoodsData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/goods/`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取货物数据失败');
+                }
+
+                goodsData = await response.json();
+                console.log('货物数据:', goodsData);
+                console.log('货物条码列表:', goodsData.map(g => g.barcode));
+            } catch (error) {
+                console.error('加载货物数据失败:', error);
+            }
+        }
+
+        // 加载库位数据
+        async function loadLocationData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/locations/`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取库位数据失败');
+                }
+
+                locationData = await response.json();
+                // 只保留当前仓库的库位数据
+                if (currentWarehouse) {
+                    locationData = locationData.filter(location => location.warehouse_id === currentWarehouse.id);
+                }
+                // 填充库位下拉框
+                const locationSelect = document.getElementById('locationSelect');
+                locationSelect.innerHTML = '<option value="">请选择库位</option>';
+                locationData.forEach(location => {
+                    const option = document.createElement('option');
+                    option.value = location.location_code;
+                    option.textContent = `${location.location_code} - ${location.name}`;
+                    locationSelect.appendChild(option);
+                });
+            } catch (error) {
+                console.error('加载库位数据失败:', error);
+            }
+        }
+
+        // 加载操作记录
+        async function loadOperationLogs(page = 1) {
+            try {
+                const params = new URLSearchParams({
+                    page: page,
+                    page_size: pageSize
+                });
+                const response = await fetch(`${API_BASE_URL}/inventory/logs?${params.toString()}`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取操作记录失败');
+                }
+
+                const result = await response.json();
+
+                // 假设API返回格式为 { data: [...], total: number }
+                const logs = result.data || result;
+                totalRecords = result.total || logs.length;
+                totalPages = Math.ceil(totalRecords / pageSize);
+                currentPage = page;
+
+                renderOperationLogs(logs);
+                renderPagination();
+            } catch (error) {
+                console.error('加载操作记录失败:', error);
+            }
+        }
+        
+        // 渲染操作记录
+        function renderOperationLogs(logs) {
+            // 计算24小时前的时间戳
+            const twentyFourHoursAgo = Date.now() - (24 * 60 * 60 * 1000);
+
+            // 过滤出24小时内的操作记录
+            const filteredLogs = logs.filter(log => {
+                // 将log.create_time转换为时间戳进行比较
+                const logTime = new Date(log.create_time).getTime();
+                return logTime >= twentyFourHoursAgo;
+            });
+
+            if (!filteredLogs || filteredLogs.length === 0) {
+                operationLogTable.innerHTML = '<tr><td colspan="7" class="px-4 py-4 text-center text-gray-500">暂无24小时内的操作记录</td></tr>';
+                // 隐藏分页控件
+                pagination.classList.add('hidden');
+                return;
+            }
+
+            // 显示分页控件
+            pagination.classList.remove('hidden');
+
+            operationLogTable.innerHTML = '';
+
+            filteredLogs.forEach(log => {
+                const goods = goodsData.find(g => g.id === log.goods_id);
+                if (!goods) return;
+
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50 transition-all-300';
+                row.innerHTML = `
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${formatDateTime(log.create_time)}</td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${log.type === '入库' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${log.type}</span>
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="text-sm font-medium text-gray-900">${goods.name}</div>
+                        <div class="text-xs text-gray-500">${goods.barcode}</div>
+                    </td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${log.location_code}</td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900 font-mono text-right">${log.quantity}</td>
+                    <td class="px-4 py-3 whitespace-nowrap text-sm text-gray-900">${log.operator_name}</td>
+                    <td class="px-4 py-3 whitespace-nowrap">
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${log.status === 'SUCCESS' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}">${log.status === 'SUCCESS' ? '成功' : '失败'}</span>
+                    </td>
+                `;
+
+                operationLogTable.appendChild(row);
+            });
+        }
+
+        // 渲染分页控件
+        function renderPagination() {
+            // 更新记录计数信息
+            const start = (currentPage - 1) * pageSize + 1;
+            const end = Math.min(currentPage * pageSize, totalRecords);
+            startRecord.textContent = start;
+            endRecord.textContent = end;
+            totalRecordsElement.textContent = totalRecords;
+
+            // 渲染页码按钮
+            pageNumbers.innerHTML = '';
+            const maxVisiblePages = 5;
+            let startPage = Math.max(1, currentPage - Math.floor(maxVisiblePages / 2));
+            let endPage = Math.min(totalPages, startPage + maxVisiblePages - 1);
+
+            if (endPage - startPage + 1 < maxVisiblePages) {
+                startPage = Math.max(1, endPage - maxVisiblePages + 1);
+            }
+
+            // 首页按钮
+            if (startPage > 1) {
+                const firstPageBtn = document.createElement('button');
+                firstPageBtn.className = 'px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50';
+                firstPageBtn.textContent = '1';
+                firstPageBtn.addEventListener('click', () => loadOperationLogs(1));
+                pageNumbers.appendChild(firstPageBtn);
+
+                if (startPage > 2) {
+                    const ellipsis = document.createElement('span');
+                    ellipsis.className = 'px-2 text-sm text-gray-500';
+                    ellipsis.textContent = '...';
+                    pageNumbers.appendChild(ellipsis);
+                }
+            }
+
+            // 中间页码按钮
+            for (let i = startPage; i <= endPage; i++) {
+                const pageBtn = document.createElement('button');
+                if (i === currentPage) {
+                    pageBtn.className = 'px-3 py-1 border border-primary rounded-md text-sm font-medium text-white bg-primary';
+                } else {
+                    pageBtn.className = 'px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50';
+                }
+                pageBtn.textContent = i;
+                pageBtn.addEventListener('click', () => loadOperationLogs(i));
+                pageNumbers.appendChild(pageBtn);
+            }
+
+            // 末页按钮
+            if (endPage < totalPages) {
+                if (endPage < totalPages - 1) {
+                    const ellipsis = document.createElement('span');
+                    ellipsis.className = 'px-2 text-sm text-gray-500';
+                    ellipsis.textContent = '...';
+                    pageNumbers.appendChild(ellipsis);
+                }
+
+                const lastPageBtn = document.createElement('button');
+                lastPageBtn.className = 'px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50';
+                lastPageBtn.textContent = totalPages;
+                lastPageBtn.addEventListener('click', () => loadOperationLogs(totalPages));
+                pageNumbers.appendChild(lastPageBtn);
+            }
+
+            // 上一页按钮状态
+            prevPageBtn.disabled = currentPage === 1;
+            // 下一页按钮状态
+            nextPageBtn.disabled = currentPage === totalPages;
+        }
+
+        // 上一页按钮事件
+        function handlePrevPage() {
+            if (currentPage > 1) {
+                loadOperationLogs(currentPage - 1);
+            }
+        }
+
+        // 下一页按钮事件
+        function handleNextPage() {
+            if (currentPage < totalPages) {
+                loadOperationLogs(currentPage + 1);
+            }
+        }
+        
+        // 全局变量 - ZXing
+        let codeReader = null;
+        let videoInputDevices = [];
+        let currentDeviceId = null;
+        let decodingInterval = null;
+        let isScannerStarting = false;
+        let isScannerRunning = false;
+        let restartScannerTimer = null;
+
+        // 初始化扫码器
+        function initScanner() {
+            if (isCameraScanMode) {
+                startCameraScanner();
+            }
+        }
+
+        // 开始摄像头扫码
+        async function startCameraScanner() {
+            if (isScannerStarting || isScannerRunning || !isCameraScanMode) {
+                return;
+            }
+
+            try {
+                isScannerStarting = true;
+
+                // 保险起见，先停止旧实例，避免重复 play()
+                stopCameraScanner();
+
+                // 初始化 ZXing 码阅读器，并显式配置支持的码制
+                codeReader = new ZXing.BrowserMultiFormatReader();
+
+                // 获取所有可用的视频输入设备
+                videoInputDevices = await codeReader.listVideoInputDevices();
+                if (videoInputDevices.length === 0) {
+                    showToast('未找到可用的摄像头设备', 'error');
+                    return;
+                }
+
+                // 选择第一个摄像头设备（或上次使用的设备）
+                currentDeviceId = videoInputDevices[0].deviceId;
+
+                // 渲染视频预览
+                const readerContainer = document.getElementById('qr-reader');
+                // ZXing 会主动调用 video.play()，这里不要再加 autoplay，避免浏览器提示重复播放
+                readerContainer.innerHTML = '<video id="video-preview" class="w-full max-w-md mx-auto" playsinline></video>';
+
+                const videoElement = document.getElementById('video-preview');
+
+                // 启动扫描
+                await codeReader.decodeFromVideoDevice(currentDeviceId, videoElement, (result, err) => {
+                    if (result) {
+                        console.log('扫描到条码类型:', result.format);
+                        onScanSuccess(result.text);
+                    }
+                    if (err && !(err instanceof ZXing.NotFoundException)) {
+                        console.warn('扫码错误:', err);
+                    }
+                });
+
+                isScannerRunning = true;
+                showToast('摄像头已启动，开始扫描', 'success');
+
+            } catch (error) {
+                console.error('启动摄像头失败:', error);
+                showToast('启动摄像头失败: ' + error.message, 'error');
+            } finally {
+                isScannerStarting = false;
+            }
+        }
+
+        // 停止摄像头扫码
+        function stopCameraScanner() {
+            if (restartScannerTimer) {
+                clearTimeout(restartScannerTimer);
+                restartScannerTimer = null;
+            }
+
+            if (codeReader) {
+                try {
+                    codeReader.reset();
+                    codeReader = null;
+                    const readerContainer = document.getElementById('qr-reader');
+                    readerContainer.innerHTML = '';
+                } catch (error) {
+                    console.error('停止扫码器失败:', error);
+                }
+            }
+
+            isScannerStarting = false;
+            isScannerRunning = false;
+        }
+
+        // 扫码成功回调
+        function onScanSuccess(decodedText) {
+            console.log('扫码成功:', decodedText);
+
+            // 只处理货物条码的扫描
+            handleGoodsBarcodeScan(decodedText);
+        }
+        
+        // 获取货物在当前仓库的可用库存
+        async function getAvailableStock(goodsBarcode) {
+            try {
+                console.log('正在查询货物条码:', goodsBarcode, '在仓库:', currentWarehouse.id, '的库存');
+
+                // 首先获取所有库存数据
+                const response = await fetch(`${API_BASE_URL}/stock/`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取库存数据失败');
+                }
+
+                const stockData = await response.json();
+                console.log('所有库存数据:', stockData);
+
+                if (Array.isArray(stockData) && stockData.length > 0) {
+                    // 过滤出指定货物条码的库存记录
+                    const filteredStock = stockData.filter(stock => {
+                        return stock.goods_barcode === goodsBarcode;
+                    });
+                    console.log('过滤后的库存数据:', filteredStock);
+
+                    // 计算该货物的总库存
+                    const totalStock = filteredStock.reduce((sum, stock) => sum + (parseFloat(stock.quantity) || 0), 0);
+                    console.log('计算出的总库存:', totalStock);
+
+                    return totalStock;
+                }
+
+                console.log('未找到库存信息');
+                return 0; // 未找到库存信息
+            } catch (error) {
+                console.error('获取可用库存失败:', error);
+                return 0;
+            }
+        }
+
+        // 处理货物条码扫描
+        async function handleGoodsBarcodeScan(barcode) {
+            console.log('扫描到的条码:', barcode, '类型:', typeof barcode);
+            console.log('货物数据长度:', goodsData.length);
+
+            // 检查货物条码是否匹配
+            let foundGoods = null;
+            goodsData.forEach((goods, index) => {
+                const isMatch = goods.barcode === barcode;
+                console.log(`索引 ${index}:`, goods.barcode, '类型:', typeof goods.barcode, '匹配:', isMatch);
+                if (isMatch) {
+                    foundGoods = goods;
+                    console.log('找到匹配的货物:', foundGoods);
+                }
+            });
+
+            const goods = goodsData.find(g => g.barcode === barcode);
+            console.log('find 方法找到的货物:', goods);
+
+            if (!goods) {
+                showToast('未找到该货物，请检查条码是否正确', 'error');
+                return;
+            }
+
+            // 更新货物信息
+            scannedGoodsBarcode = barcode;
+            goodsBarcodeInput.value = goods.barcode;
+            goodsNameInput.value = goods.name;
+            goodsSpecInput.value = goods.spec || '';
+            goodsUnitInput.value = goods.unit;
+
+            // 获取并显示可用库存
+            const availableStock = await getAvailableStock(goods.barcode);
+            document.getElementById('stockQuantity').value = availableStock;
+
+            // 显示扫描结果
+            showScanResult('货物条码', barcode);
+
+            // 直接启用提交按钮，无需扫描库位
+            submitBtn.disabled = false;
+        }
+
+        // 处理库位编码扫描
+        function handleLocationCodeScan(code) {
+            // 现在不需要扫描库位了，库位信息通过下拉框选择
+            console.log('已取消库位扫码功能，库位信息通过下拉框选择');
+        }
+        
+        // 显示扫描结果
+        function showScanResult(type, result) {
+            scanTypeText.textContent = type;
+            scanResultText.textContent = result;
+            scanResult.classList.remove('hidden');
+        }
+        
+        // 设置操作类型
+        function setOperationType(type) {
+            currentOperationType = type;
+            operationTypeSelect.value = type;
+
+            if (type === '入库') {
+                inboundTypeBtn.className = 'bg-primary text-white py-2 px-4 rounded-r-none hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all-300';
+                outboundTypeBtn.className = 'bg-gray-200 text-gray-800 py-2 px-4 rounded-l-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-all-300';
+            } else {
+                inboundTypeBtn.className = 'bg-gray-200 text-gray-800 py-2 px-4 rounded-r-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-all-300';
+                outboundTypeBtn.className = 'bg-primary text-white py-2 px-4 rounded-l-none hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all-300';
+            }
+        }
+
+        // 设置扫码模式
+        function setScanMode(mode) {
+            if (isCameraScanMode === mode) {
+                if (mode && !isScannerStarting && !isScannerRunning) {
+                    startCameraScanner();
+                }
+                return;
+            }
+
+            isCameraScanMode = mode;
+
+            if (mode) {
+                cameraScanBtn.className = 'bg-primary text-white py-2 px-4 rounded-r-none hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all-300';
+                manualInputBtn.className = 'bg-gray-200 text-gray-800 py-2 px-4 rounded-l-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-all-300';
+                cameraScanArea.classList.remove('hidden');
+                manualInputArea.classList.add('hidden');
+
+                // 重新启动摄像头扫码
+                startCameraScanner();
+            } else {
+                cameraScanBtn.className = 'bg-gray-200 text-gray-800 py-2 px-4 rounded-r-none hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-all-300';
+                manualInputBtn.className = 'bg-primary text-white py-2 px-4 rounded-l-none hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary transition-all-300';
+                cameraScanArea.classList.add('hidden');
+                manualInputArea.classList.remove('hidden');
+
+                // 停止摄像头扫码
+                stopCameraScanner();
+            }
+        }
+        
+        // 提交操作
+        async function submitOperation() {
+            const goodsBarcode = goodsBarcodeInput.value;
+            const locationCode = document.getElementById('locationSelect').value;
+            const operationType = operationTypeSelect.value;
+            const quantity = parseFloat(quantityInput.value);
+            const remark = remarkInput.value.trim();
+
+            // 验证必填字段
+            if (!goodsBarcode || !locationCode || !quantity || quantity <= 0) {
+                showToast('请填写完整的操作信息', 'warning');
+                return;
+            }
+
+            // 如果是出库，检查库存
+            if (operationType === '出库') {
+                try {
+                    const availableStock = await getAvailableStock(goodsBarcode);
+                    console.log('可用库存:', availableStock, '出库数量:', quantity);
+
+                    if (availableStock < quantity) {
+                        showToast(`库存不足，可用库存: ${availableStock}，无法完成出库操作`, 'error');
+                        return;
+                    }
+                } catch (error) {
+                    console.error('检查库存失败:', error);
+                    showToast('检查库存失败', 'error');
+                    return;
+                }
+            }
+
+            try {
+                // 显示加载状态
+                const originalContent = submitBtn.innerHTML;
+                submitBtn.innerHTML = '<span class="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></span>处理中...';
+                submitBtn.disabled = true;
+
+                const response = await fetch(`${API_BASE_URL}/inventory/scan`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        goods_barcode: goodsBarcode,
+                        location_code: locationCode,
+                        type: operationType,
+                        quantity: quantity,
+                        remark: remark
+                    })
+                });
+
+                // 恢复按钮状态
+                submitBtn.innerHTML = originalContent;
+                submitBtn.disabled = false;
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.message || '操作失败');
+                }
+
+                const result = await response.json();
+
+                showToast(result.message || '操作成功', 'success');
+
+                // 重置表单
+                resetForm();
+
+                // 重新加载操作记录
+                await loadOperationLogs();
+
+            } catch (error) {
+                showToast('操作失败: ' + error.message, 'error');
+            }
+        }
+        
+        // 重置表单
+        function resetForm() {
+            // 重置扫描状态
+            scannedGoodsBarcode = '';
+            scannedLocationCode = '';
+
+            // 重置输入框
+            goodsBarcodeInput.value = '';
+            goodsNameInput.value = '';
+            goodsSpecInput.value = '';
+            goodsUnitInput.value = '';
+            document.getElementById('locationSelect').value = '';
+            quantityInput.value = '1';
+            remarkInput.value = '';
+
+            // 重置手动输入框
+            manualGoodsBarcodeInput.value = '';
+            manualLocationCodeInput.value = '';
+
+            // 隐藏扫描结果
+            scanResult.classList.add('hidden');
+
+            // 禁用提交按钮
+            submitBtn.disabled = true;
+
+            // 如果是摄像头模式，重新启动扫码
+            if (isCameraScanMode) {
+                stopCameraScanner();
+                restartScannerTimer = setTimeout(() => {
+                    startCameraScanner();
+                }, 500);
+            }
+        }
+        
+        // 处理手动输入
+        function handleManualInput() {
+            const goodsBarcode = manualGoodsBarcodeInput.value.trim();
+            const locationCode = manualLocationCodeInput.value.trim();
+
+            if (!goodsBarcode || !locationCode) {
+                showToast('请输入货物条码和库位编码', 'warning');
+                return;
+            }
+
+            // 处理货物条码
+            const goods = goodsData.find(g => g.barcode === goodsBarcode);
+            if (!goods) {
+                showToast('未找到该货物，请检查条码是否正确', 'error');
+                return;
+            }
+
+            // 处理库位编码
+            const location = locationData.find(l => l.location_code === locationCode);
+            if (!location) {
+                showToast('未找到该库位，请检查编码是否正确', 'error');
+                return;
+            }
+
+            // 检查库位是否属于当前仓库
+            if (currentWarehouse && location.warehouse_id !== currentWarehouse.id) {
+                showToast('该库位不属于当前选择的仓库', 'error');
+                return;
+            }
+
+            // 更新表单数据
+            scannedGoodsBarcode = goodsBarcode;
+            scannedLocationCode = locationCode;
+
+            goodsBarcodeInput.value = goods.barcode;
+            goodsNameInput.value = goods.name;
+            goodsSpecInput.value = goods.spec || '';
+            goodsUnitInput.value = goods.unit;
+
+            locationCodeInput.value = location.location_code;
+            locationNameInput.value = location.name;
+
+            // 显示扫描结果
+            showScanResult('手动输入', `${goodsBarcode} + ${locationCode}`);
+
+            // 启用提交按钮
+            submitBtn.disabled = false;
+
+            // 清空手动输入框
+            manualGoodsBarcodeInput.value = '';
+            manualLocationCodeInput.value = '';
+        }
+        
+        // 设置事件监听器
+        function setupEventListeners() {
+            // 操作类型按钮
+            inboundTypeBtn.addEventListener('click', () => setOperationType('入库'));
+            outboundTypeBtn.addEventListener('click', () => setOperationType('出库'));
+
+            // 扫码模式按钮
+            cameraScanBtn.addEventListener('click', () => setScanMode(true));
+            manualInputBtn.addEventListener('click', () => setScanMode(false));
+
+            // 手动输入提交按钮
+            manualSubmitBtn.addEventListener('click', handleManualInput);
+
+            // 手动输入框回车
+            manualGoodsBarcodeInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    manualLocationCodeInput.focus();
+                }
+            });
+
+            manualLocationCodeInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    handleManualInput();
+                }
+            });
+
+            // 提交按钮
+            submitBtn.addEventListener('click', submitOperation);
+
+            // 重置按钮
+            resetBtn.addEventListener('click', resetForm);
+
+            // 仓库切换事件
+            window.addEventListener('warehouseChanged', async () => {
+                // 重新加载库位数据
+                await loadLocationData();
+                // 重置表单
+                resetForm();
+            });
+
+            // 翻页按钮事件
+            prevPageBtn.addEventListener('click', handlePrevPage);
+            nextPageBtn.addEventListener('click', handleNextPage);
+
+            // 页面离开时关闭摄像头，避免浏览器视频重复播放警告
+            window.addEventListener('pagehide', stopCameraScanner);
+            window.addEventListener('beforeunload', stopCameraScanner);
+        }
+    </script>
+</body>
+</html>

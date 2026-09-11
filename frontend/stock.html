@@ -1,0 +1,1078 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>库存查询 - 备件管理系统</title>
+    <!-- Tailwind CSS v3 -->
+    <link href="assets/css/tailwind.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="assets/css/font-awesome.min.css" rel="stylesheet">
+    <!-- Chart.js -->
+    <script src="assets/js/chart.umd.min.js"></script>
+    <!-- SheetJS for Excel export -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <!-- 统一的 Tailwind 配置 -->
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+    <!-- 顶部状态栏 -->
+    <header class="bg-white shadow-sm z-10">
+        <div class="flex items-center justify-between px-4 py-3">
+            <!-- 左侧：Logo和菜单按钮 -->
+            <div class="flex items-center">
+                <button id="sidebarToggle" class="mr-4 text-gray-600 focus:outline-none lg:hidden">
+                    <i class="fa fa-bars text-xl"></i>
+                </button>
+                <div class="flex items-center">
+                    <img src="assets/images/logo.png" alt="Logo" class="h-8 w-8">
+					<span class="ml-2 text-lg font-semibold text-gray-800 hidden sm:block">备件管理系统</span>
+                </div>
+            </div>
+            
+            <!-- 右侧：仓库选择、通知和用户信息 -->
+            <div class="flex items-center space-x-4">
+                <!-- 仓库选择 -->
+                <div class="relative" id="warehouseSelector">
+                    <button class="flex items-center text-gray-700 hover:text-primary focus:outline-none">
+                        <i class="fa fa-building-o mr-2"></i>
+                        <span id="currentWarehouse">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs"></i>
+                    </button>
+                    <div id="warehouseDropdown" class="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <div class="px-4 py-2 text-sm text-gray-400">选择仓库</div>
+                            <div id="warehouseList" class="max-h-64 overflow-y-auto">
+                                <!-- 仓库列表将通过JS动态生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 通知 -->
+                <div class="relative">
+                    <button class="text-gray-600 hover:text-primary focus:outline-none">
+                        <i class="fa fa-bell-o text-xl"></i>
+                        <span class="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full"></span>
+                    </button>
+                </div>
+                
+                <!-- 用户信息 -->
+                <div class="relative" id="userMenu">
+                    <button class="flex items-center focus:outline-none">
+                        <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center">
+                            <span id="userInitials">U</span>
+                        </div>
+                        <span class="ml-2 text-sm font-medium text-gray-700 hidden md:block" id="userName">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs text-gray-500 hidden md:block"></i>
+                    </button>
+                    <div id="userDropdown" class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-user-circle mr-2"></i> 个人资料
+                            </a>
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-cog mr-2"></i> 设置
+                            </a>
+                            <hr class="my-1">
+                            <a href="#" id="logoutButton" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-sign-out mr-2"></i> 退出登录
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- 侧边导航栏 -->
+        <aside id="sidebar" class="bg-white w-64 shadow-md hidden lg:block flex-shrink-0 transition-all-300">
+            <nav class="mt-5 px-2">
+                <a href="dashboard.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-dashboard sidebar-icon"></i>
+                    <span>仪表盘</span>
+                </a>
+                <a href="warehouse.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-building sidebar-icon"></i>
+                    <span>仓库管理</span>
+                </a>
+                <a href="location.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-map-marker sidebar-icon"></i>
+                    <span>库位管理</span>
+                </a>
+                <a href="goods.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-cubes sidebar-icon"></i>
+                    <span>货物管理</span>
+                </a>
+                <a href="stock.html" class="sidebar-active flex items-center px-4 py-3 rounded-md mb-1">
+                    <i class="fa fa-list sidebar-icon"></i>
+                    <span>库存查询</span>
+                </a>
+                <a href="scan.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-qrcode sidebar-icon"></i>
+                    <span>扫码出入库</span>
+                </a>
+                <a href="inbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-down sidebar-icon"></i>
+                    <span>入库单管理</span>
+                </a>
+                <a href="outbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-up sidebar-icon"></i>
+                    <span>出库单管理</span>
+                </a>
+                <a href="check.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-check-square-o sidebar-icon"></i>
+                    <span>盘点管理</span>
+                </a>
+                <a href="user.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-users sidebar-icon"></i>
+                    <span>用户管理</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="flex-1 overflow-y-auto p-6">
+            <!-- 页面标题 -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">库存查询</h1>
+                <p class="text-gray-600">查询和管理库存信息</p>
+            </div>
+            
+            <!-- 统计卡片 -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                <div class="bg-white rounded-lg shadow p-6 card-hover">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-blue-100 text-blue-600">
+                            <i class="fa fa-cubes text-xl"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">库存货物种类</p>
+                            <p class="text-2xl font-semibold text-gray-800" id="goodsTypes">0</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-lg shadow p-6 card-hover">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-green-100 text-green-600">
+                            <i class="fa fa-cubes text-xl"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">库存总数量</p>
+                            <p class="text-2xl font-semibold text-gray-800" id="totalQuantity">0</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-lg shadow p-6 card-hover">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-yellow-100 text-yellow-600">
+                            <i class="fa fa-money text-xl"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">库存总价值</p>
+                            <p class="text-2xl font-semibold text-gray-800" id="totalValue">¥0.00</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="bg-white rounded-lg shadow p-6 card-hover">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-red-100 text-red-600">
+                            <i class="fa fa-exclamation-triangle text-xl"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">库存预警</p>
+                            <p class="text-2xl font-semibold text-gray-800" id="stockAlerts">0</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 库存查询 -->
+            <div class="bg-white rounded-lg shadow overflow-hidden mb-6">
+                <div class="p-6">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">库存列表</h2>
+                    
+                    <!-- 搜索和筛选 -->
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-4 space-y-2 md:space-y-0">
+                        <div class="flex items-center space-x-2">
+                            <input type="text" id="searchStock" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="搜索货物名称、条码或库位">
+                            <button id="searchStockBtn" class="px-3 py-2 bg-primary text-white rounded-md hover:bg-secondary">
+                                <i class="fa fa-search"></i>
+                            </button>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <select id="filterWarehouse" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                <option value="">所有仓库</option>
+                                <!-- 仓库选项将通过JS动态生成 -->
+                            </select>
+                            <select id="filterLocation" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                <option value="">所有库位</option>
+                                <!-- 库位选项将通过JS动态生成 -->
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-4 p-3 bg-gray-50 rounded-md">
+                        <div class="text-sm text-gray-700">
+                            当前筛选总金额：
+                            <span id="filteredTotalAmount" class="font-semibold text-gray-900">¥0.00</span>
+                        </div>
+                        <button id="exportStockBtn" class="mt-2 md:mt-0 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
+                            <i class="fa fa-file-excel-o mr-1"></i> 导出Excel
+                        </button>
+                    </div>
+                    
+                    <!-- 库存表格 -->
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        货物信息
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        仓库/库位
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        库存数量
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        单价
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        库存价值
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        最后更新
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        操作
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="stockTableBody" class="bg-white divide-y divide-gray-200">
+                                <tr>
+                                    <td colspan="7" class="px-6 py-4 text-center text-gray-500">
+                                        <i class="fa fa-spinner fa-spin mr-2"></i> 加载中...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- 分页 -->
+                    <div class="flex items-center justify-between mt-4">
+                        <div class="flex items-center space-x-3 text-sm text-gray-700">
+                            <div>
+                                显示 <span id="startRange">1</span> 到 <span id="endRange">10</span> 条，共 <span id="totalCount">0</span> 条记录
+                            </div>
+                            <div class="flex items-center space-x-1">
+                                <span>每页</span>
+                                <select id="pageSizeSelect" class="px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                    <option value="10" selected>10</option>
+                                    <option value="20">20</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
+                                <span>条</span>
+                            </div>
+                        </div>
+                        <div class="flex space-x-1">
+                            <button id="prevPage" class="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50">
+                                上一页
+                            </button>
+                            <button id="nextPage" class="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50">
+                                下一页
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 库存分析 -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <!-- 库存分布 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">库存分布</h2>
+                    <div class="h-80">
+                        <canvas id="stockDistributionChart"></canvas>
+                    </div>
+                </div>
+                
+                <!-- 库存趋势 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">库存趋势</h2>
+                    <div class="h-80">
+                        <canvas id="stockTrendChart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 库存详情模态框 -->
+    <div id="stockDetailModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-lg w-full max-w-2xl max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between p-6 border-b">
+                <h3 class="text-lg font-semibold text-gray-800">库存详情</h3>
+                <button id="closeDetailModal" class="text-gray-400 hover:text-gray-600">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-6">
+                <div id="stockDetailContent">
+                    <!-- 库存详情将通过JS动态填充 -->
+                </div>
+            </div>
+            
+            <div class="p-6 border-t flex justify-end">
+                <button id="closeDetail" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">
+                    关闭
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 通用脚本 -->
+    <script src="assets/js/common.js"></script>
+    
+    <!-- 页面特定脚本 -->
+    <script>
+        // 页面特定变量
+        let stocks = [];
+        let filteredStocks = [];
+        let warehouses = [];
+        let locations = [];
+        let goods = [];
+        let currentPage = 1;
+        let pageSize = 10;
+        let distributionChart = null;
+        let trendChart = null;
+        
+        // 页面初始化
+        function pageInit() {
+            loadWarehouses();
+            loadLocations();
+            loadGoods();
+            loadStock();
+            setupStockEventListeners();
+        }
+        
+        // 加载仓库列表
+        async function loadWarehouses() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/warehouses/`, {
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取仓库列表失败');
+                }
+                
+                warehouses = await response.json();
+                
+                // 更新仓库下拉框
+                updateWarehouseSelector();
+            } catch (error) {
+                console.error('加载仓库列表失败:', error);
+            }
+        }
+        
+        // 更新仓库下拉框
+        function updateWarehouseSelector() {
+            const selector = document.getElementById('filterWarehouse');
+            if (!selector) return;
+            
+            const currentValue = selector.value;
+            
+            selector.innerHTML = '<option value="">所有仓库</option>';
+            
+            warehouses.forEach(warehouse => {
+                const option = document.createElement('option');
+                option.value = warehouse.id;
+                option.textContent = warehouse.name;
+                selector.appendChild(option);
+            });
+            
+            // 恢复当前值
+            if (currentValue) {
+                selector.value = currentValue;
+            }
+        }
+        
+        // 加载库位列表
+        async function loadLocations() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/locations/`, {
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取库位列表失败');
+                }
+                
+                locations = await response.json();
+                
+                // 更新库位下拉框
+                updateLocationSelector();
+            } catch (error) {
+                console.error('加载库位列表失败:', error);
+            }
+        }
+        
+        // 更新库位下拉框
+        function updateLocationSelector() {
+            const selector = document.getElementById('filterLocation');
+            if (!selector) return;
+            
+            const currentValue = selector.value;
+            const warehouseId = document.getElementById('filterWarehouse').value;
+            
+            selector.innerHTML = '<option value="">所有库位</option>';
+            
+            const filteredLocations = warehouseId ? 
+                locations.filter(l => l.warehouse_id.toString() === warehouseId) : 
+                locations;
+            
+            filteredLocations.forEach(location => {
+                const option = document.createElement('option');
+                option.value = location.id;
+                option.textContent = `${location.location_code} - ${location.name}`;
+                selector.appendChild(option);
+            });
+            
+            // 恢复当前值
+            if (currentValue) {
+                selector.value = currentValue;
+            }
+        }
+        
+        // 加载货物列表
+        async function loadGoods() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/goods/`, {
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取货物列表失败');
+                }
+                
+                goods = await response.json();
+            } catch (error) {
+                console.error('加载货物列表失败:', error);
+            }
+        }
+        
+        // 加载库存数据
+        async function loadStock() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/stock/`, {
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取库存数据失败');
+                }
+                
+                stocks = await response.json();
+                filteredStocks = [...stocks];
+                
+                // 应用筛选
+                applyFilters();
+                
+                // 更新表格
+                updateStockTable();
+                
+                // 更新分页信息
+                updatePagination();
+                
+                // 更新统计信息
+                updateStatistics();
+                
+                // 更新图表
+                updateCharts();
+            } catch (error) {
+                console.error('加载库存数据失败:', error);
+                showToast('加载库存数据失败', 'error');
+                document.getElementById('stockTableBody').innerHTML = `
+                    <tr>
+                        <td colspan="7" class="px-6 py-4 text-center text-red-500">
+                            加载失败，请重试
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+        
+        // 应用筛选
+        function applyFilters() {
+            const searchTerm = document.getElementById('searchStock').value.toLowerCase();
+            const warehouseId = document.getElementById('filterWarehouse').value;
+            const locationId = document.getElementById('filterLocation').value;
+            
+            filteredStocks = stocks.filter(stock => {
+                const matchesSearch = 
+                    stock.goods_name.toLowerCase().includes(searchTerm) ||
+                    stock.goods_barcode.toLowerCase().includes(searchTerm) ||
+                    stock.location_code.toLowerCase().includes(searchTerm);
+                
+                const matchesWarehouse = !warehouseId || stock.warehouse_name === getWarehouseName(parseInt(warehouseId));
+                
+                const matchesLocation = !locationId || stock.location_code === getLocationCode(parseInt(locationId));
+                
+                return matchesSearch && matchesWarehouse && matchesLocation;
+            });
+            
+            currentPage = 1;
+            updateFilteredTotalAmount();
+        }
+
+        function getStockUnitPrice(stock) {
+            const goodsItem = getGoodsById(stock.goods_id);
+            return goodsItem ? Number(goodsItem.price || 0) : 0;
+        }
+
+        function getStockValue(stock) {
+            return getStockUnitPrice(stock) * Number(stock.quantity || 0);
+        }
+
+        function updateFilteredTotalAmount() {
+            const totalAmount = filteredStocks.reduce((sum, stock) => sum + getStockValue(stock), 0);
+            document.getElementById('filteredTotalAmount').textContent = `¥${totalAmount.toFixed(2)}`;
+        }
+        
+        // 更新库存表格
+        function updateStockTable() {
+            const tbody = document.getElementById('stockTableBody');
+            const startIndex = (currentPage - 1) * pageSize;
+            const endIndex = startIndex + pageSize;
+            const pageStocks = filteredStocks.slice(startIndex, endIndex);
+            
+            if (pageStocks.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="px-6 py-4 text-center text-gray-500">
+                            暂无库存数据
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            tbody.innerHTML = pageStocks.map(stock => {
+                const goods = getGoodsById(stock.goods_id);
+                const unitPrice = getStockUnitPrice(stock);
+                const stockValue = getStockValue(stock);
+                
+                return `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4">
+                            <div class="flex items-center">
+                                <div>
+                                    <div class="text-sm font-medium text-gray-900">${stock.goods_name}</div>
+                                    <div class="text-xs text-gray-500">${stock.goods_barcode}</div>
+                                </div>
+                            </div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-sm text-gray-900">${stock.warehouse_name}</div>
+                            <div class="text-xs text-gray-500">${stock.location_code} - ${stock.location_name}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-sm font-medium text-gray-900">${stock.quantity}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-sm text-gray-900">¥${unitPrice.toFixed(2)}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-sm font-medium text-gray-900">¥${stockValue.toFixed(2)}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-sm text-gray-500">${new Date(stock.update_time).toLocaleString()}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <button onclick="viewStockDetail(${stock.id})" class="text-primary hover:text-secondary">
+                                <i class="fa fa-eye"></i> 查看
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        // 更新分页信息
+        function updatePagination() {
+            const totalPages = Math.ceil(filteredStocks.length / pageSize);
+            const startRange = filteredStocks.length > 0 ? (currentPage - 1) * pageSize + 1 : 0;
+            const endRange = Math.min(currentPage * pageSize, filteredStocks.length);
+            
+            document.getElementById('startRange').textContent = startRange;
+            document.getElementById('endRange').textContent = endRange;
+            document.getElementById('totalCount').textContent = filteredStocks.length;
+            
+            document.getElementById('prevPage').disabled = currentPage === 1;
+            document.getElementById('nextPage').disabled = currentPage === totalPages || totalPages === 0;
+        }
+        
+        // 更新统计信息
+        function updateStatistics() {
+            // 计算库存货物种类
+            const goodsTypes = new Set(filteredStocks.map(stock => stock.goods_id)).size;
+            document.getElementById('goodsTypes').textContent = goodsTypes;
+            
+            // 计算库存总数量
+            const totalQuantity = filteredStocks.reduce((sum, stock) => sum + stock.quantity, 0);
+            document.getElementById('totalQuantity').textContent = totalQuantity.toFixed(2);
+            
+            // 计算库存总价值
+            const totalValue = filteredStocks.reduce((sum, stock) => {
+                const goods = getGoodsById(stock.goods_id);
+                return sum + (goods ? goods.price * stock.quantity : 0);
+            }, 0);
+            document.getElementById('totalValue').textContent = `¥${totalValue.toFixed(2)}`;
+            
+            // 计算库存预警（这里简化为库存小于10的记录数）
+            const stockAlerts = filteredStocks.filter(stock => stock.quantity < 10).length;
+            document.getElementById('stockAlerts').textContent = stockAlerts;
+        }
+        
+        // 更新图表
+        function updateCharts() {
+            updateDistributionChart();
+            updateTrendChart();
+        }
+        
+        // 更新库存分布图表
+        function updateDistributionChart() {
+            const ctx = document.getElementById('stockDistributionChart').getContext('2d');
+            
+            // 按仓库分组统计
+            const warehouseStats = {};
+            filteredStocks.forEach(stock => {
+                if (!warehouseStats[stock.warehouse_name]) {
+                    warehouseStats[stock.warehouse_name] = 0;
+                }
+                const goods = getGoodsById(stock.goods_id);
+                warehouseStats[stock.warehouse_name] += goods ? goods.price * stock.quantity : 0;
+            });
+            
+            const labels = Object.keys(warehouseStats);
+            const data = Object.values(warehouseStats);
+            
+            // 销毁旧图表
+            if (distributionChart) {
+                distributionChart.destroy();
+            }
+            
+            // 创建新图表
+            distributionChart = new Chart(ctx, {
+                type: 'pie',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        data: data,
+                        backgroundColor: [
+                            '#1a56db',
+                            '#4f46e5',
+                            '#10b981',
+                            '#f59e0b',
+                            '#ef4444',
+                            '#8b5cf6'
+                        ],
+                        borderWidth: 2,
+                        borderColor: '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        },
+                        title: {
+                            display: true,
+                            text: '库存价值分布（按仓库）'
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 更新库存趋势图表
+        function updateTrendChart() {
+            const ctx = document.getElementById('stockTrendChart').getContext('2d');
+            
+            // 基于当前库存生成趋势数据
+            const dates = [];
+            const quantities = [];
+            const values = [];
+            
+            const today = new Date();
+            const baseQuantity = filteredStocks.reduce((sum, stock) => sum + stock.quantity, 0);
+            const baseValue = filteredStocks.reduce((sum, stock) => {
+                const goods = getGoodsById(stock.goods_id);
+                return sum + (goods ? goods.price * stock.quantity : 0);
+            }, 0);
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date(today);
+                date.setDate(date.getDate() - i);
+                dates.push(date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' }));
+
+                quantities.push(Number(baseQuantity.toFixed(2)));
+                values.push(Number(baseValue.toFixed(2)));
+            }
+            
+            // 销毁旧图表
+            if (trendChart) {
+                trendChart.destroy();
+            }
+            
+            // 创建新图表
+            trendChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [
+                        {
+                            label: '库存数量',
+                            data: quantities,
+                            borderColor: '#1a56db',
+                            backgroundColor: 'rgba(26, 86, 219, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4
+                        },
+                        {
+                            label: '库存价值',
+                            data: values,
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            borderWidth: 2,
+                            fill: true,
+                            tension: 0.4,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false
+                    },
+                    plugins: {
+                        legend: {
+                            position: 'bottom'
+                        },
+                        title: {
+                            display: true,
+                            text: '近7天库存趋势'
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: '数量'
+                            }
+                        },
+                        y1: {
+                            beginAtZero: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: '价值 (¥)'
+                            },
+                            grid: {
+                                drawOnChartArea: false
+                            }
+                        }
+                    }
+                }
+            });
+        }
+        
+        // 查看库存详情
+        function viewStockDetail(stockId) {
+            const stock = stocks.find(s => s.id === stockId);
+            if (!stock) return;
+            
+            const goods = getGoodsById(stock.goods_id);
+            
+            const modal = document.getElementById('stockDetailModal');
+            const content = document.getElementById('stockDetailContent');
+            
+            content.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <h4 class="text-md font-semibold text-gray-800 mb-3">货物信息</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">货物名称:</span>
+                                <span class="font-medium">${stock.goods_name}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">货物条码:</span>
+                                <span class="font-mono">${stock.goods_barcode}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">规格型号:</span>
+                                <span>${goods ? goods.spec || '无' : '无'}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">单位:</span>
+                                <span>${goods ? goods.unit : '个'}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">单价:</span>
+                                <span class="font-medium">¥${goods ? goods.price.toFixed(2) : '0.00'}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div>
+                        <h4 class="text-md font-semibold text-gray-800 mb-3">库存信息</h4>
+                        <div class="space-y-2">
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">所属仓库:</span>
+                                <span class="font-medium">${stock.warehouse_name}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">库位编码:</span>
+                                <span class="font-mono">${stock.location_code}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">库位名称:</span>
+                                <span>${stock.location_name}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">库存数量:</span>
+                                <span class="font-medium text-lg">${stock.quantity}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">库存价值:</span>
+                                <span class="font-medium text-lg text-primary">¥${(goods ? goods.price * stock.quantity : 0).toFixed(2)}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-gray-600">最后更新:</span>
+                                <span>${new Date(stock.update_time).toLocaleString()}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="mt-6">
+                    <h4 class="text-md font-semibold text-gray-800 mb-3">库存状态</h4>
+                    <div class="p-4 bg-gray-50 rounded-md">
+                        ${stock.quantity === 0 ? `
+                            <div class="flex items-center text-red-600">
+                                <i class="fa fa-exclamation-circle mr-2"></i>
+                                <span>库存为零，建议及时补货</span>
+                            </div>
+                        ` : stock.quantity < 10 ? `
+                            <div class="flex items-center text-yellow-600">
+                                <i class="fa fa-exclamation-triangle mr-2"></i>
+                                <span>库存不足，建议补货</span>
+                            </div>
+                        ` : `
+                            <div class="flex items-center text-green-600">
+                                <i class="fa fa-check-circle mr-2"></i>
+                                <span>库存充足</span>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            `;
+            
+            modal.classList.remove('hidden');
+        }
+
+        function formatDateTime(dateValue) {
+            if (!dateValue) return '';
+            return new Date(dateValue).toLocaleString('zh-CN');
+        }
+
+        function exportRowsAsCsv(rows, fileName) {
+            const headers = Object.keys(rows[0]);
+            const escapeCsv = (value) => {
+                const text = value === null || value === undefined ? '' : String(value);
+                return `"${text.replace(/"/g, '""')}"`;
+            };
+            const csvBody = [
+                headers.map(escapeCsv).join(','),
+                ...rows.map(row => headers.map(header => escapeCsv(row[header])).join(','))
+            ].join('\r\n');
+
+            const blob = new Blob(['\uFEFF' + csvBody], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }
+
+        function exportStock() {
+            if (filteredStocks.length === 0) {
+                showToast('暂无可导出的库存数据', 'info');
+                return;
+            }
+
+            const exportBtn = document.getElementById('exportStockBtn');
+            const originalText = exportBtn.innerHTML;
+            exportBtn.disabled = true;
+            exportBtn.innerHTML = '<i class="fa fa-spinner fa-spin mr-1"></i> 导出中...';
+
+            try {
+                const rows = filteredStocks.map(stock => {
+                    const goodsItem = getGoodsById(stock.goods_id);
+                    const unitPrice = getStockUnitPrice(stock);
+                    const stockValue = getStockValue(stock);
+                    return {
+                        '货物名称': stock.goods_name || '',
+                        '货物条码': stock.goods_barcode || '',
+                        '规格型号': goodsItem ? (goodsItem.spec || '') : '',
+                        '单位': goodsItem ? (goodsItem.unit || '') : '',
+                        '仓库': stock.warehouse_name || '',
+                        '库位编码': stock.location_code || '',
+                        '库位名称': stock.location_name || '',
+                        '库存数量': Number(stock.quantity || 0),
+                        '单价': unitPrice.toFixed(2),
+                        '库存金额': stockValue.toFixed(2),
+                        '最后更新': formatDateTime(stock.update_time)
+                    };
+                });
+
+                const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                if (window.XLSX) {
+                    const workbook = XLSX.utils.book_new();
+                    const worksheet = XLSX.utils.json_to_sheet(rows);
+                    worksheet['!cols'] = [
+                        { wch: 16 }, { wch: 16 }, { wch: 16 }, { wch: 10 }, { wch: 14 },
+                        { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 20 }
+                    ];
+                    XLSX.utils.book_append_sheet(workbook, worksheet, '库存');
+                    XLSX.writeFile(workbook, `库存导出_${datePart}.xlsx`);
+                } else {
+                    exportRowsAsCsv(rows, `库存导出_${datePart}.csv`);
+                    showToast('未加载Excel组件，已导出CSV（UTF-8）', 'info');
+                    return;
+                }
+
+                showToast('库存导出成功', 'success');
+            } catch (error) {
+                console.error('库存导出失败:', error);
+                showToast('库存导出失败', 'error');
+            } finally {
+                exportBtn.disabled = false;
+                exportBtn.innerHTML = originalText;
+            }
+        }
+        
+        // 设置事件监听器
+        function setupStockEventListeners() {
+            // 刷新按钮（检查元素是否存在）
+            const refreshBtn = document.getElementById('refreshLocations');
+            if (refreshBtn) {
+                refreshBtn.addEventListener('click', loadStock);
+            }
+            
+            // 搜索按钮
+            document.getElementById('searchStockBtn').addEventListener('click', function() {
+                applyFilters();
+                updateStockTable();
+                updatePagination();
+                updateStatistics();
+            });
+            
+            // 搜索框回车
+            document.getElementById('searchStock').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    applyFilters();
+                    updateStockTable();
+                    updatePagination();
+                    updateStatistics();
+                }
+            });
+
+            document.getElementById('exportStockBtn').addEventListener('click', exportStock);
+            
+            // 筛选仓库
+            document.getElementById('filterWarehouse').addEventListener('change', function() {
+                // 更新库位下拉框
+                updateLocationSelector();
+                
+                applyFilters();
+                updateStockTable();
+                updatePagination();
+                updateStatistics();
+                updateCharts();
+            });
+            
+            // 筛选库位
+            document.getElementById('filterLocation').addEventListener('change', function() {
+                applyFilters();
+                updateStockTable();
+                updatePagination();
+                updateStatistics();
+                updateCharts();
+            });
+            
+            // 分页按钮
+            document.getElementById('prevPage').addEventListener('click', function() {
+                if (currentPage > 1) {
+                    currentPage--;
+                    updateStockTable();
+                    updatePagination();
+                }
+            });
+            
+            document.getElementById('nextPage').addEventListener('click', function() {
+                const totalPages = Math.ceil(filteredStocks.length / pageSize);
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    updateStockTable();
+                    updatePagination();
+                }
+            });
+
+            document.getElementById('pageSizeSelect').addEventListener('change', function() {
+                pageSize = parseInt(this.value, 10) || 10;
+                currentPage = 1;
+                updateStockTable();
+                updatePagination();
+            });
+            
+            // 详情模态框
+            document.getElementById('closeDetailModal').addEventListener('click', function() {
+                document.getElementById('stockDetailModal').classList.add('hidden');
+            });
+            
+            document.getElementById('closeDetail').addEventListener('click', function() {
+                document.getElementById('stockDetailModal').classList.add('hidden');
+            });
+        }
+        
+        // 获取货物信息
+        function getGoodsById(goodsId) {
+            return goods.find(g => g.id === goodsId);
+        }
+        
+        // 获取库位编码
+        function getLocationCode(locationId) {
+            const location = locations.find(l => l.id === locationId);
+            return location ? location.location_code : '';
+        }
+    </script>
+</body>
+</html>

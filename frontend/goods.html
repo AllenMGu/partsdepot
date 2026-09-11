@@ -1,0 +1,1478 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>货物管理 - 备件管理系统</title>
+    <!-- Tailwind CSS v3 -->
+    <link href="assets/css/tailwind.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="assets/css/font-awesome.min.css" rel="stylesheet">
+    <!-- 条形码生成库 JsBarcode -->
+    <script src="/assets/js/jsbarcode.min.js"></script>
+    <!-- 二维码生成库 qrcode.js -->
+    <script src="/assets/js/qrcode.min.js"></script>
+    <!-- 统一的 Tailwind 配置 -->
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+    <!-- 顶部状态栏 -->
+    <header class="bg-white shadow-sm z-10">
+        <div class="flex items-center justify-between px-4 py-3">
+            <!-- 左侧：Logo和菜单按钮 -->
+            <div class="flex items-center">
+                <button id="sidebarToggle" class="mr-4 text-gray-600 focus:outline-none lg:hidden">
+                    <i class="fa fa-bars text-xl"></i>
+                </button>
+                <div class="flex items-center">
+                    <img src="assets/images/logo.png" alt="Logo" class="h-8 w-8">
+					<span class="ml-2 text-lg font-semibold text-gray-800 hidden sm:block">备件管理系统</span>
+                </div>
+            </div>
+            
+            <!-- 右侧：仓库选择、通知和用户信息 -->
+            <div class="flex items-center space-x-4">
+                <!-- 仓库选择 -->
+                <div class="relative" id="warehouseSelector">
+                    <button class="flex items-center text-gray-700 hover:text-primary focus:outline-none">
+                        <i class="fa fa-building-o mr-2"></i>
+                        <span id="currentWarehouse">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs"></i>
+                    </button>
+                    <div id="warehouseDropdown" class="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <div class="px-4 py-2 text-sm text-gray-400">选择仓库</div>
+                            <div id="warehouseList" class="max-h-64 overflow-y-auto">
+                                <!-- 仓库列表将通过JS动态生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 通知 -->
+                <div class="relative">
+                    <button class="text-gray-600 hover:text-primary focus:outline-none">
+                        <i class="fa fa-bell-o text-xl"></i>
+                        <span class="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full"></span>
+                    </button>
+                </div>
+                
+                <!-- 用户信息 -->
+                <div class="relative" id="userMenu">
+                    <button class="flex items-center focus:outline-none">
+                        <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center">
+                            <span id="userInitials">U</span>
+                        </div>
+                        <span class="ml-2 text-sm font-medium text-gray-700 hidden md:block" id="userName">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs text-gray-500 hidden md:block"></i>
+                    </button>
+                    <div id="userDropdown" class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-user-circle mr-2"></i> 个人资料
+                            </a>
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-cog mr-2"></i> 设置
+                            </a>
+                            <hr class="my-1">
+                            <a href="#" id="logoutButton" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-sign-out mr-2"></i> 退出登录
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- 侧边导航栏 -->
+        <aside id="sidebar" class="bg-white w-64 shadow-md hidden lg:block flex-shrink-0 transition-all-300">
+            <nav class="mt-5 px-2">
+                <a href="dashboard.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-dashboard sidebar-icon"></i>
+                    <span>仪表盘</span>
+                </a>
+                <a href="warehouse.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-building sidebar-icon"></i>
+                    <span>仓库管理</span>
+                </a>
+                <a href="location.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-map-marker sidebar-icon"></i>
+                    <span>库位管理</span>
+                </a>
+                <a href="goods.html" class="sidebar-active flex items-center px-4 py-3 rounded-md mb-1">
+                    <i class="fa fa-cubes sidebar-icon"></i>
+                    <span>货物管理</span>
+                </a>
+                <a href="stock.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-list sidebar-icon"></i>
+                    <span>库存查询</span>
+                </a>
+                <a href="scan.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-qrcode sidebar-icon"></i>
+                    <span>扫码出入库</span>
+                </a>
+                <a href="inbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-down sidebar-icon"></i>
+                    <span>入库单管理</span>
+                </a>
+                <a href="outbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-up sidebar-icon"></i>
+                    <span>出库单管理</span>
+                </a>
+                <a href="check.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-check-square-o sidebar-icon"></i>
+                    <span>盘点管理</span>
+                </a>
+                <a href="user.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-users sidebar-icon"></i>
+                    <span>用户管理</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="flex-1 overflow-y-auto p-6">
+            <!-- 页面标题和操作按钮 -->
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">货物管理</h1>
+                    <p class="text-gray-600">管理所有货物信息</p>
+                </div>
+                <div class="mt-4 md:mt-0 flex space-x-3">
+                    <button id="importGoodsBtn" class="bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-all-300 flex items-center">
+                        <i class="fa fa-upload mr-2"></i>
+                        <span>导入货物</span>
+                    </button>
+                    <button id="exportGoodsBtn" class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-all-300 flex items-center">
+                        <i class="fa fa-download mr-2"></i>
+                        <span>导出货物</span>
+                    </button>
+                    <button id="addGoodsBtn" class="bg-primary text-white px-4 py-2 rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300 flex items-center">
+                        <i class="fa fa-plus mr-2"></i>
+                        <span>新增货物</span>
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 搜索和筛选 -->
+            <div class="bg-white rounded-lg shadow p-4 mb-6">
+                <div class="flex flex-col md:flex-row md:items-center md:space-x-4">
+                    <div class="flex-1 mb-4 md:mb-0">
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500">
+                                <i class="fa fa-search"></i>
+                            </span>
+                            <input type="text" id="searchInput" class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="搜索货物名称、条码或规格">
+                        </div>
+                    </div>
+                    <div class="flex space-x-2">
+                        <button id="filterBtn" class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300 flex items-center">
+                            <i class="fa fa-filter mr-2"></i>
+                            <span>筛选</span>
+                        </button>
+                        <button id="refreshBtn" class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300 flex items-center">
+                            <i class="fa fa-refresh mr-2"></i>
+                            <span>刷新</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 货物列表 -->
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    条码
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    货物名称
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    规格型号
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    单位
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    单价
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    创建时间
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    操作
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200" id="goodsTableBody">
+                            <!-- 货物数据将通过JS动态生成 -->
+                            <tr>
+                                <td colspan="7" class="px-6 py-4 text-center text-gray-500">加载中...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+                <!-- 分页 -->
+                <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
+                    <div class="flex-1 flex justify-between sm:hidden">
+                        <a href="#" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                            上一页
+                        </a>
+                        <a href="#" class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
+                            下一页
+                        </a>
+                    </div>
+                    <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+                        <div>
+                            <p class="text-sm text-gray-700 pagination-info">
+                                显示 <span class="font-medium start-range">1</span> 到 <span class="font-medium end-range">10</span> 条，共 <span class="font-medium total-count">0</span> 条记录
+                            </p>
+                        </div>
+                        <div>
+                            <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px pagination" aria-label="Pagination">
+                                <a href="#" class="prev relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                    <span class="sr-only">上一页</span>
+                                    <i class="fa fa-chevron-left"></i>
+                                </a>
+                                <div class="page-numbers">
+                                    <!-- 页码按钮将通过JavaScript动态生成 -->
+                                </div>
+                                <a href="#" class="next relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
+                                    <span class="sr-only">下一页</span>
+                                    <i class="fa fa-chevron-right"></i>
+                                </a>
+                            </nav>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 新增/编辑货物模态框 -->
+    <div id="goodsModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-800" id="modalTitle">新增货物</h3>
+            </div>
+            <div class="px-6 py-4">
+                <form id="goodsForm">
+                    <input type="hidden" id="goodsId">
+                    <div class="mb-4">
+                        <label for="goodsBarcode" class="block text-sm font-medium text-gray-700 mb-1">货物条码 <span class="text-red-500">*</span></label>
+                        <input type="text" id="goodsBarcode" class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="请输入货物条码" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="goodsName" class="block text-sm font-medium text-gray-700 mb-1">货物名称 <span class="text-red-500">*</span></label>
+                        <input type="text" id="goodsName" class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="请输入货物名称" required>
+                    </div>
+                    <div class="mb-4">
+                        <label for="goodsSpec" class="block text-sm font-medium text-gray-700 mb-1">规格型号</label>
+                        <input type="text" id="goodsSpec" class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="请输入规格型号">
+                    </div>
+                    <div class="mb-4">
+                        <label for="goodsUnit" class="block text-sm font-medium text-gray-700 mb-1">单位</label>
+                        <input type="text" id="goodsUnit" class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="请输入单位" value="个">
+                    </div>
+                    <div class="mb-4">
+                        <label for="goodsPrice" class="block text-sm font-medium text-gray-700 mb-1">单价</label>
+                        <div class="relative">
+                            <span class="absolute inset-y-0 left-0 flex items-center pl-3 text-gray-500">¥</span>
+                            <input type="number" id="goodsPrice" class="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="请输入单价" step="0.01" min="0">
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button id="cancelBtn" class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300">
+                    取消
+                </button>
+                <button id="saveBtn" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300">
+                    保存
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 导入货物模态框 -->
+    <div id="importModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-800">导入货物</h3>
+            </div>
+            <div class="px-6 py-4">
+                <p class="text-gray-700 mb-4">请选择要导入的 Excel 文件（支持 .xlsx 格式）</p>
+                <div class="mb-4">
+                    <input type="file" id="importFile" accept=".xlsx, .xls" class="w-full">
+                </div>
+                <div id="importResult" class="hidden">
+                    <div id="importSuccess" class="text-green-500 mb-2"></div>
+                    <div id="importErrors" class="text-red-500 text-sm"></div>
+                </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button id="cancelImportBtn" class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300">
+                    取消
+                </button>
+                <button id="confirmImportBtn" class="px-4 py-2 bg-green-500 text-white rounded-md hover:bg-green-600 focus:outline-none focus:ring-2 focus:ring-green-500 focus:ring-offset-2 transition-all-300">
+                    开始导入
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 打印预览模态框 -->
+    <div id="printModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl max-w-2xl w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-800">打印条码预览</h3>
+            </div>
+            <div class="px-6 py-4">
+                <div id="printContent" class="flex flex-col items-center space-y-6">
+                    <!-- 条码内容将在此生成 -->
+                </div>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button id="cancelPrintBtn" class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300">
+                    取消
+                </button>
+                <button id="confirmPrintBtn" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300">
+                    打印
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 确认删除模态框 -->
+    <div id="deleteModal" class="fixed inset-0 bg-gray-600 bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-xl max-w-md w-full mx-4">
+            <div class="px-6 py-4 border-b border-gray-200">
+                <h3 class="text-lg font-semibold text-gray-800">确认删除</h3>
+            </div>
+            <div class="px-6 py-4">
+                <p class="text-gray-700">您确定要删除货物 "<span id="deleteGoodsName" class="font-medium"></span>" 吗？此操作无法撤销。</p>
+                <p class="text-red-500 text-sm mt-2">注意：删除货物将同时删除该货物在所有仓库的库存记录。</p>
+            </div>
+            <div class="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
+                <button id="cancelDeleteBtn" class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300">
+                    取消
+                </button>
+                <button id="confirmDeleteBtn" class="px-4 py-2 bg-red-500 text-white rounded-md hover:bg-red-600 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 transition-all-300">
+                    确认删除
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 提示消息 -->
+    <div id="toast" class="fixed bottom-4 right-4 bg-green-500 text-white px-4 py-2 rounded-md shadow-lg hidden transform transition-all duration-300 translate-y-0 opacity-0">
+        <div class="flex items-center">
+            <i class="fa fa-check-circle mr-2"></i>
+            <span id="toastMessage"></span>
+        </div>
+    </div>
+
+    <script>
+        // API基础URL
+        const API_BASE_URL = 'api';
+
+        // 用户信息和认证
+        let currentUser = null;
+        let accessToken = null;
+        let warehouses = [];
+        let currentWarehouseId = null;
+        let currentEditId = null;
+        let currentDeleteId = null;
+        let currentPage = 1;
+        const pageSize = 10;
+        let allGoods = [];  // 保存所有货物数据
+        let filteredGoods = [];  // 保存筛选后的货物数据
+        
+        // DOM元素
+        const sidebarToggle = document.getElementById('sidebarToggle');
+        const sidebar = document.getElementById('sidebar');
+        const warehouseSelector = document.getElementById('warehouseSelector');
+        const warehouseDropdown = document.getElementById('warehouseDropdown');
+        const warehouseList = document.getElementById('warehouseList');
+        const currentWarehouseEl = document.getElementById('currentWarehouse');
+        const userMenu = document.getElementById('userMenu');
+        const userDropdown = document.getElementById('userDropdown');
+        const userName = document.getElementById('userName');
+        const userInitials = document.getElementById('userInitials');
+        const logoutButton = document.getElementById('logoutButton');
+        const addGoodsBtn = document.getElementById('addGoodsBtn');
+        const goodsModal = document.getElementById('goodsModal');
+        const modalTitle = document.getElementById('modalTitle');
+        const goodsForm = document.getElementById('goodsForm');
+        const goodsId = document.getElementById('goodsId');
+        const goodsBarcode = document.getElementById('goodsBarcode');
+        const goodsName = document.getElementById('goodsName');
+        const goodsSpec = document.getElementById('goodsSpec');
+        const goodsUnit = document.getElementById('goodsUnit');
+        const goodsPrice = document.getElementById('goodsPrice');
+        const cancelBtn = document.getElementById('cancelBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const deleteModal = document.getElementById('deleteModal');
+        const deleteGoodsName = document.getElementById('deleteGoodsName');
+        const cancelDeleteBtn = document.getElementById('cancelDeleteBtn');
+        const confirmDeleteBtn = document.getElementById('confirmDeleteBtn');
+        const toast = document.getElementById('toast');
+        const toastMessage = document.getElementById('toastMessage');
+        const searchInput = document.getElementById('searchInput');
+        const filterBtn = document.getElementById('filterBtn');
+        const refreshBtn = document.getElementById('refreshBtn');
+        const goodsTableBody = document.getElementById('goodsTableBody');
+        const importGoodsBtn = document.getElementById('importGoodsBtn');
+        const exportGoodsBtn = document.getElementById('exportGoodsBtn');
+        const importModal = document.getElementById('importModal');
+        const importFile = document.getElementById('importFile');
+        const importResult = document.getElementById('importResult');
+        const importSuccess = document.getElementById('importSuccess');
+        const importErrors = document.getElementById('importErrors');
+        const cancelImportBtn = document.getElementById('cancelImportBtn');
+        const confirmImportBtn = document.getElementById('confirmImportBtn');
+        
+        // 检查认证状态
+        function checkAuth() {
+            console.log('进入checkAuth函数');
+            const localAuth = {
+                token: localStorage.getItem('access_token'),
+                userStr: localStorage.getItem('user'),
+                expiry: localStorage.getItem('token_expiry')
+            };
+            const sessionAuth = {
+                token: sessionStorage.getItem('access_token'),
+                userStr: sessionStorage.getItem('user'),
+                expiry: sessionStorage.getItem('token_expiry')
+            };
+            const isComplete = (auth) => !!(auth.token && auth.userStr);
+            const isExpired = (auth) => !!(auth.expiry && new Date() >= new Date(auth.expiry));
+
+            let auth = null;
+            if (isComplete(localAuth) && !isExpired(localAuth)) {
+                auth = localAuth;
+            } else if (isComplete(sessionAuth) && !isExpired(sessionAuth)) {
+                auth = sessionAuth;
+            } else if (isComplete(localAuth)) {
+                auth = localAuth;
+            } else if (isComplete(sessionAuth)) {
+                auth = sessionAuth;
+            }
+
+            const token = auth ? auth.token : null;
+            const userStr = auth ? auth.userStr : null;
+            const expiry = auth ? auth.expiry : null;
+
+            if (!token || !userStr) {
+                console.log('未找到token或用户信息，跳转到登录页');
+                window.location.href = 'index.html';
+                return false;
+            }
+
+            // 检查token是否过期
+            if (expiry && new Date() >= new Date(expiry)) {
+                console.log('token已过期，执行logout');
+                logout();
+                return false;
+            }
+
+            try {
+                currentUser = JSON.parse(userStr);
+                accessToken = token;
+                return true;
+            } catch (e) {
+                console.error('解析用户信息失败:', e);
+                return false;
+            }
+        }
+
+        // 退出登录
+        function logout() {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('user');
+            localStorage.removeItem('token_expiry');
+            sessionStorage.removeItem('access_token');
+            sessionStorage.removeItem('user');
+            sessionStorage.removeItem('token_expiry');
+            window.location.href = 'index.html';
+        }
+
+        // 页面初始化
+        async function pageInit() {
+            if (!checkAuth()) {
+                return;
+            }
+
+            applyPermissionControls();
+
+            // 加载用户信息
+            loadUserInfo();
+
+            // 加载仓库列表
+            await loadWarehouses();
+
+            // 加载货物数据
+            await loadGoodsData();
+
+            // 检查URL参数，如果有action=create则打开新增模态框
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.get('action') === 'create') {
+                openAddModal();
+            }
+
+            // 设置事件监听器
+            setupEventListeners();
+        }
+
+        function applyPermissionControls() {
+            const isAdmin = currentUser && currentUser.role === 'admin';
+            if (!isAdmin) {
+                importGoodsBtn.style.display = 'none';
+                const warehouseNavLink = document.querySelector('a[href="warehouse.html"]');
+                if (warehouseNavLink) {
+                    warehouseNavLink.style.display = 'none';
+                }
+            }
+        }
+        
+        // 加载用户信息
+        function loadUserInfo() {
+            if (currentUser) {
+                userName.textContent = currentUser.full_name || currentUser.username;
+                userInitials.textContent = (currentUser.full_name || currentUser.username).charAt(0).toUpperCase();
+                
+                if (currentUser.current_warehouse_id) {
+                    currentWarehouseId = currentUser.current_warehouse_id;
+                }
+            }
+        }
+        
+        // 加载仓库列表
+        async function loadWarehouses() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/users/${currentUser.id}/warehouses`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取仓库列表失败');
+                }
+                
+                warehouses = await response.json();
+                
+                // 更新当前仓库显示
+                if (warehouses.length > 0) {
+                    let selectedWarehouse = null;
+                    
+                    if (currentWarehouseId) {
+                        selectedWarehouse = warehouses.find(w => w.id === currentWarehouseId);
+                    }
+                    
+                    if (!selectedWarehouse && warehouses.length > 0) {
+                        selectedWarehouse = warehouses.find(w => w.is_current) || warehouses[0];
+                        currentWarehouseId = selectedWarehouse.id;
+                    }
+                    
+                    if (selectedWarehouse) {
+                        currentWarehouseEl.textContent = selectedWarehouse.name;
+                    }
+                    
+                    // 填充仓库下拉列表
+                    warehouseList.innerHTML = '';
+                    warehouses.forEach(warehouse => {
+                        const item = document.createElement('a');
+                        item.href = '#';
+                        item.className = `block px-4 py-2 text-sm ${warehouse.id === currentWarehouseId ? 'bg-primary text-white' : 'text-gray-700 hover:bg-gray-100'}`;
+                        item.textContent = warehouse.name;
+                        item.dataset.warehouseId = warehouse.id;
+                        item.dataset.warehouseName = warehouse.name;
+                        
+                        item.addEventListener('click', async function(e) {
+                            e.preventDefault();
+                            const warehouseId = parseInt(this.dataset.warehouseId);
+                            const warehouseName = this.dataset.warehouseName;
+                            
+                            // 更新当前仓库
+                            await switchWarehouse(warehouseId, warehouseName);
+                            
+                            // 更新UI
+                            warehouseList.querySelectorAll('a').forEach(a => {
+                                a.className = a.dataset.warehouseId == warehouseId ? 
+                                    'block px-4 py-2 text-sm bg-primary text-white' : 
+                                    'block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100';
+                            });
+                            
+                            // 隐藏下拉菜单
+                            warehouseDropdown.classList.add('hidden');
+                        });
+                        
+                        warehouseList.appendChild(item);
+                    });
+                } else {
+                    currentWarehouseEl.textContent = '无可用仓库';
+                    warehouseList.innerHTML = '<div class="px-4 py-2 text-sm text-gray-500">无可用仓库</div>';
+                }
+            } catch (error) {
+                console.error('加载仓库列表失败:', error);
+                currentWarehouseEl.textContent = '加载失败';
+            }
+        }
+        
+        // 切换仓库
+        async function switchWarehouse(warehouseId, warehouseName) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/users/${currentUser.id}/switch-warehouse`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${accessToken}`
+                    },
+                    body: JSON.stringify({ warehouse_id: warehouseId })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('切换仓库失败');
+                }
+                
+                // 更新UI
+                currentWarehouseEl.textContent = warehouseName;
+                currentWarehouseId = warehouseId;
+                
+                // 更新本地存储的用户信息
+                currentUser.current_warehouse_id = warehouseId;
+                if (localStorage.getItem('access_token')) {
+                    localStorage.setItem('user', JSON.stringify(currentUser));
+                }
+                if (sessionStorage.getItem('access_token')) {
+                    sessionStorage.setItem('user', JSON.stringify(currentUser));
+                }
+            } catch (error) {
+                console.error('切换仓库失败:', error);
+                alert('切换仓库失败，请重试');
+            }
+        }
+        
+        // 加载货物数据
+        async function loadGoodsData() {
+            try {
+                // 显示加载状态
+                goodsTableBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-gray-500">加载中...</td></tr>';
+
+                // 获取货物列表
+                const response = await fetch(`${API_BASE_URL}/goods/`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取货物数据失败');
+                }
+
+                allGoods = await response.json();
+                filteredGoods = [...allGoods];
+
+                // 应用筛选
+                applyFilters();
+
+                // 更新表格
+                renderGoodsTable();
+            } catch (error) {
+                console.error('加载货物数据失败:', error);
+                goodsTableBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-red-500">加载失败，请重试</td></tr>';
+            }
+        }
+        
+        // 应用筛选
+        function applyFilters() {
+            const searchTerm = searchInput.value.toLowerCase();
+
+            filteredGoods = allGoods.filter(goods => {
+                const matchesSearch =
+                    goods.barcode.toLowerCase().includes(searchTerm) ||
+                    goods.name.toLowerCase().includes(searchTerm) ||
+                    (goods.spec || '').toLowerCase().includes(searchTerm);
+
+                return matchesSearch;
+            });
+
+            currentPage = 1;
+        }
+
+        // 更新分页信息
+        function updatePagination() {
+            const dataLength = filteredGoods.length;
+            const totalPages = Math.ceil(dataLength / pageSize);
+            const startRange = dataLength > 0 ? (currentPage - 1) * pageSize + 1 : 0;
+            const endRange = Math.min(currentPage * pageSize, dataLength);
+
+            // 更新分页信息显示
+            const startRangeEl = document.querySelector('.pagination-info .start-range');
+            const endRangeEl = document.querySelector('.pagination-info .end-range');
+            const totalCountEl = document.querySelector('.pagination-info .total-count');
+
+            if (startRangeEl) startRangeEl.textContent = startRange;
+            if (endRangeEl) endRangeEl.textContent = endRange;
+            if (totalCountEl) totalCountEl.textContent = dataLength;
+
+            // 生成页码按钮
+            const paginationContainer = document.querySelector('.pagination');
+            if (paginationContainer) {
+                const pageNumbers = generatePageNumbers(totalPages);
+                renderPageNumbers(paginationContainer, pageNumbers, totalPages);
+            }
+        }
+
+        // 生成页码数组
+        function generatePageNumbers(totalPages) {
+            const maxVisiblePages = 5;
+            const pageNumbers = [];
+
+            if (totalPages <= maxVisiblePages) {
+                // 总页数小于等于最大可见页数，显示所有页码
+                for (let i = 1; i <= totalPages; i++) {
+                    pageNumbers.push(i);
+                }
+            } else {
+                // 总页数大于最大可见页数，显示当前页附近的页码
+                let startPage = Math.max(1, currentPage - 2);
+                let endPage = Math.min(totalPages, currentPage + 2);
+
+                if (currentPage <= 3) {
+                    endPage = 5;
+                } else if (currentPage >= totalPages - 2) {
+                    startPage = totalPages - 4;
+                }
+
+                for (let i = startPage; i <= endPage; i++) {
+                    pageNumbers.push(i);
+                }
+
+                // 添加省略号
+                if (startPage > 1) {
+                    pageNumbers.unshift('ellipsis');
+                    pageNumbers.unshift(1);
+                }
+
+                if (endPage < totalPages) {
+                    pageNumbers.push('ellipsis');
+                    pageNumbers.push(totalPages);
+                }
+            }
+
+            return pageNumbers;
+        }
+
+        // 渲染页码按钮
+        function renderPageNumbers(container, pageNumbers, totalPages) {
+            // 找到页码按钮容器
+            const pageNumberContainer = container.querySelector('.page-numbers');
+            if (!pageNumberContainer) {
+                // 如果没有页码按钮容器，创建一个
+                const prevBtn = container.querySelector('.prev');
+                const nextBtn = container.querySelector('.next');
+                const pageNumberContainer = document.createElement('div');
+                pageNumberContainer.className = 'page-numbers';
+                pageNumberContainer.style.display = 'flex';
+                pageNumberContainer.style.alignItems = 'center';
+                container.insertBefore(pageNumberContainer, nextBtn);
+            }
+
+            // 清空现有页码按钮
+            pageNumberContainer.innerHTML = '';
+
+            // 渲染页码按钮
+            pageNumbers.forEach(page => {
+                if (page === 'ellipsis') {
+                    // 渲染省略号
+                    const ellipsis = document.createElement('span');
+                    ellipsis.className = 'relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700';
+                    ellipsis.textContent = '...';
+                    pageNumberContainer.appendChild(ellipsis);
+                } else {
+                    // 渲染页码按钮
+                    const pageBtn = document.createElement('a');
+                    pageBtn.href = '#';
+                    pageBtn.className = `relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium hover:bg-gray-50 ${page === currentPage ? 'bg-primary text-white' : 'bg-white text-gray-700'}`;
+                    pageBtn.textContent = page;
+                    pageBtn.addEventListener('click', function(e) {
+                        e.preventDefault();
+                        currentPage = page;
+                        renderGoodsTable();
+                    });
+                    pageNumberContainer.appendChild(pageBtn);
+                }
+            });
+
+            // 禁用/启用上一页和下一页按钮
+            const prevBtn = container.querySelector('.prev');
+            const nextBtn = container.querySelector('.next');
+
+            if (prevBtn) {
+                prevBtn.classList.toggle('opacity-50', currentPage === 1);
+                prevBtn.classList.toggle('pointer-events-none', currentPage === 1);
+            }
+
+            if (nextBtn) {
+                nextBtn.classList.toggle('opacity-50', currentPage === totalPages);
+                nextBtn.classList.toggle('pointer-events-none', currentPage === totalPages);
+            }
+        }
+
+        // 渲染货物表格
+        function renderGoodsTable() {
+            if (!filteredGoods || filteredGoods.length === 0) {
+                goodsTableBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-gray-500">暂无数据</td></tr>';
+                updatePagination();
+                return;
+            }
+
+            // 更新分页信息
+            updatePagination();
+
+            // 获取当前页的数据
+            const startIndex = (currentPage - 1) * pageSize;
+            const endIndex = startIndex + pageSize;
+            const pageData = filteredGoods.slice(startIndex, endIndex);
+
+            goodsTableBody.innerHTML = '';
+
+            pageData.forEach(goods => {
+                const row = document.createElement('tr');
+                row.className = 'hover:bg-gray-50 transition-all-300';
+                
+                // 条码
+                const barcodeCell = document.createElement('td');
+                barcodeCell.className = 'px-6 py-4 whitespace-nowrap';
+                barcodeCell.innerHTML = `<div class="text-sm font-medium text-gray-900">${goods.barcode}</div>`;
+                row.appendChild(barcodeCell);
+                
+                // 货物名称
+                const nameCell = document.createElement('td');
+                nameCell.className = 'px-6 py-4';
+                nameCell.innerHTML = `<div class="text-sm text-gray-900">${goods.name}</div>`;
+                row.appendChild(nameCell);
+                
+                // 规格型号
+                const specCell = document.createElement('td');
+                specCell.className = 'px-6 py-4';
+                specCell.innerHTML = `<div class="text-sm text-gray-900">${goods.spec || '-'}</div>`;
+                row.appendChild(specCell);
+                
+                // 单位
+                const unitCell = document.createElement('td');
+                unitCell.className = 'px-6 py-4 whitespace-nowrap';
+                unitCell.innerHTML = `<div class="text-sm text-gray-900">${goods.unit}</div>`;
+                row.appendChild(unitCell);
+                
+                // 单价
+                const priceCell = document.createElement('td');
+                priceCell.className = 'px-6 py-4 whitespace-nowrap';
+                priceCell.innerHTML = `<div class="text-sm text-gray-900">¥${goods.price.toFixed(2)}</div>`;
+                row.appendChild(priceCell);
+                
+                // 创建时间
+                const timeCell = document.createElement('td');
+                timeCell.className = 'px-6 py-4 whitespace-nowrap text-sm text-gray-500';
+                console.log('create_time:', goods.create_time, typeof goods.create_time); // 调试信息
+                const date = new Date(goods.create_time);
+                const year = date.getFullYear();
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                const hours = String(date.getHours()).padStart(2, '0');
+                const minutes = String(date.getMinutes()).padStart(2, '0');
+                const seconds = String(date.getSeconds()).padStart(2, '0');
+                const createTime = `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+                timeCell.textContent = createTime;
+                row.appendChild(timeCell);
+                
+                // 操作
+                const actionCell = document.createElement('td');
+                actionCell.className = 'px-6 py-4 whitespace-nowrap text-sm font-medium';
+
+                // 打印按钮
+                const printBtn = document.createElement('button');
+                printBtn.className = 'text-blue-500 hover:text-blue-600 mr-3';
+                printBtn.innerHTML = '<i class="fa fa-print"></i> 打印';
+                printBtn.dataset.barcode = goods.barcode;
+                printBtn.dataset.name = goods.name;
+                printBtn.addEventListener('click', function() {
+                    const barcode = this.dataset.barcode;
+                    const name = this.dataset.name;
+                    openPrintModal(barcode, name);
+                });
+
+                actionCell.appendChild(printBtn);
+
+                // 管理员和操作员都可以编辑货物，但只有管理员可以删除
+                const editBtn = document.createElement('button');
+                editBtn.className = 'text-primary hover:text-secondary mr-3';
+                editBtn.innerHTML = '<i class="fa fa-pencil"></i> 编辑';
+                editBtn.dataset.id = goods.id;
+                editBtn.addEventListener('click', function() {
+                    const id = parseInt(this.dataset.id);
+                    editGoods(id);
+                });
+
+                actionCell.appendChild(editBtn);
+
+                if (currentUser.role === 'admin') {
+                    const deleteBtn = document.createElement('button');
+                    deleteBtn.className = 'text-red-500 hover:text-red-600';
+                    deleteBtn.innerHTML = '<i class="fa fa-trash"></i> 删除';
+                    deleteBtn.dataset.id = goods.id;
+                    deleteBtn.dataset.name = goods.name;
+                    deleteBtn.addEventListener('click', function() {
+                        const id = parseInt(this.dataset.id);
+                        const name = this.dataset.name;
+                        confirmDelete(id, name);
+                    });
+
+                    actionCell.appendChild(deleteBtn);
+                } else {
+                    actionCell.appendChild(document.createTextNode('无删除权限'));
+                }
+                
+                row.appendChild(actionCell);
+                
+                goodsTableBody.appendChild(row);
+            });
+        }
+        
+        // 打开新增货物模态框
+        function openAddModal() {
+            modalTitle.textContent = '新增货物';
+            goodsForm.reset();
+            goodsId.value = '';
+            goodsUnit.value = '个';
+            goodsPrice.value = '0.00';
+            currentEditId = null;
+            goodsModal.classList.remove('hidden');
+        }
+        
+        // 打开编辑货物模态框
+        async function editGoods(id) {
+            try {
+                // 获取货物详情
+                const response = await fetch(`${API_BASE_URL}/goods/${id}`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取货物详情失败');
+                }
+                
+                const goods = await response.json();
+                
+                // 填充表单
+                modalTitle.textContent = '编辑货物';
+                goodsId.value = goods.id;
+                goodsBarcode.value = goods.barcode;
+                goodsName.value = goods.name;
+                goodsSpec.value = goods.spec || '';
+                goodsUnit.value = goods.unit;
+                goodsPrice.value = goods.price.toFixed(2);
+                currentEditId = id;
+                
+                // 显示模态框
+                goodsModal.classList.remove('hidden');
+            } catch (error) {
+                console.error('编辑货物失败:', error);
+                showToast('获取货物详情失败', 'error');
+            }
+        }
+        
+        // 保存货物
+        async function saveGoods() {
+            // 表单验证
+            if (!goodsBarcode.value.trim()) {
+                showToast('请输入货物条码', 'error');
+                goodsBarcode.focus();
+                return;
+            }
+            
+            if (!goodsName.value.trim()) {
+                showToast('请输入货物名称', 'error');
+                goodsName.focus();
+                return;
+            }
+            
+            if (!goodsUnit.value.trim()) {
+                showToast('请输入单位', 'error');
+                goodsUnit.focus();
+                return;
+            }
+            
+            const price = parseFloat(goodsPrice.value);
+            if (isNaN(price) || price < 0) {
+                showToast('请输入有效的单价', 'error');
+                goodsPrice.focus();
+                return;
+            }
+            
+            try {
+                const goodsData = {
+                    barcode: goodsBarcode.value.trim(),
+                    name: goodsName.value.trim(),
+                    spec: goodsSpec.value.trim(),
+                    unit: goodsUnit.value.trim(),
+                    price: price
+                };
+                
+                let response;
+                
+                if (currentEditId) {
+                    // 更新货物
+                    response = await fetch(`${API_BASE_URL}/goods/${currentEditId}`, {
+                        method: 'PUT',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${accessToken}`
+                        },
+                        body: JSON.stringify(goodsData)
+                    });
+                } else {
+                    // 新增货物
+                    response = await fetch(`${API_BASE_URL}/goods/`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': `Bearer ${accessToken}`
+                        },
+                        body: JSON.stringify(goodsData)
+                    });
+                }
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '保存失败');
+                }
+                
+                // 关闭模态框
+                goodsModal.classList.add('hidden');
+                
+                // 重新加载数据
+                await loadGoodsData();
+                
+                // 显示成功提示
+                showToast(currentEditId ? '货物更新成功' : '货物创建成功');
+            } catch (error) {
+                console.error('保存货物失败:', error);
+                showToast(error.message || '保存失败', 'error');
+            }
+        }
+        
+        // 确认删除
+        function confirmDelete(id, name) {
+            currentDeleteId = id;
+            deleteGoodsName.textContent = name;
+            deleteModal.classList.remove('hidden');
+        }
+        
+        // 删除货物
+        async function deleteGoods() {
+            if (!currentUser || currentUser.role !== 'admin') {
+                showToast('无权限删除货物', 'error');
+                return;
+            }
+            if (!currentDeleteId) return;
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/goods/${currentDeleteId}`, {
+                    method: 'DELETE',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    }
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '删除失败');
+                }
+                
+                // 关闭模态框
+                deleteModal.classList.add('hidden');
+                
+                // 重新加载数据
+                await loadGoodsData();
+                
+                // 显示成功提示
+                showToast('货物删除成功');
+            } catch (error) {
+                console.error('删除货物失败:', error);
+                showToast(error.message || '删除失败', 'error');
+            }
+        }
+        
+        // 打开打印模态框
+        function openPrintModal(barcode, name) {
+            const printContent = document.getElementById('printContent');
+            printContent.innerHTML = '';
+            printContent.className = 'flex flex-col items-center justify-center space-y-6';
+
+            // 创建二维码容器
+            const qrContainer = document.createElement('div');
+            qrContainer.className = 'flex flex-col items-center space-y-2 max-w-full';
+
+            // 货物名称
+            const nameDiv = document.createElement('div');
+            nameDiv.className = 'text-lg font-semibold text-gray-800';
+            nameDiv.textContent = name;
+            qrContainer.appendChild(nameDiv);
+
+            // 货物条码
+            const barcodeDiv = document.createElement('div');
+            barcodeDiv.className = 'text-sm text-gray-600 mb-4';
+            barcodeDiv.textContent = barcode;
+            qrContainer.appendChild(barcodeDiv);
+
+            // 二维码
+            const qrTitle = document.createElement('div');
+            qrTitle.className = 'text-sm text-gray-600';
+            qrTitle.textContent = '二维码';
+            qrContainer.appendChild(qrTitle);
+
+            const qrDiv = document.createElement('div');
+            qrDiv.className = 'flex justify-center items-center p-4 bg-white border border-gray-200 rounded-md w-full';
+
+            // 生成二维码
+            try {
+                const qrCode = new QRCode(qrDiv, {
+                    text: barcode,
+                    width: 256,
+                    height: 256,
+                    colorDark: '#000000',
+                    colorLight: '#ffffff',
+                    correctLevel: QRCode.CorrectLevel.M
+                });
+            } catch (error) {
+                console.error('生成二维码失败:', error);
+                showToast('生成二维码失败', 'error');
+            }
+
+            qrContainer.appendChild(qrDiv);
+            printContent.appendChild(qrContainer);
+
+            document.getElementById('printModal').classList.remove('hidden');
+        }
+
+        // 执行打印
+        function printBarcode() {
+            const printContent = document.getElementById('printContent');
+
+            // 将 Canvas 元素转换为图片
+            const printContentCopy = printContent.cloneNode(true);
+            const canvases = printContentCopy.querySelectorAll('canvas');
+            canvases.forEach(function(canvas) {
+                const img = document.createElement('img');
+                img.src = canvas.toDataURL('image/png');
+                img.style.width = canvas.width + 'px';
+                img.style.height = canvas.height + 'px';
+                canvas.parentNode.replaceChild(img, canvas);
+            });
+
+            // 创建打印内容
+            const printHTML = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <title>打印条码</title>
+                    <style>
+                        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+                        .print-container { text-align: center; max-width: 400px; margin: 0 auto; }
+                        .goods-name { font-size: 18px; font-weight: bold; margin-bottom: 20px; }
+                        .barcode-container, .qr-container { margin-bottom: 20px; padding: 10px; border: 1px solid #ddd; border-radius: 4px; }
+                        .barcode-text { font-size: 16px; font-weight: bold; margin-top: 10px; }
+                        .qr-title { font-size: 14px; color: #666; margin-bottom: 10px; }
+                        @media print {
+                            body { padding: 0; }
+                            .no-print { display: none; }
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="print-container">
+                        ${printContentCopy.innerHTML}
+                    </div>
+                </body>
+                </html>
+            `;
+
+            // 打开新窗口打印
+            const printWindow = window.open('', '_blank');
+            printWindow.document.write(printHTML);
+            printWindow.document.close();
+            printWindow.focus();
+
+            // 等待内容加载完成后执行打印
+            printWindow.onload = function() {
+                // 检查打印窗口内容是否加载完成
+                if (printWindow.document.readyState === 'complete') {
+                    // 使用 setTimeout 确保内容完全渲染
+                    setTimeout(function() {
+                        printWindow.print();
+                        // 打印完成后关闭窗口
+                        printWindow.onafterprint = function() {
+                            printWindow.close();
+                        };
+                    }, 500);
+                }
+            };
+
+            // 关闭模态框
+            document.getElementById('printModal').classList.add('hidden');
+        }
+
+        // 显示提示消息
+        function showToast(message, type = 'success') {
+            toastMessage.textContent = message;
+            
+            // 设置颜色
+            if (type === 'error') {
+                toast.classList.remove('bg-green-500');
+                toast.classList.add('bg-red-500');
+            } else {
+                toast.classList.remove('bg-red-500');
+                toast.classList.add('bg-green-500');
+            }
+            
+            // 显示
+            toast.classList.remove('hidden');
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-0');
+                toast.classList.add('translate-y-2', 'opacity-100');
+            }, 10);
+            
+            // 自动隐藏
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-100');
+                toast.classList.add('translate-y-0', 'opacity-0');
+                
+                setTimeout(() => {
+                    toast.classList.add('hidden');
+                }, 300);
+            }, 3000);
+        }
+        
+        // 导出货物数据
+        async function exportGoods() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/goods/export`, {
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    }
+                });
+
+                if (!response.ok) {
+                    throw new Error('导出失败');
+                }
+
+                // 获取 blob 数据
+                const blob = await response.blob();
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'goods_export.xlsx';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                showToast('导出成功');
+            } catch (error) {
+                console.error('导出失败:', error);
+                showToast('导出失败: ' + error.message, 'error');
+            }
+        }
+
+        // 导入货物数据
+        async function importGoods() {
+            if (!currentUser || currentUser.role !== 'admin') {
+                showToast('无权限导入货物', 'error');
+                return;
+            }
+            const file = importFile.files[0];
+            if (!file) {
+                showToast('请选择要导入的文件', 'error');
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('file', file);
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/goods/import`, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    },
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '导入失败');
+                }
+
+                const result = await response.json();
+
+                // 显示导入结果
+                importResult.classList.remove('hidden');
+                importSuccess.textContent = `成功导入 ${result.success_count} 条货物数据`;
+
+                if (result.error_count > 0) {
+                    importErrors.innerHTML = `失败 ${result.error_count} 条：<br>` + result.errors.join('<br>');
+                } else {
+                    importErrors.textContent = '';
+                }
+
+                // 重新加载货物数据
+                await loadGoodsData();
+            } catch (error) {
+                console.error('导入失败:', error);
+                showToast('导入失败: ' + error.message, 'error');
+            }
+        }
+
+        // 设置事件监听器
+        function setupEventListeners() {
+            // 导出按钮
+            exportGoodsBtn.addEventListener('click', exportGoods);
+
+            // 导入按钮
+            importGoodsBtn.addEventListener('click', function() {
+                importModal.classList.remove('hidden');
+                importResult.classList.add('hidden');
+                importFile.value = '';
+            });
+
+            // 取消导入
+            cancelImportBtn.addEventListener('click', function() {
+                importModal.classList.add('hidden');
+                importFile.value = '';
+            });
+
+            // 确认导入
+            confirmImportBtn.addEventListener('click', importGoods);
+
+            // 侧边栏切换
+            sidebarToggle.addEventListener('click', function() {
+                sidebar.classList.toggle('hidden');
+            });
+            
+            // 仓库选择器下拉菜单
+            warehouseSelector.addEventListener('click', function(e) {
+                e.stopPropagation();
+                warehouseDropdown.classList.toggle('hidden');
+                userDropdown.classList.add('hidden');
+            });
+            
+            // 用户菜单下拉
+            userMenu.addEventListener('click', function(e) {
+                e.stopPropagation();
+                userDropdown.classList.toggle('hidden');
+                warehouseDropdown.classList.add('hidden');
+            });
+            
+            // 点击页面其他地方关闭下拉菜单
+            document.addEventListener('click', function() {
+                warehouseDropdown.classList.add('hidden');
+                userDropdown.classList.add('hidden');
+            });
+            
+            // 退出登录
+            logoutButton.addEventListener('click', function(e) {
+                e.preventDefault();
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('user');
+                localStorage.removeItem('token_expiry');
+                sessionStorage.removeItem('access_token');
+                sessionStorage.removeItem('user');
+                sessionStorage.removeItem('token_expiry');
+                window.location.href = 'index.html';
+            });
+            
+            // 新增货物按钮
+            addGoodsBtn.addEventListener('click', openAddModal);
+            
+            // 取消按钮
+            cancelBtn.addEventListener('click', function() {
+                goodsModal.classList.add('hidden');
+            });
+            
+            // 保存按钮
+            saveBtn.addEventListener('click', saveGoods);
+            
+            // 取消删除按钮
+            cancelDeleteBtn.addEventListener('click', function() {
+                deleteModal.classList.add('hidden');
+            });
+            
+            // 确认删除按钮
+            confirmDeleteBtn.addEventListener('click', deleteGoods);
+            
+            // 刷新按钮
+            refreshBtn.addEventListener('click', loadGoodsData);
+            
+            // 搜索输入
+            searchInput.addEventListener('input', function() {
+                applyFilters();
+                renderGoodsTable();
+            });
+
+            // 筛选按钮
+            filterBtn.addEventListener('click', function() {
+                applyFilters();
+                renderGoodsTable();
+            });
+
+            // 打印模态框事件
+            document.getElementById('cancelPrintBtn').addEventListener('click', function() {
+                document.getElementById('printModal').classList.add('hidden');
+            });
+
+            document.getElementById('confirmPrintBtn').addEventListener('click', function() {
+                printBarcode();
+            });
+
+            // 分页按钮事件监听器
+            const prevPageBtn = document.querySelector('.pagination .prev');
+            const nextPageBtn = document.querySelector('.pagination .next');
+
+            if (prevPageBtn) {
+                prevPageBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    if (currentPage > 1) {
+                        currentPage--;
+                        renderGoodsTable();
+                    }
+                });
+            }
+
+            if (nextPageBtn) {
+                nextPageBtn.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const totalPages = Math.ceil(filteredGoods.length / pageSize);
+                    if (currentPage < totalPages) {
+                        currentPage++;
+                        renderGoodsTable();
+                    }
+                });
+            }
+        }
+        
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', pageInit);
+    </script>
+</body>
+</html>

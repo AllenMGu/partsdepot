@@ -1,0 +1,29 @@
+<view class="container">
+  <view class="card">
+    <view class="title">{{user.full_name || "-"}}</view>
+    <view class="subtitle">账号：{{user.username}}</view>
+    <view class="subtitle">角色：{{user.role}}</view>
+    <view class="subtitle">当前仓库：{{user.current_warehouse_name || "未选择"}}</view>
+  </view>
+
+  <view class="card">
+    <view class="subtitle" style="margin-bottom: 10rpx;">切换仓库</view>
+    <view wx:for="{{warehouses}}" wx:key="id" class="warehouse-item">
+      <view class="row">
+        <text>{{item.name}} ({{item.code}})</text>
+        <button
+          size="mini"
+          class="{{item.id===user.current_warehouse_id ? 'btn-primary' : 'btn-ghost'}}"
+          data-id="{{item.id}}"
+          data-name="{{item.name}}"
+          bindtap="switchWarehouse"
+          disabled="{{item.id===user.current_warehouse_id}}"
+        >
+          {{item.id===user.current_warehouse_id ? '当前' : '切换'}}
+        </button>
+      </view>
+    </view>
+  </view>
+
+  <button class="btn-primary" bindtap="logout">退出登录</button>
+</view>

@@ -1,0 +1,36 @@
+{
+  "pages": [
+    "pages/login/index",
+    "pages/home/index",
+    "pages/stock/index",
+    "pages/scan/index",
+    "pages/logs/index",
+    "pages/profile/index",
+    "pages/orders/index",
+    "pages/inbound/index",
+    "pages/outbound/index",
+    "pages/check-order/index"
+  ],
+  "lazyCodeLoading": "requiredComponents",
+  "window": {
+    "navigationBarTitleText": "WMS",
+    "navigationBarBackgroundColor": "#ffffff",
+    "navigationBarTextStyle": "black",
+    "backgroundTextStyle": "light"
+  },
+  "tabBar": {
+    "color": "#666666",
+    "selectedColor": "#1f6feb",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "\u9996\u9875" },
+      { "pagePath": "pages/stock/index", "text": "\u5e93\u5b58" },
+      { "pagePath": "pages/scan/index", "text": "\u626b\u7801" },
+      { "pagePath": "pages/logs/index", "text": "\u65e5\u5fd7" },
+      { "pagePath": "pages/profile/index", "text": "\u6211\u7684" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

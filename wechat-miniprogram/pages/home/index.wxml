@@ -1,0 +1,20 @@
+<view class="container">
+  <view class="card">
+    <view class="title">你好，{{user.full_name || user.username}}</view>
+    <view class="subtitle">当前仓库：{{user.current_warehouse_name || "未选择"}}</view>
+  </view>
+
+  <view class="card">
+    <view class="row"><text>库存条目</text><text>{{stockCount}}</text></view>
+    <view class="row" style="margin-top:12rpx;"><text>库存总量</text><text>{{totalQty}}</text></view>
+    <view class="row" style="margin-top:12rpx;"><text>最近日志</text><text>{{logsCount}}</text></view>
+  </view>
+
+  <view class="card">
+    <view class="subtitle" style="margin-bottom: 12rpx;">快捷操作</view>
+    <button class="btn-ghost" style="margin-bottom:12rpx;" bindtap="goOrders">单据中心</button>
+    <button class="btn-primary" bindtap="goScan">扫码出入库/盘点</button>
+    <button class="btn-ghost" style="margin-top:12rpx;" bindtap="goStock">查看库存</button>
+    <button class="btn-ghost" style="margin-top:12rpx;" bindtap="logout">退出登录</button>
+  </view>
+</view>

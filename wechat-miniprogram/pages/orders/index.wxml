@@ -1,0 +1,30 @@
+<view class="container">
+  <view class="card">
+    <view class="title">单据流程</view>
+    <view class="subtitle">选择要处理的业务单据</view>
+  </view>
+
+  <view class="card nav-card" bindtap="goInbound">
+    <view class="row">
+      <text>入库单</text>
+      <text>></text>
+    </view>
+    <view class="subtitle">创建、加明细、提交入库</view>
+  </view>
+
+  <view class="card nav-card" bindtap="goOutbound">
+    <view class="row">
+      <text>出库单</text>
+      <text>></text>
+    </view>
+    <view class="subtitle">创建、加明细、提交出库</view>
+  </view>
+
+  <view class="card nav-card" bindtap="goCheck">
+    <view class="row">
+      <text>盘点单</text>
+      <text>></text>
+    </view>
+    <view class="subtitle">创建、录入盘点、完成盘点</view>
+  </view>
+</view>

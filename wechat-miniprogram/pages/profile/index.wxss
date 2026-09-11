@@ -1,0 +1,4 @@
+.warehouse-item {
+  border-top: 1rpx solid #eef2f7;
+  padding: 16rpx 0;
+}

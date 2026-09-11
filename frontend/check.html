@@ -1,0 +1,1311 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>盘点管理 - 备件管理系统</title>
+    <!-- Tailwind CSS v3 -->
+    <link href="assets/css/tailwind.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="assets/css/font-awesome.min.css" rel="stylesheet">
+    <!-- ZXing JavaScript Library for barcode/qr code scanning -->
+    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <!-- SheetJS for Excel export -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <!-- 统一的 Tailwind 配置 -->
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+    <!-- 顶部状态栏 -->
+    <header class="bg-white shadow-sm z-10">
+        <div class="flex items-center justify-between px-4 py-3">
+            <!-- 左侧：Logo和菜单按钮 -->
+            <div class="flex items-center">
+                <button id="sidebarToggle" class="mr-4 text-gray-600 focus:outline-none lg:hidden">
+                    <i class="fa fa-bars text-xl"></i>
+                </button>
+                <div class="flex items-center">
+                    <img src="assets/images/logo.png" alt="Logo" class="h-8 w-8">
+                    <span class="ml-2 text-lg font-semibold text-gray-800 hidden sm:block">备件管理系统</span>
+                </div>
+            </div>
+
+            <!-- 右侧：仓库选择、通知和用户信息 -->
+            <div class="flex items-center space-x-4">
+                <!-- 仓库选择 -->
+                <div class="relative" id="warehouseSelector">
+                    <button class="flex items-center text-gray-700 hover:text-primary focus:outline-none">
+                        <i class="fa fa-building-o mr-2"></i>
+                        <span id="currentWarehouse">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs"></i>
+                    </button>
+                    <div id="warehouseDropdown" class="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <div class="px-4 py-2 text-sm text-gray-400">选择仓库</div>
+                            <div id="warehouseList" class="max-h-64 overflow-y-auto">
+                                <!-- 仓库列表将通过JS动态生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 通知 -->
+                <div class="relative">
+                    <button class="text-gray-600 hover:text-primary focus:outline-none">
+                        <i class="fa fa-bell-o text-xl"></i>
+                        <span class="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full"></span>
+                    </button>
+                </div>
+
+                <!-- 用户信息 -->
+                <div class="relative" id="userMenu">
+                    <button class="flex items-center focus:outline-none">
+                        <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center">
+                            <span id="userInitials">U</span>
+                        </div>
+                        <span class="ml-2 text-sm font-medium text-gray-700 hidden md:block" id="userName">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs text-gray-500 hidden md:block"></i>
+                    </button>
+                    <div id="userDropdown" class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-user-circle mr-2"></i> 个人资料
+                            </a>
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-cog mr-2"></i> 设置
+                            </a>
+                            <hr class="my-1">
+                            <a href="#" id="logoutButton" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-sign-out mr-2"></i> 退出登录
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- 侧边导航栏 -->
+        <aside id="sidebar" class="bg-white w-64 shadow-md hidden lg:block flex-shrink-0 transition-all-300">
+            <nav class="mt-5 px-2">
+                <a href="dashboard.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-dashboard sidebar-icon"></i>
+                    <span>仪表盘</span>
+                </a>
+                <a href="warehouse.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-building sidebar-icon"></i>
+                    <span>仓库管理</span>
+                </a>
+                <a href="location.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-map-marker sidebar-icon"></i>
+                    <span>库位管理</span>
+                </a>
+                <a href="goods.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-cubes sidebar-icon"></i>
+                    <span>货物管理</span>
+                </a>
+                <a href="stock.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-list sidebar-icon"></i>
+                    <span>库存查询</span>
+                </a>
+                <a href="scan.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-qrcode sidebar-icon"></i>
+                    <span>扫码出入库</span>
+                </a>
+                <a href="inbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-down sidebar-icon"></i>
+                    <span>入库单管理</span>
+                </a>
+                <a href="outbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-up sidebar-icon"></i>
+                    <span>出库单管理</span>
+                </a>
+                <a href="check.html" class="sidebar-active flex items-center px-4 py-3 rounded-md mb-1">
+                    <i class="fa fa-check-square-o sidebar-icon"></i>
+                    <span>盘点管理</span>
+                </a>
+                <a href="user.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-users sidebar-icon"></i>
+                    <span>用户管理</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="flex-1 overflow-y-auto p-6">
+            <!-- 页面标题 -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">盘点管理</h1>
+                <p class="text-gray-600">进行库存盘点单管理和盘点操作</p>
+            </div>
+
+            <!-- 统计卡片 -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
+                <div class="bg-white rounded-lg shadow p-6 card-hover">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-blue-100 text-blue-600">
+                            <i class="fa fa-calendar-check-o text-xl"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">今日盘点单</p>
+                            <p class="text-2xl font-semibold text-gray-800" id="todayCheckOrders">0</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6 card-hover">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-green-100 text-green-600">
+                            <i class="fa fa-check-circle text-xl"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">已完成</p>
+                            <p class="text-2xl font-semibold text-gray-800" id="completedOrders">0</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6 card-hover">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-yellow-100 text-yellow-600">
+                            <i class="fa fa-exclamation-circle text-xl"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">盘点中</p>
+                            <p class="text-2xl font-semibold text-gray-800" id="inProgressOrders">0</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-lg shadow p-6 card-hover">
+                    <div class="flex items-center">
+                        <div class="p-3 rounded-full bg-purple-100 text-purple-600">
+                            <i class="fa fa-cubes text-xl"></i>
+                        </div>
+                        <div class="ml-4">
+                            <p class="text-sm font-medium text-gray-600">待盘点</p>
+                            <p class="text-2xl font-semibold text-gray-800" id="draftOrders">0</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 创建盘点单按钮 -->
+            <div class="mb-6">
+                <button id="createCheckOrderBtn" class="px-6 py-3 bg-primary text-white rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
+                    <i class="fa fa-plus mr-2"></i> 创建盘点单
+                </button>
+            </div>
+
+            <!-- 盘点单列表 -->
+            <div class="bg-white rounded-lg shadow p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-800">盘点单列表</h2>
+                    <div class="flex items-center space-x-4">
+                        <select id="statusFilter" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                            <option value="">全部状态</option>
+                            <option value="DRAFT">待盘点</option>
+                            <option value="IN_PROGRESS">盘点中</option>
+                            <option value="COMPLETED">已完成</option>
+                        </select>
+                        <input type="date" id="startDateFilter" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                        <input type="date" id="endDateFilter" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                        <button id="refreshOrders" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">
+                            <i class="fa fa-refresh mr-1"></i> 刷新
+                        </button>
+                    </div>
+                </div>
+
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    盘点单号
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    仓库
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    操作员
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    明细数量
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    状态
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    创建时间
+                                </th>
+                                <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                    操作
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody id="checkOrdersTableBody" class="bg-white divide-y divide-gray-200">
+                            <tr>
+                                <td colspan="7" class="px-6 py-4 text-center text-gray-500">
+                                    暂无盘点单数据
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- 分页控件 -->
+                <div id="pagination" class="mt-4 flex items-center justify-between">
+                    <div class="text-sm text-gray-700">
+                        显示第 <span id="startItem">1</span> 到 <span id="endItem">0</span> 条，共 <span id="totalItems">0</span> 条记录
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <button id="firstPageBtn" class="px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50" disabled>
+                            <i class="fa fa-angle-double-left"></i> 第一页
+                        </button>
+                        <button id="prevPageBtn" class="px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50" disabled>
+                            <i class="fa fa-angle-left"></i> 上一页
+                        </button>
+                        <div class="flex items-center space-x-1">
+                            <span class="text-sm text-gray-700">第 <span id="currentPage">1</span> 页 / 共 <span id="totalPages">1</span> 页</span>
+                        </div>
+                        <button id="nextPageBtn" class="px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50" disabled>
+                            下一页 <i class="fa fa-angle-right"></i>
+                        </button>
+                        <button id="lastPageBtn" class="px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50" disabled>
+                            最后一页 <i class="fa fa-angle-double-right"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 盘点操作区 -->
+            <div id="checkOperationSection" class="grid grid-cols-1 lg:grid-cols-2 gap-6 hidden">
+                <!-- 左侧：扫码盘点 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">扫码盘点</h2>
+
+                    <div class="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                        <div class="flex items-center">
+                            <i class="fa fa-info-circle text-blue-500 mr-2"></i>
+                            <div>
+                                <div class="font-medium text-blue-800">当前盘点单</div>
+                                <div class="text-sm text-blue-600" id="currentOrderInfo">未选择盘点单</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <form id="checkForm" class="space-y-6">
+                        <!-- 货物条码 -->
+                        <div>
+                            <label for="goodsBarcode" class="block text-sm font-medium text-gray-700 mb-1">货物条码 <span class="text-red-500">*</span></label>
+                            <div class="flex">
+                                <input type="text" id="goodsBarcode" name="goodsBarcode" class="flex-1 px-4 py-3 border border-gray-300 rounded-l-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent scan-input" placeholder="扫描货物条码" required>
+                                <button type="button" id="scanGoodsBtn" class="px-4 py-3 bg-primary text-white rounded-r-md hover:bg-secondary">
+                                    <i class="fa fa-qrcode"></i>
+                                </button>
+                            </div>
+                            <div id="goodsInfo" class="mt-2 hidden">
+                                <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                                    <div class="flex items-center">
+                                        <i class="fa fa-check-circle text-green-500 mr-2"></i>
+                                        <div>
+                                            <div class="font-medium text-green-800" id="goodsName"></div>
+                                            <div class="text-sm text-green-600" id="goodsSpec"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 库位编码 -->
+                        <div>
+                            <label for="locationCode" class="block text-sm font-medium text-gray-700 mb-1">库位编码 <span class="text-red-500">*</span></label>
+                            <select id="locationCode" name="locationCode" class="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" required>
+                                <option value="">请选择库位</option>
+                            </select>
+                            <div id="locationInfo" class="mt-2 hidden">
+                                <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                                    <div class="flex items-center">
+                                        <i class="fa fa-check-circle text-green-500 mr-2"></i>
+                                        <div>
+                                            <div class="font-medium text-green-800" id="locationName"></div>
+                                            <div class="text-sm text-green-600" id="locationWarehouse"></div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 盘点数量 -->
+                        <div>
+                            <label for="checkQuantity" class="block text-sm font-medium text-gray-700 mb-1">盘点数量 <span class="text-red-500">*</span></label>
+                            <input type="number" id="checkQuantity" name="checkQuantity" class="w-full px-4 py-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="请输入实际盘点数量" min="0" step="0.01" required>
+                        </div>
+
+                        <!-- 当前库存 -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">系统库存</label>
+                            <div class="px-4 py-3 bg-gray-50 border border-gray-300 rounded-md">
+                                <span id="currentStock" class="text-lg font-medium">-</span>
+                            </div>
+                        </div>
+
+                        <!-- 操作按钮 -->
+                        <div class="flex space-x-3">
+                            <button type="submit" id="submitCheck" class="flex-1 px-6 py-3 bg-primary text-white rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
+                                <i class="fa fa-check mr-2"></i> 确认盘点
+                            </button>
+                            <button type="button" id="resetForm" class="px-6 py-3 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500">
+                                <i class="fa fa-refresh mr-2"></i> 重置
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- 右侧：盘点明细 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <h2 class="text-lg font-semibold text-gray-800">盘点明细</h2>
+                        <div class="space-x-2">
+                            <button id="completeOrderBtn" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700" disabled>
+                                <i class="fa fa-check-circle mr-1"></i> 完成盘点
+                            </button>
+                            <button id="exportOrderBtn" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-secondary" disabled>
+                                <i class="fa fa-file-excel-o mr-1"></i> 导出报告
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3 max-h-96 overflow-y-auto" id="checkOrderItems">
+                        <div class="text-center text-gray-500 py-8">
+                            <i class="fa fa-list text-4xl mb-2"></i>
+                            <p>暂无盘点明细</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 扫码模态框 -->
+    <div id="scanModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-lg">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-semibold text-gray-800">扫码</h3>
+                <button id="closeScanModal" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <div class="text-center">
+                <div id="qr-reader" class="mx-auto mb-4"></div>
+                <p class="text-sm text-gray-500 mb-4">请将货物条码对准摄像头</p>
+                <button id="stopScanBtn" class="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">
+                    停止扫码
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 盘点结果模态框 -->
+    <div id="resultModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+            <div class="text-center">
+                <div id="resultIcon" class="mx-auto mb-4 text-5xl"></div>
+                <h3 id="resultTitle" class="text-xl font-semibold mb-2"></h3>
+                <div id="resultContent" class="text-gray-600 mb-6"></div>
+                <div class="flex justify-center space-x-3">
+                    <button id="nextScanBtn" class="px-6 py-2 bg-primary text-white rounded-md hover:bg-secondary hidden">
+                        <i class="fa fa-qrcode mr-2"></i> 继续扫码
+                    </button>
+                    <button id="closeResultModal" class="px-6 py-2 bg-primary text-white rounded-md hover:bg-secondary">
+                        确定
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建盘点单模态框 -->
+    <div id="createOrderModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-semibold text-gray-800">创建盘点单</h3>
+                <button id="closeCreateOrderModal" class="text-gray-500 hover:text-gray-700">
+                    <i class="fa fa-times text-xl"></i>
+                </button>
+            </div>
+            <form id="createOrderForm" class="space-y-4">
+                <div>
+                    <label for="orderRemark" class="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                    <textarea id="orderRemark" name="remark" rows="3" class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="请输入备注信息"></textarea>
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" id="cancelCreateOrder" class="px-6 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">
+                        取消
+                    </button>
+                    <button type="submit" id="confirmCreateOrder" class="px-6 py-2 bg-primary text-white rounded-md hover:bg-secondary">
+                        <i class="fa fa-check mr-2"></i> 确认创建
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 通用脚本 -->
+    <script src="assets/js/common.js"></script>
+
+    <!-- 页面特定脚本 -->
+    <script>
+        // 页面特定变量
+        let checkOrders = [];
+        let currentCheckOrder = null;
+        let locationData = []; // 库位数据
+        let goodsCache = new Map();
+        let locationCache = new Map();
+        let currentStock = 0;
+        let codeReader = null; // ZXing 条码阅读器
+        let videoInputDevices = []; // 视频输入设备列表
+        let currentDeviceId = null; // 当前使用的设备ID
+        let currentPage = 1;
+        let pageSize = 10;
+        let totalPages = 1;
+        let totalCount = 0;
+
+        // 页面初始化
+        function pageInit() {
+            loadLocationData(); // 加载库位数据
+            loadCheckOrderStatistics(); // 加载统计数据
+            loadCheckOrders(); // 加载盘点单列表
+            setupCheckEventListeners();
+        }
+
+        // 加载库位数据
+        async function loadLocationData() {
+            try {
+                const response = await fetch(`${API_BASE_URL}/locations/`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取库位数据失败');
+                }
+
+                locationData = await response.json();
+                // 只保留当前仓库的库位数据（用户有权限的库位）
+                if (currentWarehouse) {
+                    locationData = locationData.filter(location => location.warehouse_id === currentWarehouse.id);
+                }
+                // 填充库位下拉框
+                const locationSelect = document.getElementById('locationCode');
+                locationSelect.innerHTML = '<option value="">请选择库位</option>';
+                locationData.forEach(location => {
+                    const option = document.createElement('option');
+                    option.value = location.location_code;
+                    option.textContent = `${location.location_code} - ${location.name}`;
+                    locationSelect.appendChild(option);
+                    // 同时添加到缓存中
+                    locationCache.set(location.location_code, location);
+                });
+            } catch (error) {
+                console.error('加载库位数据失败:', error);
+                showToast('加载库位数据失败', 'error');
+            }
+        }
+
+        // 加载盘点单统计
+        async function loadCheckOrderStatistics() {
+            try {
+                // 获取今日日期
+                const today = new Date().toISOString().split('T')[0];
+                const params = new URLSearchParams();
+                params.append('start_date', today);
+                params.append('end_date', today);
+
+                const response = await fetch(`${API_BASE_URL}/check-orders/?${params.toString()}`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取盘点单统计失败');
+                }
+
+                const result = await response.json();
+                const orders = result.data || [];
+
+                // 统计数据
+                const todayOrders = orders.length;
+                const completedOrders = orders.filter(order => order.status === 'COMPLETED').length;
+                const inProgressOrders = orders.filter(order => order.status === 'IN_PROGRESS').length;
+                const draftOrders = orders.filter(order => order.status === 'DRAFT').length;
+
+                // 更新统计卡片
+                document.getElementById('todayCheckOrders').textContent = todayOrders;
+                document.getElementById('completedOrders').textContent = completedOrders;
+                document.getElementById('inProgressOrders').textContent = inProgressOrders;
+                document.getElementById('draftOrders').textContent = draftOrders;
+
+            } catch (error) {
+                console.error('加载盘点单统计失败:', error);
+                showToast('加载盘点单统计失败', 'error');
+            }
+        }
+
+        // 加载盘点单列表
+        async function loadCheckOrders(page = 1) {
+            currentPage = page;
+            try {
+                const params = new URLSearchParams();
+
+                // 添加仓库筛选
+                if (currentWarehouse && currentWarehouse.id) {
+                    params.append('warehouse_id', currentWarehouse.id);
+                }
+
+                // 添加状态筛选
+                const statusFilter = document.getElementById('statusFilter').value;
+                if (statusFilter) {
+                    params.append('status', statusFilter);
+                }
+
+                // 添加日期筛选
+                const startDate = document.getElementById('startDateFilter').value;
+                const endDate = document.getElementById('endDateFilter').value;
+                if (startDate) {
+                    params.append('start_date', startDate);
+                }
+                if (endDate) {
+                    params.append('end_date', endDate);
+                }
+
+                // 添加分页参数
+                params.append('page', currentPage);
+                params.append('page_size', pageSize);
+
+                const response = await fetch(`${API_BASE_URL}/check-orders/?${params.toString()}`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取盘点单列表失败');
+                }
+
+                const result = await response.json();
+                checkOrders = result.data || [];
+                totalCount = result.total || 0;
+                totalPages = Math.ceil(totalCount / pageSize);
+
+                updateCheckOrdersTable();
+                updatePagination();
+
+            } catch (error) {
+                console.error('加载盘点单列表失败:', error);
+                showToast('加载盘点单列表失败', 'error');
+            }
+        }
+
+        // 更新盘点单列表
+        function updateCheckOrdersTable() {
+            const tbody = document.getElementById('checkOrdersTableBody');
+
+            if (checkOrders.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="7" class="px-6 py-4 text-center text-gray-500">
+                            暂无盘点单数据
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            tbody.innerHTML = checkOrders.map(order => {
+                // 状态显示
+                let statusText, statusClass;
+                switch (order.status) {
+                    case 'DRAFT':
+                        statusText = '待盘点';
+                        statusClass = 'bg-gray-100 text-gray-800';
+                        break;
+                    case 'IN_PROGRESS':
+                        statusText = '盘点中';
+                        statusClass = 'bg-yellow-100 text-yellow-800';
+                        break;
+                    case 'COMPLETED':
+                        statusText = '已完成';
+                        statusClass = 'bg-green-100 text-green-800';
+                        break;
+                    default:
+                        statusText = '未知';
+                        statusClass = 'bg-gray-100 text-gray-800';
+                }
+
+                return `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4">
+                            <div class="text-sm font-medium text-gray-900">${order.order_no}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-sm text-gray-900">${order.warehouse_name}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-sm text-gray-900">${order.operator_name}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-sm text-gray-900">${order.item_count}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <span class="px-2 py-1 text-xs font-medium rounded-full ${statusClass}">
+                                ${statusText}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-sm text-gray-500">${formatDateTime(order.create_time)}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="flex space-x-2">
+                                <button onclick="viewCheckOrder(${order.id})" class="px-3 py-1 bg-info text-white text-sm rounded-md hover:bg-primary">
+                                    <i class="fa fa-eye mr-1"></i> 查看
+                                </button>
+                                ${order.status !== 'COMPLETED' ? `
+                                    <button onclick="startCheckOrder(${order.id})" class="px-3 py-1 bg-primary text-white text-sm rounded-md hover:bg-secondary">
+                                        <i class="fa fa-qrcode mr-1"></i> 扫码盘点
+                                    </button>
+                                ` : ''}
+                                ${order.status === 'COMPLETED' ? `
+                                    <button onclick="exportCheckOrder(${order.id})" class="px-3 py-1 bg-success text-white text-sm rounded-md hover:bg-green-700">
+                                        <i class="fa fa-file-excel-o mr-1"></i> 导出
+                                    </button>
+                                ` : ''}
+                            </div>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        // 更新分页控件
+        function updatePagination() {
+            // 计算显示的项目范围
+            const startItem = (currentPage - 1) * pageSize + 1;
+            const endItem = Math.min(currentPage * pageSize, totalCount);
+
+            // 更新文本显示
+            document.getElementById('startItem').textContent = startItem;
+            document.getElementById('endItem').textContent = endItem;
+            document.getElementById('totalItems').textContent = totalCount;
+            document.getElementById('currentPage').textContent = currentPage;
+            document.getElementById('totalPages').textContent = totalPages;
+
+            // 更新按钮状态
+            document.getElementById('firstPageBtn').disabled = currentPage <= 1;
+            document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
+            document.getElementById('lastPageBtn').disabled = currentPage >= totalPages;
+        }
+
+        // 设置事件监听器
+        function setupCheckEventListeners() {
+            // 创建盘点单按钮
+            document.getElementById('createCheckOrderBtn').addEventListener('click', openCreateOrderModal);
+
+            // 筛选事件
+            document.getElementById('statusFilter').addEventListener('change', () => loadCheckOrders(1));
+            document.getElementById('startDateFilter').addEventListener('change', () => loadCheckOrders(1));
+            document.getElementById('endDateFilter').addEventListener('change', () => loadCheckOrders(1));
+            document.getElementById('refreshOrders').addEventListener('click', () => loadCheckOrders(1));
+
+            // 分页事件
+            document.getElementById('firstPageBtn').addEventListener('click', () => loadCheckOrders(1));
+            document.getElementById('prevPageBtn').addEventListener('click', () => loadCheckOrders(currentPage - 1));
+            document.getElementById('nextPageBtn').addEventListener('click', () => loadCheckOrders(currentPage + 1));
+            document.getElementById('lastPageBtn').addEventListener('click', () => loadCheckOrders(totalPages));
+
+            // 扫码按钮
+            document.getElementById('scanGoodsBtn').addEventListener('click', function() {
+                openScanModal('goods');
+            });
+
+            // 货物条码输入
+            document.getElementById('goodsBarcode').addEventListener('input', function() {
+                if (this.value.trim()) {
+                    validateGoods(this.value.trim());
+                } else {
+                    document.getElementById('goodsInfo').classList.add('hidden');
+                    updateCurrentStock();
+                }
+            });
+
+            // 库位编码选择
+            document.getElementById('locationCode').addEventListener('change', function() {
+                if (this.value.trim()) {
+                    validateLocation(this.value.trim());
+                } else {
+                    document.getElementById('locationInfo').classList.add('hidden');
+                    updateCurrentStock();
+                }
+            });
+
+            // 扫码模态框事件
+            document.getElementById('closeScanModal').addEventListener('click', closeScanModal);
+            document.getElementById('stopScanBtn').addEventListener('click', closeScanModal);
+
+            // 表单提交
+            document.getElementById('checkForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                handleCheckSubmit();
+            });
+
+            // 重置按钮
+            document.getElementById('resetForm').addEventListener('click', resetForm);
+
+            // 完成盘点按钮
+            document.getElementById('completeOrderBtn').addEventListener('click', completeCheckOrder);
+
+            // 导出报告按钮
+            document.getElementById('exportOrderBtn').addEventListener('click', exportCheckOrder);
+
+            // 结果模态框
+            document.getElementById('closeResultModal').addEventListener('click', function() {
+                document.getElementById('resultModal').classList.add('hidden');
+            });
+            document.getElementById('nextScanBtn').addEventListener('click', function() {
+                document.getElementById('resultModal').classList.add('hidden');
+                resetForm();
+            });
+
+            // 创建盘点单模态框
+            document.getElementById('closeCreateOrderModal').addEventListener('click', closeCreateOrderModal);
+            document.getElementById('cancelCreateOrder').addEventListener('click', closeCreateOrderModal);
+            document.getElementById('createOrderForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                createCheckOrder();
+            });
+        }
+
+        // 打开创建盘点单模态框
+        function openCreateOrderModal() {
+            document.getElementById('createOrderModal').classList.remove('hidden');
+            document.getElementById('orderRemark').value = '';
+        }
+
+        // 关闭创建盘点单模态框
+        function closeCreateOrderModal() {
+            document.getElementById('createOrderModal').classList.add('hidden');
+        }
+
+        // 创建盘点单
+        async function createCheckOrder() {
+            const remark = document.getElementById('orderRemark').value.trim();
+
+            try {
+                const data = {
+                    remark: remark
+                };
+
+                if (currentWarehouse && currentWarehouse.id) {
+                    data.warehouse_id = currentWarehouse.id;
+                }
+
+                const response = await fetch(`${API_BASE_URL}/check-orders/`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify(data)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '创建盘点单失败');
+                }
+
+                const result = await response.json();
+
+                // 显示成功消息
+                showToast('盘点单创建成功', 'success');
+                closeCreateOrderModal();
+
+                // 刷新数据
+                loadCheckOrderStatistics();
+                loadCheckOrders();
+
+                // 自动开始盘点
+                startCheckOrder(result.id);
+
+            } catch (error) {
+                console.error('创建盘点单失败:', error);
+                showToast(error.message, 'error');
+            }
+        }
+
+        // 查看盘点单详情
+        async function viewCheckOrder(orderId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/check-orders/${orderId}`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取盘点单详情失败');
+                }
+
+                const orderData = await response.json();
+                currentCheckOrder = orderData;
+
+                // 显示操作区
+                document.getElementById('checkOperationSection').classList.remove('hidden');
+                document.getElementById('currentOrderInfo').textContent = `${orderData.header.order_no} - ${orderData.header.warehouse_name}`;
+
+                // 更新明细列表
+                updateCheckOrderItems();
+
+                // 禁用/启用按钮
+                document.getElementById('completeOrderBtn').disabled = orderData.header.status === 'COMPLETED';
+                document.getElementById('exportOrderBtn').disabled = orderData.header.status !== 'COMPLETED';
+
+            } catch (error) {
+                console.error('查看盘点单详情失败:', error);
+                showToast('查看盘点单详情失败', 'error');
+            }
+        }
+
+        // 开始盘点
+        async function startCheckOrder(orderId) {
+            await viewCheckOrder(orderId);
+        }
+
+        // 更新盘点明细列表
+        function updateCheckOrderItems() {
+            const container = document.getElementById('checkOrderItems');
+
+            if (!currentCheckOrder || !currentCheckOrder.items || currentCheckOrder.items.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center text-gray-500 py-8">
+                        <i class="fa fa-list text-4xl mb-2"></i>
+                        <p>暂无盘点明细</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = currentCheckOrder.items.map(item => {
+                const isMatched = Math.abs(item.diff_quantity) < 0.01;
+                const itemClass = isMatched ? 'bg-green-50 border-green-200 text-green-800' : 'bg-yellow-50 border-yellow-200 text-yellow-800';
+                const diffClass = isMatched ? 'text-green-600' : 'text-red-600';
+
+                return `
+                    <div class="p-3 ${itemClass} border rounded-md">
+                        <div class="flex items-center justify-between">
+                            <div class="flex items-center">
+                                <i class="fa ${isMatched ? 'fa-check-circle' : 'fa-exclamation-circle'} mr-2"></i>
+                                <span class="font-medium">${item.goods_name}</span>
+                            </div>
+                            <span class="text-xs text-gray-500">${formatDateTime(item.create_time)}</span>
+                        </div>
+                        <div class="mt-2 space-y-1 text-sm">
+                            <div class="flex justify-between">
+                                <span>条码:</span>
+                                <span class="font-medium">${item.goods_barcode}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>库位:</span>
+                                <span>${item.location_code}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>系统库存:</span>
+                                <span>${item.actual_quantity}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>盘点数量:</span>
+                                <span>${item.check_quantity}</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span>差异:</span>
+                                <span class="${diffClass} font-medium">${item.diff_quantity > 0 ? '+' : ''}${item.diff_quantity}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // 打开扫码模态框
+        function openScanModal(type) {
+            const modal = document.getElementById('scanModal');
+            modal.classList.remove('hidden');
+            startCameraScanner(type);
+        }
+
+        // 关闭扫码模态框
+        function closeScanModal() {
+            const modal = document.getElementById('scanModal');
+            modal.classList.add('hidden');
+            stopCameraScanner();
+        }
+
+        // 开始摄像头扫码
+        async function startCameraScanner(type) {
+            try {
+                // 初始化 ZXing 码阅读器
+                codeReader = new ZXing.BrowserMultiFormatReader();
+
+                // 获取所有可用的视频输入设备
+                videoInputDevices = await codeReader.listVideoInputDevices();
+                if (videoInputDevices.length === 0) {
+                    showToast('未找到可用的摄像头设备', 'error');
+                    closeScanModal();
+                    return;
+                }
+
+                // 选择第一个摄像头设备
+                currentDeviceId = videoInputDevices[0].deviceId;
+
+                // 渲染视频预览
+                const readerContainer = document.getElementById('qr-reader');
+                readerContainer.innerHTML = '<video id="video-preview" class="w-full max-w-md mx-auto" autoplay playsinline></video>';
+
+                const videoElement = document.getElementById('video-preview');
+
+                // 启动扫描
+                await codeReader.decodeFromVideoDevice(currentDeviceId, videoElement, (result, err) => {
+                    if (result) {
+                        console.log('扫描到条码:', result.text);
+                        onScanSuccess(result.text, type);
+                    }
+                    if (err && !(err instanceof ZXing.NotFoundException)) {
+                        console.warn('扫码错误:', err);
+                    }
+                });
+
+                showToast('摄像头已启动，开始扫描', 'success');
+
+            } catch (error) {
+                console.error('启动摄像头失败:', error);
+                showToast('启动摄像头失败: ' + error.message, 'error');
+                closeScanModal();
+            }
+        }
+
+        // 停止摄像头扫码
+        function stopCameraScanner() {
+            if (codeReader) {
+                try {
+                    codeReader.reset();
+                    codeReader = null;
+                    const readerContainer = document.getElementById('qr-reader');
+                    readerContainer.innerHTML = '';
+                } catch (error) {
+                    console.error('停止扫码器失败:', error);
+                }
+            }
+        }
+
+        // 扫码成功回调
+        function onScanSuccess(decodedText, type) {
+            console.log('扫码成功:', decodedText, '类型:', type);
+            stopCameraScanner();
+            closeScanModal();
+
+            if (type === 'goods') {
+                document.getElementById('goodsBarcode').value = decodedText;
+                validateGoods(decodedText);
+            }
+        }
+
+        // 验证货物
+        async function validateGoods(barcode) {
+            try {
+                // 检查缓存
+                if (goodsCache.has(barcode)) {
+                    showGoodsInfo(goodsCache.get(barcode));
+                    updateCurrentStock();
+                    return;
+                }
+
+                // 调用API获取货物信息
+                const response = await fetch(`${API_BASE_URL}/goods/`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取货物信息失败');
+                }
+
+                const goodsList = await response.json();
+                const goods = goodsList.find(g => g.barcode === barcode);
+
+                if (goods) {
+                    goodsCache.set(barcode, goods);
+                    showGoodsInfo(goods);
+                    updateCurrentStock();
+                } else {
+                    showToast('货物不存在', 'error');
+                    document.getElementById('goodsInfo').classList.add('hidden');
+                    updateCurrentStock();
+                }
+            } catch (error) {
+                console.error('验证货物失败:', error);
+                showToast('验证货物失败', 'error');
+            }
+        }
+
+        // 显示货物信息
+        function showGoodsInfo(goods) {
+            document.getElementById('goodsName').textContent = goods.name;
+            document.getElementById('goodsSpec').textContent = `${goods.spec || '无规格'} | ${goods.unit} | ¥${goods.price}`;
+            document.getElementById('goodsInfo').classList.remove('hidden');
+        }
+
+        // 验证库位
+        function validateLocation(code) {
+            try {
+                // 检查缓存
+                if (locationCache.has(code)) {
+                    showLocationInfo(locationCache.get(code));
+                    updateCurrentStock();
+                    return;
+                }
+
+                showToast('库位不存在', 'error');
+                document.getElementById('locationInfo').classList.add('hidden');
+                updateCurrentStock();
+            } catch (error) {
+                console.error('验证库位失败:', error);
+                showToast('验证库位失败', 'error');
+            }
+        }
+
+        // 显示库位信息
+        function showLocationInfo(location) {
+            document.getElementById('locationName').textContent = location.name;
+            document.getElementById('locationWarehouse').textContent = `仓库: ${getWarehouseName(location.warehouse_id)}`;
+            document.getElementById('locationInfo').classList.remove('hidden');
+        }
+
+        // 更新当前库存
+        async function updateCurrentStock() {
+            const goodsBarcode = document.getElementById('goodsBarcode').value.trim();
+            const locationCode = document.getElementById('locationCode').value.trim();
+
+            if (!goodsBarcode || !locationCode) {
+                document.getElementById('currentStock').textContent = '-';
+                currentStock = 0;
+                return;
+            }
+
+            try {
+                // 调用API获取库存信息
+                const response = await fetch(`${API_BASE_URL}/stock/`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取库存信息失败');
+                }
+
+                const stocks = await response.json();
+                const stock = stocks.find(s =>
+                    s.goods_barcode === goodsBarcode &&
+                    s.location_code === locationCode
+                );
+
+                currentStock = stock ? stock.quantity : 0;
+                document.getElementById('currentStock').textContent = currentStock;
+            } catch (error) {
+                console.error('获取当前库存失败:', error);
+                document.getElementById('currentStock').textContent = '-';
+                currentStock = 0;
+            }
+        }
+
+        // 处理盘点提交
+        async function handleCheckSubmit() {
+            if (!currentCheckOrder) {
+                showToast('请先选择或创建盘点单', 'error');
+                return;
+            }
+
+            const goodsBarcode = document.getElementById('goodsBarcode').value.trim();
+            const locationCode = document.getElementById('locationCode').value.trim();
+            const checkQuantity = parseFloat(document.getElementById('checkQuantity').value);
+
+            // 验证输入
+            if (!goodsBarcode || !locationCode || !checkQuantity && checkQuantity !== 0) {
+                showToast('请填写完整的信息', 'error');
+                return;
+            }
+
+            // 验证货物和库位是否已确认
+            if (document.getElementById('goodsInfo').classList.contains('hidden') ||
+                document.getElementById('locationInfo').classList.contains('hidden')) {
+                showToast('请先确认货物和库位信息', 'error');
+                return;
+            }
+
+            try {
+                const data = {
+                    header_id: currentCheckOrder.header.id,
+                    goods_barcode: goodsBarcode,
+                    location_code: locationCode,
+                    check_quantity: checkQuantity
+                };
+
+                const response = await fetch(`${API_BASE_URL}/check-orders/items/`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify(data)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '盘点失败');
+                }
+
+                const result = await response.json();
+
+                // 显示结果
+                const isMatched = Math.abs(result.diff_quantity) < 0.01;
+                showResultModal(
+                    isMatched ? 'success' : 'warning',
+                    isMatched ? '盘点一致' : '盘点差异',
+                    `
+                        <div class="space-y-2 text-left">
+                            <p><strong>货物:</strong> ${result.goods_name}</p>
+                            <p><strong>库位:</strong> ${result.location_name}</p>
+                            <p><strong>系统库存:</strong> ${result.actual_quantity}</p>
+                            <p><strong>盘点数量:</strong> ${result.check_quantity}</p>
+                            <p><strong>差异:</strong> <span class="${isMatched ? 'text-green-600' : 'text-red-600'} font-medium">${result.diff_quantity > 0 ? '+' : ''}${result.diff_quantity}</span></p>
+                        </div>
+                    `
+                );
+
+                // 显示继续扫码按钮
+                document.getElementById('nextScanBtn').classList.remove('hidden');
+
+                // 重新加载当前盘点单数据
+                await viewCheckOrder(currentCheckOrder.header.id);
+
+            } catch (error) {
+                console.error('盘点失败:', error);
+                showResultModal('error', '盘点失败', error.message);
+            }
+        }
+
+        // 显示结果模态框
+        function showResultModal(type, title, content) {
+            const modal = document.getElementById('resultModal');
+            const icon = document.getElementById('resultIcon');
+            const titleEl = document.getElementById('resultTitle');
+            const contentEl = document.getElementById('resultContent');
+
+            if (type === 'success') {
+                icon.className = 'mx-auto mb-4 text-5xl text-green-500';
+                icon.innerHTML = '<i class="fa fa-check-circle"></i>';
+            } else if (type === 'warning') {
+                icon.className = 'mx-auto mb-4 text-5xl text-yellow-500';
+                icon.innerHTML = '<i class="fa fa-exclamation-triangle"></i>';
+            } else {
+                icon.className = 'mx-auto mb-4 text-5xl text-red-500';
+                icon.innerHTML = '<i class="fa fa-times-circle"></i>';
+            }
+
+            titleEl.textContent = title;
+            contentEl.innerHTML = content;
+
+            modal.classList.remove('hidden');
+        }
+
+        // 完成盘点
+        async function completeCheckOrder() {
+            if (!currentCheckOrder) {
+                showToast('请先选择或创建盘点单', 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/check-orders/${currentCheckOrder.header.id}/complete`, {
+                    method: 'POST',
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '完成盘点失败');
+                }
+
+                const result = await response.json();
+
+                // 显示结果
+                showToast('盘点完成', 'success');
+
+                // 重新加载数据
+                loadCheckOrderStatistics();
+                loadCheckOrders();
+
+                // 隐藏操作区
+                document.getElementById('checkOperationSection').classList.add('hidden');
+
+            } catch (error) {
+                console.error('完成盘点失败:', error);
+                showToast(error.message, 'error');
+            }
+        }
+
+        // 导出盘点报告
+        async function exportCheckOrder(orderId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/check-orders/${orderId}/export`, {
+                    method: 'GET',
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '导出报告失败');
+                }
+
+                // 处理文件下载
+                const blob = await response.blob();
+                const contentType = response.headers.get('content-type');
+
+                // 创建临时链接并触发下载
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+
+                // 获取文件名
+                const contentDisposition = response.headers.get('content-disposition');
+                let fileName = '盘点报告.xlsx';
+                if (contentDisposition) {
+                    const matches = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+                    if (matches != null && matches[1]) {
+                        fileName = decodeURIComponent(matches[1].replace(/['"]/g, ''));
+                    }
+                }
+
+                a.download = fileName;
+                document.body.appendChild(a);
+                a.click();
+
+                // 清理
+                window.URL.revokeObjectURL(url);
+                document.body.removeChild(a);
+
+                showToast('报告导出成功', 'success');
+
+            } catch (error) {
+                console.error('导出报告失败:', error);
+                showToast('导出报告失败', 'error');
+            }
+        }
+
+        // 重置表单
+        function resetForm() {
+            document.getElementById('checkForm').reset();
+            document.getElementById('goodsInfo').classList.add('hidden');
+            document.getElementById('locationInfo').classList.add('hidden');
+            document.getElementById('currentStock').textContent = '-';
+            currentStock = 0;
+        }
+
+    </script>
+</body>
+</html>

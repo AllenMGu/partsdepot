@@ -50,7 +50,7 @@ WMS/
 
 ### 1. 启动后端
 
-1. 准备 PostgreSQL 数据库，并修改 `main.py` 中的 `DATABASE_URL` 为本地配置。
+1. 复制 `.env.example` 中的配置示例，并通过环境变量设置数据库、JWT 和 LDAP 配置；不要将真实凭据提交到仓库。
 2. 安装依赖并运行服务（示例）：
    ```bash
    pip install fastapi uvicorn sqlalchemy psycopg2-binary passlib[bcrypt] python-jose
@@ -82,7 +82,7 @@ WMS/
 
 <img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/ef27b20f-3e72-4776-96e3-881e7be9344f" />
 
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/800a0fdc-1ef3-4ab8-874a-fa5766c4f6e4" />
+<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/800a0fdc-1ef3-4ab8-874a-fa5766c7f6e4" />
 
 <img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/b5d2d2ba-3df5-4464-a975-b4919c69ddbe" />
 

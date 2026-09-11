@@ -1,0 +1,1598 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>入库单管理 - 备件管理系统</title>
+    <!-- Tailwind CSS v3 -->
+    <link href="assets/css/tailwind.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="assets/css/font-awesome.min.css" rel="stylesheet">
+    <!-- SheetJS for Excel export -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+    <!-- 统一的 Tailwind 配置 -->
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col">
+    <!-- 顶部状态栏 -->
+    <header class="bg-white shadow-sm z-10">
+        <div class="flex items-center justify-between px-4 py-3">
+            <!-- 左侧：Logo和菜单按钮 -->
+            <div class="flex items-center">
+                <button id="sidebarToggle" class="mr-4 text-gray-600 focus:outline-none lg:hidden">
+                    <i class="fa fa-bars text-xl"></i>
+                </button>
+                <div class="flex items-center">
+                    <img src="assets/images/logo.png" alt="Logo" class="h-8 w-8">
+					<span class="ml-2 text-lg font-semibold text-gray-800 hidden sm:block">备件管理系统</span>
+                </div>
+            </div>
+            
+            <!-- 右侧：仓库选择、通知和用户信息 -->
+            <div class="flex items-center space-x-4">
+                <!-- 仓库选择 -->
+                <div class="relative" id="warehouseSelector">
+                    <button class="flex items-center text-gray-700 hover:text-primary focus:outline-none">
+                        <i class="fa fa-building-o mr-2"></i>
+                        <span id="currentWarehouse">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs"></i>
+                    </button>
+                    <div id="warehouseDropdown" class="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <div class="px-4 py-2 text-sm text-gray-400">选择仓库</div>
+                            <div id="warehouseList" class="max-h-64 overflow-y-auto">
+                                <!-- 仓库列表将通过JS动态生成 -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 通知 -->
+                <div class="relative">
+                    <button class="text-gray-600 hover:text-primary focus:outline-none">
+                        <i class="fa fa-bell-o text-xl"></i>
+                        <span class="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full"></span>
+                    </button>
+                </div>
+                
+                <!-- 用户信息 -->
+                <div class="relative" id="userMenu">
+                    <button class="flex items-center focus:outline-none">
+                        <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center">
+                            <span id="userInitials">U</span>
+                        </div>
+                        <span class="ml-2 text-sm font-medium text-gray-700 hidden md:block" id="userName">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs text-gray-500 hidden md:block"></i>
+                    </button>
+                    <div id="userDropdown" class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-user-circle mr-2"></i> 个人资料
+                            </a>
+                            <a href="#" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-cog mr-2"></i> 设置
+                            </a>
+                            <hr class="my-1">
+                            <a href="#" id="logoutButton" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-sign-out mr-2"></i> 退出登录
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <!-- 侧边导航栏 -->
+        <aside id="sidebar" class="bg-white w-64 shadow-md hidden lg:block flex-shrink-0 transition-all-300">
+            <nav class="mt-5 px-2">
+                <a href="dashboard.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-dashboard sidebar-icon"></i>
+                    <span>仪表盘</span>
+                </a>
+                <a href="warehouse.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-building sidebar-icon"></i>
+                    <span>仓库管理</span>
+                </a>
+                <a href="location.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-map-marker sidebar-icon"></i>
+                    <span>库位管理</span>
+                </a>
+                <a href="goods.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-cubes sidebar-icon"></i>
+                    <span>货物管理</span>
+                </a>
+                <a href="stock.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-list sidebar-icon"></i>
+                    <span>库存查询</span>
+                </a>
+                <a href="scan.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-qrcode sidebar-icon"></i>
+                    <span>扫码出入库</span>
+                </a>
+                <a href="inbound.html" class="sidebar-active flex items-center px-4 py-3 rounded-md mb-1">
+                    <i class="fa fa-arrow-down sidebar-icon"></i>
+                    <span>入库单管理</span>
+                </a>
+                <a href="outbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-up sidebar-icon"></i>
+                    <span>出库单管理</span>
+                </a>
+                <a href="check.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-check-square-o sidebar-icon"></i>
+                    <span>盘点管理</span>
+                </a>
+                <a href="user.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-users sidebar-icon"></i>
+                    <span>用户管理</span>
+                </a>
+            </nav>
+        </aside>
+
+        <!-- 主内容区 -->
+        <main class="flex-1 overflow-y-auto p-6">
+            <!-- 页面标题 -->
+            <div class="mb-6">
+                <h1 class="text-2xl font-bold text-gray-800">入库单管理</h1>
+                <p class="text-gray-600">管理入库单据和明细</p>
+            </div>
+            
+            <!-- 操作卡片 -->
+            <div class="bg-white rounded-lg shadow p-6 mb-6">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-semibold text-gray-800">新增入库单</h2>
+                    <button id="refreshOrders" class="flex items-center text-sm text-primary hover:text-secondary">
+                        <i class="fa fa-refresh mr-1"></i> 刷新列表
+                    </button>
+                </div>
+                
+                <form id="orderForm" class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="supplier" class="block text-sm font-medium text-gray-700 mb-1">供应商</label>
+                            <input type="text" id="supplier" name="supplier" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="请输入供应商名称">
+                        </div>
+                        <div>
+                            <label for="orderRemark" class="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                            <input type="text" id="orderRemark" name="orderRemark" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="请输入备注信息">
+                        </div>
+                    </div>
+                    
+                    <div class="flex items-center">
+                        <button type="submit" id="createOrder" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary">
+                            <i class="fa fa-plus mr-1"></i> 创建入库单
+                        </button>
+                    </div>
+                </form>
+            </div>
+            
+            <!-- 入库单列表 -->
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="p-6">
+                    <h2 class="text-lg font-semibold text-gray-800 mb-4">入库单列表</h2>
+                    
+                    <!-- 搜索和筛选 -->
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-4 space-y-2 md:space-y-0">
+                        <div class="flex items-center space-x-2">
+                            <input type="text" id="searchOrder" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="搜索单号或供应商">
+                            <button id="searchOrderBtn" class="px-3 py-2 bg-primary text-white rounded-md hover:bg-secondary">
+                                <i class="fa fa-search"></i>
+                            </button>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <select id="filterStatus" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                <option value="">所有状态</option>
+                                <option value="DRAFT">草稿</option>
+                                <option value="COMPLETED">已完成</option>
+                            </select>
+                            <input type="date" id="startDate" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                            <input type="date" id="endDate" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                            <button id="applyDateFilterBtn" class="px-3 py-2 bg-primary text-white rounded-md hover:bg-secondary">
+                                <i class="fa fa-filter mr-1"></i> 筛选
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-4 p-3 bg-gray-50 rounded-md">
+                        <div class="text-sm text-gray-700">
+                            当前筛选总金额：
+                            <span id="filteredTotalAmount" class="font-semibold text-gray-900">¥0.00</span>
+                        </div>
+                        <button id="exportOrdersBtn" class="mt-2 md:mt-0 px-3 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
+                            <i class="fa fa-file-excel-o mr-1"></i> 导出Excel
+                        </button>
+                    </div>
+                    
+                    <!-- 入库单表格 -->
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        单号
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        仓库
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        供应商
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        操作员
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        总金额
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        状态
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        创建时间
+                                    </th>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                                        操作
+                                    </th>
+                                </tr>
+                            </thead>
+                            <tbody id="orderTableBody" class="bg-white divide-y divide-gray-200">
+                                <tr>
+                                    <td colspan="8" class="px-6 py-4 text-center text-gray-500">
+                                        <i class="fa fa-spinner fa-spin mr-2"></i> 加载中...
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <!-- 分页 -->
+                    <div class="flex items-center justify-between mt-4">
+                        <div class="flex items-center space-x-3 text-sm text-gray-700">
+                            <div>
+                                显示 <span id="startRange">1</span> 到 <span id="endRange">10</span> 条，共 <span id="totalCount">0</span> 条记录
+                            </div>
+                            <div class="flex items-center space-x-1">
+                                <span>每页</span>
+                                <select id="pageSizeSelect" class="px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                    <option value="10" selected>10</option>
+                                    <option value="20">20</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
+                                <span>条</span>
+                            </div>
+                        </div>
+                        <div class="flex space-x-1">
+                            <button id="prevPage" class="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50">
+                                上一页
+                            </button>
+                            <button id="nextPage" class="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50">
+                                下一页
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 入库单明细模态框 -->
+    <div id="orderDetailModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-lg w-full max-w-4xl max-h-[90vh] flex flex-col">
+            <div class="flex items-center justify-between p-6 border-b">
+                <h3 class="text-lg font-semibold text-gray-800">入库单明细</h3>
+                <button id="closeDetailModal" class="text-gray-400 hover:text-gray-600">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-6">
+                <div id="orderDetailContent">
+                    <!-- 订单详情将通过JS动态填充 -->
+                </div>
+            </div>
+            
+            <div class="p-6 border-t flex justify-between">
+                <div id="orderDetailActions">
+                    <!-- 操作按钮将根据订单状态动态显示 -->
+                </div>
+                <button id="cancelDetail" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">
+                    关闭
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加明细模态框 -->
+    <div id="addItemModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold text-gray-800">添加入库明细</h3>
+                <button id="closeItemModal" class="text-gray-400 hover:text-gray-600">
+                    <i class="fa fa-times"></i>
+                </button>
+            </div>
+            
+            <form id="itemForm" class="space-y-4">
+                <div>
+                    <label for="goodsBarcode" class="block text-sm font-medium text-gray-700 mb-1">货物名称/条码 <span class="text-red-500">*</span></label>
+                    <div class="flex">
+                        <input type="text" id="goodsBarcode" name="goodsBarcode" class="flex-1 px-3 py-2 border border-gray-300 rounded-l-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="输入货物名称、条码或规格搜索" required>
+                        <button type="button" id="scanGoodsBtn" class="px-4 py-2 bg-primary text-white rounded-r-md hover:bg-secondary">
+                            <i class="fa fa-qrcode"></i>
+                        </button>
+                    </div>
+                    <!-- 货物搜索结果 -->
+                    <div id="goodsSearchResults" class="mt-2 hidden max-h-40 overflow-y-auto border border-gray-300 rounded-md bg-white">
+                        <div id="goodsResultsList"></div>
+                    </div>
+                    <div id="goodsInfo" class="mt-2 hidden">
+                        <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                            <div class="flex items-center">
+                                <i class="fa fa-check-circle text-green-500 mr-2"></i>
+                                <div>
+                                    <div class="font-medium text-green-800" id="goodsName"></div>
+                                    <div class="text-sm text-green-600" id="goodsSpec"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <label for="locationCode" class="block text-sm font-medium text-gray-700 mb-1">库位编码 <span class="text-red-500">*</span></label>
+                    <div class="flex">
+                        <select id="locationCode" name="locationCode" class="flex-1 px-3 py-2 border border-gray-300 rounded-l-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" required>
+                            <option value="">请选择库位</option>
+                        </select>
+                        <button type="button" id="scanLocationBtn" class="px-4 py-2 bg-primary text-white rounded-r-md hover:bg-secondary">
+                            <i class="fa fa-qrcode"></i>
+                        </button>
+                    </div>
+                    <div id="locationInfo" class="mt-2 hidden">
+                        <div class="p-3 bg-green-50 border border-green-200 rounded-md">
+                            <div class="flex items-center">
+                                <i class="fa fa-check-circle text-green-500 mr-2"></i>
+                                <div>
+                                    <div class="font-medium text-green-800" id="locationName"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div>
+                    <label for="quantity" class="block text-sm font-medium text-gray-700 mb-1">数量 <span class="text-red-500">*</span></label>
+                    <input type="number" id="quantity" name="quantity" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="请输入数量" min="0.01" step="0.01" required>
+                </div>
+                
+                <div>
+                    <label for="unitPrice" class="block text-sm font-medium text-gray-700 mb-1">单价</label>
+                    <input type="number" id="unitPrice" name="unitPrice" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="请输入单价" min="0" step="0.01">
+                </div>
+                
+                <div>
+                    <label for="itemRemark" class="block text-sm font-medium text-gray-700 mb-1">备注</label>
+                    <textarea id="itemRemark" name="itemRemark" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent" placeholder="请输入备注信息"></textarea>
+                </div>
+                
+                <div class="flex justify-end space-x-3">
+                    <button type="button" id="cancelAddItem" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-md hover:bg-gray-300">
+                        取消
+                    </button>
+                    <button type="submit" id="submitItem" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-secondary">
+                        添加
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- 通用脚本 -->
+    <script src="assets/js/common.js"></script>
+    
+    <!-- 页面特定脚本 -->
+    <script>
+        // 页面特定变量
+        let orders = [];
+        let filteredOrders = [];
+        let currentPage = 1;
+        let pageSize = 10;
+        let currentOrderId = null;
+        let goodsCache = new Map();
+        let locationCache = new Map();
+        
+        // 页面初始化
+        function pageInit() {
+            loadInboundOrders();
+            setupInboundEventListeners();
+
+            // 检查URL参数是否有orderId，如果有则直接显示订单详情
+            const urlParams = new URLSearchParams(window.location.search);
+            const orderId = urlParams.get('orderId');
+            if (orderId) {
+                viewOrderDetail(parseInt(orderId));
+            }
+        }
+        
+        // 加载入库单列表
+        async function loadInboundOrders() {
+            try {
+                const params = new URLSearchParams();
+                const status = document.getElementById('filterStatus').value;
+                const startDate = document.getElementById('startDate').value;
+                const endDate = document.getElementById('endDate').value;
+                
+                if (status) params.append('status', status);
+                if (startDate) params.append('start_date', startDate);
+                if (endDate) params.append('end_date', endDate);
+                
+                const response = await fetch(`${API_BASE_URL}/inbound-orders/?${params.toString()}`, {
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取入库单列表失败');
+                }
+                
+                orders = await response.json();
+                filteredOrders = [...orders];
+                
+                // 应用搜索
+                applySearch();
+                
+                // 更新表格
+                updateOrderTable();
+                
+                // 更新分页信息
+                updatePagination();
+            } catch (error) {
+                console.error('加载入库单列表失败:', error);
+                showToast('加载入库单列表失败', 'error');
+                document.getElementById('orderTableBody').innerHTML = `
+                    <tr>
+                        <td colspan="8" class="px-6 py-4 text-center text-red-500">
+                            加载失败，请重试
+                        </td>
+                    </tr>
+                `;
+            }
+        }
+        
+        // 应用搜索
+        function applySearch() {
+            const searchTerm = document.getElementById('searchOrder').value.toLowerCase();
+            
+            filteredOrders = orders.filter(order => 
+                (order.order_no || '').toLowerCase().includes(searchTerm) ||
+                (order.supplier || '').toLowerCase().includes(searchTerm)
+            );
+            
+            currentPage = 1;
+            updateFilteredTotalAmount();
+        }
+
+        function updateFilteredTotalAmount() {
+            const totalAmount = filteredOrders.reduce((sum, order) => sum + (parseFloat(order.total_amount) || 0), 0);
+            document.getElementById('filteredTotalAmount').textContent = `¥${totalAmount.toFixed(2)}`;
+        }
+        
+        // 更新入库单表格
+        function updateOrderTable() {
+            const tbody = document.getElementById('orderTableBody');
+            const startIndex = (currentPage - 1) * pageSize;
+            const endIndex = startIndex + pageSize;
+            const pageOrders = filteredOrders.slice(startIndex, endIndex);
+            
+            if (pageOrders.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="8" class="px-6 py-4 text-center text-gray-500">
+                            暂无入库单数据
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+            
+            tbody.innerHTML = pageOrders.map(order => {
+                const statusClass = order.status === 'DRAFT' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800';
+                const statusText = order.status === 'DRAFT' ? '草稿' : '已完成';
+                
+                return `
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm font-medium text-gray-900">${order.order_no}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-900">${order.warehouse_name}</div>
+                        </td>
+                        <td class="px-6 py-4">
+                            <div class="text-sm text-gray-900">${order.supplier || '-'}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-900">${order.operator_name}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm font-medium text-gray-900">¥${order.total_amount.toFixed(2)}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}">
+                                ${statusText}
+                            </span>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap">
+                            <div class="text-sm text-gray-500">${new Date(order.create_time).toLocaleString()}</div>
+                        </td>
+                        <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <button onclick="viewOrderDetail(${order.id})" class="text-primary hover:text-secondary mr-3">
+                                <i class="fa fa-eye"></i> 查看
+                            </button>
+                            ${order.status === 'DRAFT' ? `
+                                <button onclick="editOrder(${order.id})" class="text-green-600 hover:text-green-700 mr-3">
+                                    <i class="fa fa-edit"></i> 编辑
+                                </button>
+                                <button onclick="deleteOrder(${order.id})" class="text-red-600 hover:text-red-700">
+                                    <i class="fa fa-trash"></i> 删除
+                                </button>
+                            ` : ''}
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+        }
+        
+        // 更新分页信息
+        function updatePagination() {
+            const totalPages = Math.ceil(filteredOrders.length / pageSize);
+            const startRange = filteredOrders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0;
+            const endRange = Math.min(currentPage * pageSize, filteredOrders.length);
+            
+            document.getElementById('startRange').textContent = startRange;
+            document.getElementById('endRange').textContent = endRange;
+            document.getElementById('totalCount').textContent = filteredOrders.length;
+            
+            document.getElementById('prevPage').disabled = currentPage === 1;
+            document.getElementById('nextPage').disabled = currentPage === totalPages || totalPages === 0;
+        }
+        
+        // 创建入库单
+        async function createInboundOrder() {
+            const supplier = document.getElementById('supplier').value.trim();
+            const remark = document.getElementById('orderRemark').value.trim();
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/inbound-orders/`, {
+                    method: 'POST',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        supplier: supplier,
+                        remark: remark
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '创建入库单失败');
+                }
+                
+                const order = await response.json();
+                showToast('入库单创建成功', 'success');
+                
+                // 重置表单
+                document.getElementById('orderForm').reset();
+                
+                // 重新加载列表
+                loadInboundOrders();
+                
+                // 显示订单详情
+                viewOrderDetail(order.id);
+            } catch (error) {
+                console.error('创建入库单失败:', error);
+                showToast(error.message, 'error');
+            }
+        }
+        
+        // 编辑订单（直接调用查看详情，因为详情页面已经包含编辑功能）
+        function editOrder(orderId) {
+            viewOrderDetail(orderId);
+        }
+
+        // 删除订单
+        async function deleteOrder(orderId) {
+            if (!confirm('确定要删除此入库单吗？删除后将无法恢复。')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/inbound-orders/${orderId}`, {
+                    method: 'DELETE',
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '删除入库单失败');
+                }
+
+                showToast('入库单删除成功', 'success');
+                loadInboundOrders();
+            } catch (error) {
+                console.error('删除入库单失败:', error);
+                showToast(error.message, 'error');
+            }
+        }
+
+        // 查看订单详情
+        async function viewOrderDetail(orderId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/inbound-orders/${orderId}`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取订单详情失败');
+                }
+
+                const order = await response.json();
+                currentOrderId = orderId;
+
+                // 显示订单详情
+                showOrderDetail(order);
+            } catch (error) {
+                console.error('获取订单详情失败:', error);
+                showToast('获取订单详情失败', 'error');
+            }
+        }
+        
+        // 显示订单详情
+        function showOrderDetail(order) {
+            const modal = document.getElementById('orderDetailModal');
+            const content = document.getElementById('orderDetailContent');
+            const actions = document.getElementById('orderDetailActions');
+
+            // 构建详情内容
+            const statusClass = order.status === 'DRAFT' ? 'bg-yellow-100 text-yellow-800' : 'bg-green-100 text-green-800';
+            const statusText = order.status === 'DRAFT' ? '草稿' : '已完成';
+
+            content.innerHTML = `
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                    <div>
+                        <p class="text-sm text-gray-500">单号</p>
+                        <p class="font-medium text-gray-900">${order.order_no}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">仓库</p>
+                        <p class="font-medium text-gray-900">${order.warehouse_name}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">供应商</p>
+                        ${order.status === 'DRAFT' ? `
+                            <input type="text" id="editSupplier" value="${order.supplier || ''}" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                        ` : `
+                            <p class="font-medium text-gray-900">${order.supplier || '-'}</p>
+                        `}
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">操作员</p>
+                        <p class="font-medium text-gray-900">${order.operator_name}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">总金额</p>
+                        <p class="font-medium text-gray-900">¥${order.total_amount.toFixed(2)}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">状态</p>
+                        <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}">
+                            ${statusText}
+                        </span>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">创建时间</p>
+                        <p class="font-medium text-gray-900">${new Date(order.create_time).toLocaleString()}</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500">完成时间</p>
+                        <p class="font-medium text-gray-900">${order.complete_time ? new Date(order.complete_time).toLocaleString() : '-'}</p>
+                    </div>
+                    <div class="md:col-span-2">
+                        <p class="text-sm text-gray-500">备注</p>
+                        ${order.status === 'DRAFT' ? `
+                            <textarea id="editRemark" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">${order.remark || ''}</textarea>
+                        ` : `
+                            <p class="font-medium text-gray-900">${order.remark || '-'}</p>
+                        `}
+                    </div>
+                </div>
+
+                <div class="mt-6">
+                    <h4 class="text-md font-semibold text-gray-800 mb-3">入库明细</h4>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">货物</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">库位</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">数量</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">单价</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">金额</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">备注</th>
+                                    ${order.status === 'DRAFT' ? `<th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>` : ''}
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-gray-200">
+                                ${order.items.length > 0 ? order.items.map(item => `
+                                    <tr>
+                                        <td class="px-4 py-3">
+                                            <div class="text-sm font-medium text-gray-900">${item.goods_name}</div>
+                                            <div class="text-xs text-gray-500">${item.goods_barcode}</div>
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <div class="text-sm text-gray-900">${item.location_code}</div>
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <div class="text-sm text-gray-900">${item.quantity}</div>
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <div class="text-sm text-gray-900">¥${item.unit_price.toFixed(2)}</div>
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <div class="text-sm font-medium text-gray-900">¥${item.total_price.toFixed(2)}</div>
+                                        </td>
+                                        <td class="px-4 py-3">
+                                            <div class="text-sm text-gray-900">${item.remark || '-'}</div>
+                                        </td>
+                                        ${order.status === 'DRAFT' ? `
+                                            <td class="px-4 py-3 text-sm font-medium">
+                                                <button onclick="editOrderItem(${item.id})" class="text-blue-600 hover:text-blue-700 mr-3">
+                                                    <i class="fa fa-edit"></i> 编辑
+                                                </button>
+                                                <button onclick="deleteOrderItem(${item.id})" class="text-red-600 hover:text-red-700">
+                                                    <i class="fa fa-trash"></i> 删除
+                                                </button>
+                                            </td>
+                                        ` : ''}
+                                    </tr>
+                                `).join('') : `
+                                    <tr>
+                                        <td colspan="${order.status === 'DRAFT' ? '7' : '6'}" class="px-4 py-4 text-center text-gray-500">
+                                            暂无明细数据
+                                        </td>
+                                    </tr>
+                                `}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+
+            // 构建操作按钮
+            if (order.status === 'DRAFT') {
+                actions.innerHTML = `
+                    <button onclick="saveOrderHeader()" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 mr-3">
+                        <i class="fa fa-save mr-1"></i> 保存表头
+                    </button>
+                    <button onclick="showAddItemModal()" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-secondary mr-3">
+                        <i class="fa fa-plus mr-1"></i> 添加明细
+                    </button>
+                    <button onclick="submitOrder()" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
+                        <i class="fa fa-check mr-1"></i> 提交入库
+                    </button>
+                `;
+            } else {
+                actions.innerHTML = `
+                    <button onclick="returnOrder()" class="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700">
+                        <i class="fa fa-undo mr-1"></i> 退库
+                    </button>
+                `;
+            }
+
+            modal.classList.remove('hidden');
+        }
+        
+        // 保存入库单表头
+        async function saveOrderHeader() {
+            const supplier = document.getElementById('editSupplier').value.trim();
+            const remark = document.getElementById('editRemark').value.trim();
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/inbound-orders/${currentOrderId}`, {
+                    method: 'PUT',
+                    headers: getHeaders(),
+                    body: JSON.stringify({
+                        supplier: supplier,
+                        remark: remark
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '保存入库单表头失败');
+                }
+
+                showToast('入库单表头保存成功', 'success');
+                viewOrderDetail(currentOrderId); // 重新加载订单详情
+            } catch (error) {
+                console.error('保存入库单表头失败:', error);
+                showToast(error.message, 'error');
+            }
+        }
+
+        // 编辑入库单明细
+        async function editOrderItem(itemId) {
+            try {
+                // 获取订单详情
+                const response = await fetch(`${API_BASE_URL}/inbound-orders/${currentOrderId}`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取订单详情失败');
+                }
+
+                const order = await response.json();
+                const item = order.items.find(i => i.id === itemId);
+
+                if (!item) {
+                    throw new Error('未找到明细项');
+                }
+
+                // 填充表单
+                document.getElementById('goodsBarcode').value = item.goods_barcode;
+                document.getElementById('locationCode').value = item.location_code;
+                document.getElementById('quantity').value = item.quantity;
+                document.getElementById('unitPrice').value = item.unit_price;
+                document.getElementById('itemRemark').value = item.remark || '';
+
+                // 显示货物信息
+                await validateGoods(item.goods_barcode);
+
+                // 显示库位信息
+                if (locationCache.has(item.location_code)) {
+                    showLocationInfo(locationCache.get(item.location_code));
+                } else {
+                    // 如果库位信息未缓存，尝试从API获取
+                    const locationResponse = await fetch(`${API_BASE_URL}/locations/`, {
+                        headers: getHeaders()
+                    });
+
+                    if (locationResponse.ok) {
+                        const locations = await locationResponse.json();
+                        const location = locations.find(l => l.location_code === item.location_code);
+                        if (location) {
+                            locationCache.set(item.location_code, location);
+                            showLocationInfo(location);
+                        }
+                    }
+                }
+
+                // 显示编辑模式
+                document.getElementById('orderDetailModal').classList.add('hidden');
+                document.getElementById('addItemModal').classList.remove('hidden');
+
+                // 保存当前编辑的明细项ID
+                document.getElementById('addItemModal').dataset.editItemId = itemId;
+                document.querySelector('#addItemModal h3').textContent = '编辑入库明细';
+                document.getElementById('submitItem').textContent = '保存修改';
+            } catch (error) {
+                console.error('编辑入库单明细失败:', error);
+                showToast(error.message, 'error');
+            }
+        }
+
+        // 删除入库单明细
+        async function deleteOrderItem(itemId) {
+            if (!confirm('确定要删除此入库明细吗？')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/inbound-orders/${currentOrderId}/items/${itemId}`, {
+                    method: 'DELETE',
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '删除入库单明细失败');
+                }
+
+                showToast('入库单明细删除成功', 'success');
+                viewOrderDetail(currentOrderId); // 重新加载订单详情
+            } catch (error) {
+                console.error('删除入库单明细失败:', error);
+                showToast(error.message, 'error');
+            }
+        }
+
+        // 加载当前仓库下的库位数据
+        async function loadLocationsByWarehouse(warehouseId) {
+            try {
+                const response = await fetch(`${API_BASE_URL}/locations/?warehouse_id=${warehouseId}`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取库位信息失败');
+                }
+
+                const locationList = await response.json();
+                const locationSelect = document.getElementById('locationCode');
+
+                // 清空下拉框
+                locationSelect.innerHTML = '<option value="">请选择库位</option>';
+
+                // 填充库位数据
+                locationList.forEach(location => {
+                    const option = document.createElement('option');
+                    option.value = location.location_code;
+                    option.textContent = `${location.location_code} - ${location.name}`;
+                    locationSelect.appendChild(option);
+                });
+
+                // 缓存库位信息
+                locationList.forEach(location => {
+                    locationCache.set(location.location_code, location);
+                });
+
+                return locationList;
+            } catch (error) {
+                console.error('加载库位数据失败:', error);
+                showToast('加载库位数据失败', 'error');
+                return [];
+            }
+        }
+
+        // 显示添加明细模态框
+        function showAddItemModal() {
+            document.getElementById('orderDetailModal').classList.add('hidden');
+            document.getElementById('addItemModal').classList.remove('hidden');
+            document.getElementById('itemForm').reset();
+            document.getElementById('goodsInfo').classList.add('hidden');
+            document.getElementById('locationInfo').classList.add('hidden');
+            document.getElementById('addItemModal').dataset.editItemId = '';
+            document.querySelector('#addItemModal h3').textContent = '添加入库明细';
+            document.getElementById('submitItem').textContent = '添加';
+
+            // 加载当前仓库下的库位数据
+            if (currentWarehouse) {
+                loadLocationsByWarehouse(currentWarehouse.id);
+            } else {
+                showToast('未选择仓库', 'error');
+            }
+        }
+
+        // 自动填充库位编码
+        async function autoFillLocationCode() {
+            try {
+                // 调用API获取库位列表
+                const response = await fetch(`${API_BASE_URL}/locations/?warehouse_id=${currentWarehouse.id}`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取库位信息失败');
+                }
+
+                const locationList = await response.json();
+
+                if (locationList.length > 0) {
+                    // 选择第一个可用库位
+                    const defaultLocation = locationList[0];
+                    document.getElementById('locationCode').value = defaultLocation.location_code;
+                    locationCache.set(defaultLocation.location_code, defaultLocation);
+                    showLocationInfo(defaultLocation);
+                }
+            } catch (error) {
+                console.error('自动填充库位失败:', error);
+                // 库位自动填充失败不显示错误，允许用户手动选择
+            }
+        }
+        
+        // 添加或更新明细项
+        async function addOrderItem() {
+            const goodsBarcode = document.getElementById('goodsBarcode').value.trim();
+            const locationCode = document.getElementById('locationCode').value.trim();
+            const quantity = parseFloat(document.getElementById('quantity').value);
+            const unitPrice = parseFloat(document.getElementById('unitPrice').value) || null;
+            const remark = document.getElementById('itemRemark').value.trim();
+
+            // 验证输入
+            if (!goodsBarcode || !locationCode || !quantity || quantity <= 0) {
+                showToast('请填写完整的信息', 'error');
+                return;
+            }
+
+            // 验证货物和库位是否已确认
+            if (document.getElementById('goodsInfo').classList.contains('hidden') ||
+                document.getElementById('locationInfo').classList.contains('hidden')) {
+                showToast('请先确认货物和库位信息', 'error');
+                return;
+            }
+
+            const editItemId = document.getElementById('addItemModal').dataset.editItemId;
+
+            try {
+                let response;
+                if (editItemId) {
+                    // 更新明细
+                    response = await fetch(`${API_BASE_URL}/inbound-orders/${currentOrderId}/items/${editItemId}`, {
+                        method: 'PUT',
+                        headers: getHeaders(),
+                        body: JSON.stringify({
+                            goods_barcode: goodsBarcode,
+                            location_code: locationCode,
+                            quantity: quantity,
+                            unit_price: unitPrice,
+                            remark: remark
+                        })
+                    });
+                    showToast('明细更新成功', 'success');
+                } else {
+                    // 添加明细
+                    response = await fetch(`${API_BASE_URL}/inbound-orders/${currentOrderId}/items`, {
+                        method: 'POST',
+                        headers: getHeaders(),
+                        body: JSON.stringify({
+                            goods_barcode: goodsBarcode,
+                            location_code: locationCode,
+                            quantity: quantity,
+                            unit_price: unitPrice,
+                            remark: remark
+                        })
+                    });
+                    showToast('明细添加成功', 'success');
+                }
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '操作失败');
+                }
+
+                // 关闭模态框
+                document.getElementById('addItemModal').classList.add('hidden');
+                document.getElementById('addItemModal').dataset.editItemId = '';
+                document.querySelector('#addItemModal h3').textContent = '添加入库明细';
+                document.getElementById('submitItem').textContent = '添加';
+
+                // 重新查看订单详情
+                viewOrderDetail(currentOrderId);
+            } catch (error) {
+                console.error('操作失败:', error);
+                showToast(error.message, 'error');
+            }
+        }
+
+        // 退库
+        async function returnOrder() {
+            if (!confirm('确定要对此次入库进行退库操作吗？这将创建一个对应的出库单。')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${API_BASE_URL}/inbound-orders/${currentOrderId}/return`, {
+                    method: 'POST',
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '创建退库单失败');
+                }
+
+                const outboundOrder = await response.json();
+                showToast('退库单创建成功', 'success');
+                document.getElementById('orderDetailModal').classList.add('hidden');
+                window.location.href = `outbound.html?orderId=${outboundOrder.id}`;
+            } catch (error) {
+                console.error('创建退库单失败:', error);
+                showToast(error.message, 'error');
+            }
+        }
+        
+        // 提交入库单
+        async function submitOrder() {
+            if (!confirm('确定要提交此入库单吗？提交后将更新库存。')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/inbound-orders/${currentOrderId}/submit`, {
+                    method: 'POST',
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || '提交入库单失败');
+                }
+                
+                showToast('入库单提交成功', 'success');
+                
+                // 关闭模态框
+                document.getElementById('orderDetailModal').classList.add('hidden');
+                
+                // 重新加载列表
+                loadInboundOrders();
+            } catch (error) {
+                console.error('提交入库单失败:', error);
+                showToast(error.message, 'error');
+            }
+        }
+        
+        // 搜索货物
+        async function searchGoods(keyword) {
+            try {
+                // 调用API搜索货物
+                const response = await fetch(`${API_BASE_URL}/goods/?keyword=${encodeURIComponent(keyword)}`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('搜索货物失败');
+                }
+
+                const goodsList = await response.json();
+
+                if (goodsList.length > 0) {
+                    await showGoodsSearchResults(goodsList);
+                } else {
+                    await showGoodsSearchResults([]);
+                    showToast('未找到匹配的货物', 'info');
+                }
+            } catch (error) {
+                console.error('搜索货物失败:', error);
+                showToast('搜索货物失败', 'error');
+            }
+        }
+
+        // 显示货物搜索结果
+        async function showGoodsSearchResults(goodsList) {
+            const resultsContainer = document.getElementById('goodsResultsList');
+            const resultsDiv = document.getElementById('goodsSearchResults');
+
+            if (goodsList.length === 0) {
+                resultsContainer.innerHTML = '<div class="px-3 py-2 text-gray-500">未找到匹配的货物</div>';
+                resultsDiv.classList.remove('hidden');
+                return;
+            }
+
+            // 异步获取所有货物的可用库存
+            const goodsWithStock = await Promise.all(
+                goodsList.map(async goods => {
+                    const availableStock = await getAvailableStock(goods.barcode);
+                    return { ...goods, availableStock };
+                })
+            );
+
+            resultsContainer.innerHTML = goodsWithStock.map(goods => `
+                <div class="px-3 py-2 hover:bg-gray-100 cursor-pointer" data-goods='${JSON.stringify(goods).replace(/'/g, "&apos;")}'>
+                    <div class="font-medium text-gray-900">${goods.name}</div>
+                    <div class="text-sm text-gray-500">条码: ${goods.barcode} | 规格: ${goods.spec || '无'} | 单位: ${goods.unit}</div>
+                    <div class="text-sm text-blue-600 mt-1">可用库存: ${goods.availableStock}</div>
+                </div>
+            `).join('');
+
+            // 为搜索结果添加点击事件监听器
+            resultsContainer.querySelectorAll('[data-goods]').forEach(item => {
+                item.addEventListener('click', async function() {
+                    const goods = JSON.parse(this.dataset.goods.replace(/&apos;/g, "'"));
+                    await selectGoods(goods);
+                });
+            });
+
+            resultsDiv.classList.remove('hidden');
+        }
+
+        // 选择货物
+        async function selectGoods(goods) {
+            // 填充货物条码输入框
+            document.getElementById('goodsBarcode').value = goods.barcode;
+            // 显示货物信息
+            await showGoodsInfo(goods);
+            // 隐藏搜索结果
+            document.getElementById('goodsSearchResults').classList.add('hidden');
+            // 缓存货物信息
+            goodsCache.set(goods.barcode, goods);
+        }
+
+        // 验证货物
+        async function validateGoods(keyword) {
+            // 如果输入内容较短，可能是条码，直接查找
+            if (keyword.length <= 10) {
+                // 检查缓存
+                if (goodsCache.has(keyword)) {
+                    await showGoodsInfo(goodsCache.get(keyword));
+                    document.getElementById('goodsSearchResults').classList.add('hidden');
+                    return;
+                }
+
+                // 调用API获取货物信息
+                const response = await fetch(`${API_BASE_URL}/goods/`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取货物信息失败');
+                }
+
+                const goodsList = await response.json();
+                const goods = goodsList.find(g => g.barcode === keyword);
+
+                if (goods) {
+                    goodsCache.set(keyword, goods);
+                    await showGoodsInfo(goods);
+                    document.getElementById('goodsSearchResults').classList.add('hidden');
+                } else {
+                    // 未找到，尝试搜索
+                    await searchGoods(keyword);
+                }
+            } else {
+                // 输入内容较长，直接搜索
+                await searchGoods(keyword);
+            }
+        }
+        
+        // 获取货物在当前仓库的可用库存
+        async function getAvailableStock(goodsBarcode) {
+            try {
+                console.log('正在查询货物条码:', goodsBarcode, '在仓库:', currentWarehouse.id, '的库存');
+
+                // 首先获取所有库存数据
+                const response = await fetch(`${API_BASE_URL}/stock/`, {
+                    headers: getHeaders()
+                });
+
+                if (!response.ok) {
+                    throw new Error('获取库存数据失败');
+                }
+
+                const stockData = await response.json();
+                console.log('所有库存数据:', stockData);
+
+                if (Array.isArray(stockData) && stockData.length > 0) {
+                    // 过滤出指定货物条码和仓库的库存记录
+                    const filteredStock = stockData.filter(stock => {
+                        return stock.goods_barcode === goodsBarcode;
+                    });
+                    console.log('过滤后的库存数据:', filteredStock);
+
+                    // 计算该货物在当前仓库的总库存
+                    const totalStock = filteredStock.reduce((sum, stock) => sum + (parseFloat(stock.quantity) || 0), 0);
+                    console.log('计算出的总库存:', totalStock);
+
+                    return totalStock;
+                }
+
+                console.log('未找到库存信息');
+                return 0; // 未找到库存信息
+            } catch (error) {
+                console.error('获取可用库存失败:', error);
+                // 不显示错误提示，避免影响用户体验
+                return 0;
+            }
+        }
+
+        // 显示货物信息
+        async function showGoodsInfo(goods) {
+            document.getElementById('goodsName').textContent = goods.name;
+            document.getElementById('goodsSpec').textContent = `${goods.spec || ''}${goods.spec && goods.unit ? ' | ' : ''}${goods.unit} | ¥${goods.price}`;
+            document.getElementById('goodsInfo').classList.remove('hidden');
+
+            // 显示可用库存
+            const availableStock = await getAvailableStock(goods.barcode);
+            document.getElementById('goodsSpec').textContent += ` | 可用库存: ${availableStock}`;
+
+            // 如果没有输入单价，自动填充
+            if (!document.getElementById('unitPrice').value) {
+                document.getElementById('unitPrice').value = goods.price;
+            }
+
+            // 自动填充库位编码（这里可以根据业务逻辑设置默认库位）
+            // 目前设置为自动填充第一个可用库位
+            autoFillLocationCode();
+        }
+        
+        // 验证库位
+        async function validateLocation(code) {
+            try {
+                // 检查缓存
+                if (locationCache.has(code)) {
+                    showLocationInfo(locationCache.get(code));
+                    return;
+                }
+                
+                // 调用API获取库位信息
+                const response = await fetch(`${API_BASE_URL}/locations/`, {
+                    headers: getHeaders()
+                });
+                
+                if (!response.ok) {
+                    throw new Error('获取库位信息失败');
+                }
+                
+                const locationList = await response.json();
+                const location = locationList.find(l => l.location_code === code);
+                
+                if (location) {
+                    locationCache.set(code, location);
+                    showLocationInfo(location);
+                } else {
+                    showToast('库位不存在', 'error');
+                    document.getElementById('locationInfo').classList.add('hidden');
+                }
+            } catch (error) {
+                console.error('验证库位失败:', error);
+                showToast('验证库位失败', 'error');
+            }
+        }
+        
+        // 显示库位信息
+        function showLocationInfo(location) {
+            document.getElementById('locationName').textContent = location.name;
+            document.getElementById('locationInfo').classList.remove('hidden');
+        }
+
+        function formatDateTime(dateValue) {
+            if (!dateValue) return '';
+            return new Date(dateValue).toLocaleString('zh-CN');
+        }
+
+        function exportRowsAsCsv(rows, fileName) {
+            const headers = Object.keys(rows[0]);
+            const escapeCsv = (value) => {
+                const text = value === null || value === undefined ? '' : String(value);
+                return `"${text.replace(/"/g, '""')}"`;
+            };
+            const csvBody = [
+                headers.map(escapeCsv).join(','),
+                ...rows.map(row => headers.map(header => escapeCsv(row[header])).join(','))
+            ].join('\r\n');
+
+            const blob = new Blob(['\uFEFF' + csvBody], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        }
+
+        async function exportInboundOrders() {
+            if (filteredOrders.length === 0) {
+                showToast('暂无可导出的入库单数据', 'info');
+                return;
+            }
+
+            const exportBtn = document.getElementById('exportOrdersBtn');
+            const originalText = exportBtn.innerHTML;
+            exportBtn.disabled = true;
+            exportBtn.innerHTML = '<i class="fa fa-spinner fa-spin mr-1"></i> 导出中...';
+
+            try {
+                const orderDetails = await Promise.all(filteredOrders.map(async (order) => {
+                    try {
+                        const response = await fetch(`${API_BASE_URL}/inbound-orders/${order.id}`, {
+                            headers: getHeaders()
+                        });
+                        if (!response.ok) {
+                            throw new Error('获取详情失败');
+                        }
+                        return await response.json();
+                    } catch (error) {
+                        console.warn(`获取入库单 ${order.order_no} 详情失败，使用列表数据导出`, error);
+                        return { ...order, items: [] };
+                    }
+                }));
+
+                const rows = [];
+                orderDetails.forEach(order => {
+                    const statusText = order.status === 'DRAFT' ? '草稿' : '已完成';
+                    const baseData = {
+                        '入库单号': order.order_no || '',
+                        '仓库': order.warehouse_name || '',
+                        '供应商': order.supplier || '',
+                        '操作员': order.operator_name || '',
+                        '状态': statusText,
+                        '单据总金额': parseFloat(order.total_amount || 0).toFixed(2),
+                        '创建时间': formatDateTime(order.create_time),
+                        '完成时间': formatDateTime(order.complete_time),
+                        '单据备注': order.remark || ''
+                    };
+
+                    if (Array.isArray(order.items) && order.items.length > 0) {
+                        order.items.forEach(item => {
+                            rows.push({
+                                ...baseData,
+                                '货物名称': item.goods_name || '',
+                                '货物条码': item.goods_barcode || '',
+                                '库位编码': item.location_code || '',
+                                '数量': item.quantity ?? '',
+                                '单价': parseFloat(item.unit_price || 0).toFixed(2),
+                                '明细金额': parseFloat(item.total_price || 0).toFixed(2),
+                                '明细备注': item.remark || ''
+                            });
+                        });
+                    } else {
+                        rows.push({
+                            ...baseData,
+                            '货物名称': '',
+                            '货物条码': '',
+                            '库位编码': '',
+                            '数量': '',
+                            '单价': '',
+                            '明细金额': '',
+                            '明细备注': ''
+                        });
+                    }
+                });
+
+                const datePart = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                if (window.XLSX) {
+                    const workbook = XLSX.utils.book_new();
+                    const worksheet = XLSX.utils.json_to_sheet(rows);
+                    worksheet['!cols'] = [
+                        { wch: 18 }, { wch: 14 }, { wch: 14 }, { wch: 12 }, { wch: 10 },
+                        { wch: 12 }, { wch: 20 }, { wch: 20 }, { wch: 16 }, { wch: 16 },
+                        { wch: 16 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 12 }, { wch: 16 }
+                    ];
+                    XLSX.utils.book_append_sheet(workbook, worksheet, '入库单');
+                    XLSX.writeFile(workbook, `入库单导出_${datePart}.xlsx`);
+                } else {
+                    exportRowsAsCsv(rows, `入库单导出_${datePart}.csv`);
+                    showToast('未加载Excel组件，已导出CSV（UTF-8）', 'info');
+                    return;
+                }
+
+                showToast('入库单导出成功', 'success');
+            } catch (error) {
+                console.error('导出入库单失败:', error);
+                showToast('导出入库单失败', 'error');
+            } finally {
+                exportBtn.disabled = false;
+                exportBtn.innerHTML = originalText;
+            }
+        }
+        
+        // 模拟扫码
+        function simulateScan(type) {
+            showToast('请使用实际扫码设备或手动输入', 'info');
+            if (type === 'goods') {
+                document.getElementById('goodsBarcode').focus();
+            } else {
+                document.getElementById('locationCode').focus();
+            }
+        }
+        
+        // 设置事件监听器
+        function setupInboundEventListeners() {
+            // 创建入库单
+            document.getElementById('orderForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                createInboundOrder();
+            });
+            
+            // 刷新按钮
+            document.getElementById('refreshOrders').addEventListener('click', loadInboundOrders);
+            
+            // 搜索按钮
+            document.getElementById('searchOrderBtn').addEventListener('click', function() {
+                applySearch();
+                updateOrderTable();
+                updatePagination();
+            });
+            
+            // 搜索框回车
+            document.getElementById('searchOrder').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    applySearch();
+                    updateOrderTable();
+                    updatePagination();
+                }
+            });
+
+            // 导出按钮
+            document.getElementById('exportOrdersBtn').addEventListener('click', exportInboundOrders);
+            
+            // 筛选状态
+            document.getElementById('filterStatus').addEventListener('change', loadInboundOrders);
+            
+            // 日期筛选
+            document.getElementById('startDate').addEventListener('change', loadInboundOrders);
+            document.getElementById('endDate').addEventListener('change', loadInboundOrders);
+            document.getElementById('applyDateFilterBtn').addEventListener('click', function() {
+                currentPage = 1;
+                loadInboundOrders();
+            });
+            
+            // 分页按钮
+            document.getElementById('prevPage').addEventListener('click', function() {
+                if (currentPage > 1) {
+                    currentPage--;
+                    updateOrderTable();
+                    updatePagination();
+                }
+            });
+            
+            document.getElementById('nextPage').addEventListener('click', function() {
+                const totalPages = Math.ceil(filteredOrders.length / pageSize);
+                if (currentPage < totalPages) {
+                    currentPage++;
+                    updateOrderTable();
+                    updatePagination();
+                }
+            });
+
+            document.getElementById('pageSizeSelect').addEventListener('change', function() {
+                pageSize = parseInt(this.value, 10) || 10;
+                currentPage = 1;
+                updateOrderTable();
+                updatePagination();
+            });
+            
+            // 详情模态框
+            document.getElementById('closeDetailModal').addEventListener('click', function() {
+                document.getElementById('orderDetailModal').classList.add('hidden');
+            });
+            
+            document.getElementById('cancelDetail').addEventListener('click', function() {
+                document.getElementById('orderDetailModal').classList.add('hidden');
+            });
+            
+            // 添加明细模态框
+            document.getElementById('closeItemModal').addEventListener('click', function() {
+                document.getElementById('addItemModal').classList.add('hidden');
+            });
+            
+            document.getElementById('cancelAddItem').addEventListener('click', function() {
+                document.getElementById('addItemModal').classList.add('hidden');
+            });
+            
+            document.getElementById('itemForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                addOrderItem();
+            });
+            
+            // 扫码按钮
+            document.getElementById('scanGoodsBtn').addEventListener('click', function() {
+                simulateScan('goods');
+            });
+            
+            document.getElementById('scanLocationBtn').addEventListener('click', function() {
+                simulateScan('location');
+            });
+            
+            // 货物条码输入
+            document.getElementById('goodsBarcode').addEventListener('input', function() {
+                if (this.value.trim()) {
+                    validateGoods(this.value.trim());
+                } else {
+                    document.getElementById('goodsInfo').classList.add('hidden');
+                }
+            });
+            
+            // 点击页面其他地方隐藏搜索结果
+            document.addEventListener('click', function(event) {
+                const goodsBarcodeInput = document.getElementById('goodsBarcode');
+                const goodsSearchResults = document.getElementById('goodsSearchResults');
+
+                if (!goodsBarcodeInput.contains(event.target) &&
+                    !goodsSearchResults.contains(event.target)) {
+                    goodsSearchResults.classList.add('hidden');
+                }
+            });
+
+            // 库位编码选择
+            document.getElementById('locationCode').addEventListener('change', function() {
+                if (this.value.trim()) {
+                    validateLocation(this.value.trim());
+                } else {
+                    document.getElementById('locationInfo').classList.add('hidden');
+                }
+            });
+        }
+    </script>
+</body>
+</html>
+
