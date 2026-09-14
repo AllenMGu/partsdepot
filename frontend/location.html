@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-E3yxBhWQGh4bVFILDvJc9j77UFSPbBldD5uxPGdV8qc='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>库位管理 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -460,13 +461,13 @@
                 return `
                     <tr class="hover:bg-gray-50">
                         <td class="px-6 py-4 whitespace-nowrap">
-                            <div class="text-sm font-medium text-gray-900">${location.location_code}</div>
+                            <div class="text-sm font-medium text-gray-900">${escapeHTML(location.location_code)}</div>
                         </td>
                         <td class="px-6 py-4">
-                            <div class="text-sm text-gray-900">${location.name}</div>
+                            <div class="text-sm text-gray-900">${escapeHTML(location.name)}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
-                            <div class="text-sm text-gray-900">${warehouse ? warehouse.name : '未知仓库'}</div>
+                            <div class="text-sm text-gray-900">${escapeHTML(warehouse ? warehouse.name : '未知仓库')}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
                             <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}">
@@ -477,14 +478,14 @@
                             <div class="text-sm text-gray-500">${new Date(location.create_time).toLocaleString()}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <button onclick="openLocationPrint(${location.id})" class="text-blue-500 hover:text-blue-600 mr-3">
+                            <button onclick="openLocationPrint(${Number(location.id) || 0})" class="text-blue-500 hover:text-blue-600 mr-3">
                                 <i class="fa fa-print"></i> 打印
                             </button>
-                            <button onclick="editLocation(${location.id})" class="text-primary hover:text-secondary mr-3">
+                            <button onclick="editLocation(${Number(location.id) || 0})" class="text-primary hover:text-secondary mr-3">
                                 <i class="fa fa-edit"></i> 编辑
                             </button>
                             ${getCurrentUserRole() === 'admin' ? `
-                                <button onclick="deleteLocation(${location.id})" class="text-red-600 hover:text-red-700">
+                                <button onclick="deleteLocation(${Number(location.id) || 0})" class="text-red-600 hover:text-red-700">
                                     <i class="fa fa-trash"></i> 删除
                                 </button>
                             ` : ''}
@@ -652,9 +653,9 @@
             const infoContainer = document.createElement('div');
             infoContainer.className = 'text-center space-y-2';
             infoContainer.innerHTML = `
-                <div class="text-xl font-bold text-gray-800">${location.name}</div>
-                <div class="text-base text-gray-600">库位编码：${location.location_code}</div>
-                <div class="text-sm text-gray-500">所属仓库：${warehouse ? warehouse.name : '未知仓库'}</div>
+                <div class="text-xl font-bold text-gray-800">${escapeHTML(location.name)}</div>
+                <div class="text-base text-gray-600">库位编码：${escapeHTML(location.location_code)}</div>
+                <div class="text-sm text-gray-500">所属仓库：${escapeHTML(warehouse ? warehouse.name : '未知仓库')}</div>
             `;
 
             const qrContainer = document.createElement('div');
@@ -702,11 +703,12 @@
                 canvas.parentNode.replaceChild(img, canvas);
             });
 
-            const printWindow = window.open('', '_blank');
+            const printWindow = window.open('', '_blank', 'noopener,noreferrer');
             if (!printWindow) {
                 showToast('浏览器阻止了弹窗，请允许后重试', 'error');
                 return;
             }
+            printWindow.opener = null;
 
             const printHTML = `
                 <!DOCTYPE html>

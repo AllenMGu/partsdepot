@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-bXaBJavjGDofTa3I4uP9nbm+YFNsz54xcy1GrjsMXdU='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>仪表盘 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <!-- Font Awesome -->
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
     <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="assets/js/chart.umd.min.js"></script>
     <!-- 统一的 Tailwind 配置 -->
 </head>
 <body class="bg-gray-100 min-h-screen flex flex-col">
@@ -314,6 +315,15 @@
         let outboundSeries = [];
         let categoryLabels = [];
         let categoryValues = [];
+
+        function escapeHTML(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
         
         // DOM元素
         const sidebarToggle = document.getElementById('sidebarToggle');
@@ -335,11 +345,10 @@
                 return window.top !== window.self || params.get('embedded') === '1';
             };
             const readAuth = (storage) => ({
-                token: storage.getItem('access_token'),
                 userInfo: storage.getItem('user'),
                 expiry: storage.getItem('token_expiry')
             });
-            const isComplete = (auth) => !!(auth.token && auth.userInfo);
+            const isComplete = (auth) => !!auth.userInfo;
             const isExpired = (auth) => !!(auth.expiry && new Date() >= new Date(auth.expiry));
             const pickBest = (localAuth, sessionAuth) => {
                 if (isComplete(localAuth) && !isExpired(localAuth)) return localAuth;
@@ -365,32 +374,28 @@
                 }
             }
 
-            const legacyToken = localStorage.getItem('token');
-            if (legacyToken) {
-                localStorage.setItem('access_token', legacyToken);
-                localStorage.removeItem('token');
-                return {
-                    token: legacyToken,
-                    userInfo: localStorage.getItem('user'),
-                    expiry: localStorage.getItem('token_expiry')
-                };
-            }
-
-            return { token: null, userInfo: null, expiry: null };
+            return { userInfo: null, expiry: null };
         }
 
         function clearAuthStorage() {
             localStorage.removeItem('access_token');
+            localStorage.removeItem('auth_mode');
+            localStorage.removeItem('token');
             localStorage.removeItem('user');
             localStorage.removeItem('token_expiry');
             sessionStorage.removeItem('access_token');
+            sessionStorage.removeItem('auth_mode');
             sessionStorage.removeItem('user');
             sessionStorage.removeItem('token_expiry');
         }
 
         function restoreAuthContext() {
-            const { token, userInfo, expiry } = getStoredAuth();
-            if (!token || !userInfo) {
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('token');
+            sessionStorage.removeItem('access_token');
+
+            const { userInfo, expiry } = getStoredAuth();
+            if (!userInfo) {
                 window.location.href = 'index.html';
                 return false;
             }
@@ -403,7 +408,7 @@
 
             try {
                 currentUser = JSON.parse(userInfo);
-                accessToken = token;
+                accessToken = null;
                 return true;
             } catch (error) {
                 console.error('????????:', error);
@@ -411,6 +416,14 @@
                 window.location.href = 'index.html';
                 return false;
             }
+        }
+
+        function getAuthHeaders() {
+            const headers = {};
+            if (accessToken) {
+                headers['Authorization'] = `Bearer ${accessToken}`;
+            }
+            return headers;
         }
         
         // 页面初始化
@@ -468,7 +481,7 @@
             try {
                 const response = await fetch(`${API_BASE_URL}/users/${currentUser.id}/warehouses`, {
                     headers: {
-                        'Authorization': `Bearer ${accessToken}`
+                        ...getAuthHeaders()
                     }
                 });
                 
@@ -546,7 +559,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${accessToken}`
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ warehouse_id: warehouseId })
                 });
@@ -562,10 +575,10 @@
                 
                 // 更新本地存储的用户信息
                 currentUser.current_warehouse_id = warehouseId;
-                if (localStorage.getItem('access_token')) {
+                if (localStorage.getItem('user')) {
                     localStorage.setItem('user', JSON.stringify(currentUser));
                 }
-                if (sessionStorage.getItem('access_token')) {
+                if (sessionStorage.getItem('user')) {
                     sessionStorage.setItem('user', JSON.stringify(currentUser));
                 }
                 
@@ -584,7 +597,7 @@
             }
             
             try {
-                const headers = { 'Authorization': `Bearer ${accessToken}` };
+                const headers = getAuthHeaders();
                 const [stocks, goods, inboundOrders, outboundOrders] = await Promise.all([
                     fetch(`${API_BASE_URL}/stock/`, { headers }).then(handleResponse),
                     fetch(`${API_BASE_URL}/goods/`, { headers }).then(handleResponse),
@@ -646,14 +659,14 @@
                         return `
                             <tr>
                                 <td class="px-4 py-3 whitespace-nowrap">
-                                    <div class="text-sm font-medium text-gray-900">${stock.goods_name}</div>
-                                    <div class="text-xs text-gray-500">SKU: ${stock.goods_barcode}</div>
+                                    <div class="text-sm font-medium text-gray-900">${escapeHTML(stock.goods_name)}</div>
+                                    <div class="text-xs text-gray-500">SKU: ${escapeHTML(stock.goods_barcode)}</div>
                                 </td>
                                 <td class="px-4 py-3 whitespace-nowrap">
                                     <div class="text-sm text-gray-900">${stock.quantity}</div>
                                 </td>
                                 <td class="px-4 py-3 whitespace-nowrap">
-                                    <div class="text-sm text-gray-900">${stock.location_code}</div>
+                                    <div class="text-sm text-gray-900">${escapeHTML(stock.location_code)}</div>
                                 </td>
                                 <td class="px-4 py-3 whitespace-nowrap">
                                     <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}">
@@ -857,6 +870,7 @@
             // 退出登录
             logoutButton.addEventListener('click', function(e) {
                 e.preventDefault();
+                fetch(`${API_BASE_URL}/logout`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
                 clearAuthStorage();
                 window.location.href = 'index.html';
             });
@@ -865,6 +879,5 @@
         // 页面加载完成后初始化
         document.addEventListener('DOMContentLoaded', pageInit);
     </script>
-    <script type="module" src="assets/js/page-agent-loader.js"></script>
 </body>
 </html>

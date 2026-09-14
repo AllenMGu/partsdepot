@@ -1,8 +1,9 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-1K7yB+05OI6hoeweIl72a7yYgogBeCDRmsv7uzeVogE='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>出库单管理 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -400,6 +401,15 @@
         let currentOrderId = null;
         let goodsCache = new Map();
         let locationCache = new Map();
+
+        function escapeHTML(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
         
         // 页面初始化
         function pageInit() {
@@ -501,16 +511,16 @@
                 return `
                     <tr class="hover:bg-gray-50">
                         <td class="px-6 py-4 whitespace-nowrap">
-                            <div class="text-sm font-medium text-gray-900">${order.order_no}</div>
+                            <div class="text-sm font-medium text-gray-900">${escapeHTML(order.order_no)}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
-                            <div class="text-sm text-gray-900">${order.warehouse_name}</div>
+                            <div class="text-sm text-gray-900">${escapeHTML(order.warehouse_name)}</div>
                         </td>
                         <td class="px-6 py-4">
-                            <div class="text-sm text-gray-900">${order.customer || '-'}</div>
+                            <div class="text-sm text-gray-900">${escapeHTML(order.customer || '-')}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
-                            <div class="text-sm text-gray-900">${order.operator_name}</div>
+                            <div class="text-sm text-gray-900">${escapeHTML(order.operator_name)}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap">
                             <div class="text-sm font-medium text-gray-900">¥${order.total_amount.toFixed(2)}</div>
@@ -524,14 +534,14 @@
                             <div class="text-sm text-gray-500">${new Date(order.create_time).toLocaleString()}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <button onclick="viewOrderDetail(${order.id})" class="text-primary hover:text-secondary mr-3">
+                            <button onclick="viewOrderDetail(${Number(order.id) || 0})" class="text-primary hover:text-secondary mr-3">
                                 <i class="fa fa-eye"></i> 查看
                             </button>
                             ${order.status === 'DRAFT' ? `
-                                <button onclick="editOrder(${order.id})" class="text-green-600 hover:text-green-700 mr-3">
+                                <button onclick="editOrder(${Number(order.id) || 0})" class="text-green-600 hover:text-green-700 mr-3">
                                     <i class="fa fa-edit"></i> 编辑
                                 </button>
-                                <button onclick="deleteOrder(${order.id})" class="text-red-600 hover:text-red-700">
+                                <button onclick="deleteOrder(${Number(order.id) || 0})" class="text-red-600 hover:text-red-700">
                                     <i class="fa fa-trash"></i> 删除
                                 </button>
                             ` : ''}
@@ -658,23 +668,23 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                     <div>
                         <p class="text-sm text-gray-500">单号</p>
-                        <p class="font-medium text-gray-900">${order.order_no}</p>
+                        <p class="font-medium text-gray-900">${escapeHTML(order.order_no)}</p>
                     </div>
                     <div>
                         <p class="text-sm text-gray-500">仓库</p>
-                        <p class="font-medium text-gray-900">${order.warehouse_name}</p>
+                        <p class="font-medium text-gray-900">${escapeHTML(order.warehouse_name)}</p>
                     </div>
                     <div>
                         <p class="text-sm text-gray-500">客户</p>
                         ${order.status === 'DRAFT' ? `
-                            <input type="text" id="editCustomer" value="${order.customer || ''}" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                            <input type="text" id="editCustomer" value="${escapeHTML(order.customer || '')}" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
                         ` : `
-                            <p class="font-medium text-gray-900">${order.customer || '-'}</p>
+                            <p class="font-medium text-gray-900">${escapeHTML(order.customer || '-')}</p>
                         `}
                     </div>
                     <div>
                         <p class="text-sm text-gray-500">操作员</p>
-                        <p class="font-medium text-gray-900">${order.operator_name}</p>
+                        <p class="font-medium text-gray-900">${escapeHTML(order.operator_name)}</p>
                     </div>
                     <div>
                         <p class="text-sm text-gray-500">总金额</p>
@@ -697,9 +707,9 @@
                     <div class="md:col-span-2">
                         <p class="text-sm text-gray-500">备注</p>
                         ${order.status === 'DRAFT' ? `
-                            <textarea id="editRemark" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">${order.remark || ''}</textarea>
+                            <textarea id="editRemark" rows="2" class="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">${escapeHTML(order.remark || '')}</textarea>
                         ` : `
-                            <p class="font-medium text-gray-900">${order.remark || '-'}</p>
+                            <p class="font-medium text-gray-900">${escapeHTML(order.remark || '-')}</p>
                         `}
                     </div>
                 </div>
@@ -723,11 +733,11 @@
                                 ${order.items.length > 0 ? order.items.map(item => `
                                     <tr>
                                         <td class="px-4 py-3">
-                                            <div class="text-sm font-medium text-gray-900">${item.goods_name}</div>
-                                            <div class="text-xs text-gray-500">${item.goods_barcode}</div>
+                                            <div class="text-sm font-medium text-gray-900">${escapeHTML(item.goods_name)}</div>
+                                            <div class="text-xs text-gray-500">${escapeHTML(item.goods_barcode)}</div>
                                         </td>
                                         <td class="px-4 py-3">
-                                            <div class="text-sm text-gray-900">${item.location_code}</div>
+                                            <div class="text-sm text-gray-900">${escapeHTML(item.location_code)}</div>
                                         </td>
                                         <td class="px-4 py-3">
                                             <div class="text-sm text-gray-900">${item.quantity}</div>
@@ -739,14 +749,14 @@
                                             <div class="text-sm font-medium text-gray-900">¥${item.total_price.toFixed(2)}</div>
                                         </td>
                                         <td class="px-4 py-3">
-                                            <div class="text-sm text-gray-900">${item.remark || '-'}</div>
+                                            <div class="text-sm text-gray-900">${escapeHTML(item.remark || '-')}</div>
                                         </td>
                                         ${order.status === 'DRAFT' ? `
                                             <td class="px-4 py-3 text-sm font-medium">
-                                                <button onclick="editOrderItem(${item.id})" class="text-blue-600 hover:text-blue-700 mr-3">
+                                                <button onclick="editOrderItem(${Number(item.id) || 0})" class="text-blue-600 hover:text-blue-700 mr-3">
                                                     <i class="fa fa-edit"></i> 编辑
                                                 </button>
-                                                <button onclick="deleteOrderItem(${item.id})" class="text-red-600 hover:text-red-700">
+                                                <button onclick="deleteOrderItem(${Number(item.id) || 0})" class="text-red-600 hover:text-red-700">
                                                     <i class="fa fa-trash"></i> 删除
                                                 </button>
                                             </td>
@@ -1141,9 +1151,9 @@
             );
 
             resultsContainer.innerHTML = goodsWithStock.map(goods => `
-                <div class="px-3 py-2 hover:bg-gray-100 cursor-pointer" data-goods='${JSON.stringify(goods).replace(/'/g, "&apos;")}'>
-                    <div class="font-medium text-gray-900">${goods.name}</div>
-                    <div class="text-sm text-gray-500">条码: ${goods.barcode} | 规格: ${goods.spec || '无'} | 单位: ${goods.unit}</div>
+                <div class="px-3 py-2 hover:bg-gray-100 cursor-pointer" data-goods="${encodeURIComponent(JSON.stringify(goods))}">
+                    <div class="font-medium text-gray-900">${escapeHTML(goods.name)}</div>
+                    <div class="text-sm text-gray-500">条码: ${escapeHTML(goods.barcode)} | 规格: ${escapeHTML(goods.spec || '无')} | 单位: ${escapeHTML(goods.unit)}</div>
                     <div class="text-sm text-blue-600 mt-1">可用库存: ${goods.availableStock}</div>
                 </div>
             `).join('');
@@ -1151,7 +1161,7 @@
             // 为搜索结果添加点击事件监听器
             resultsContainer.querySelectorAll('[data-goods]').forEach(item => {
                 item.addEventListener('click', async function() {
-                    const goods = JSON.parse(this.dataset.goods.replace(/&apos;/g, "'"));
+                    const goods = JSON.parse(decodeURIComponent(this.dataset.goods));
                     await selectGoods(goods);
                 });
             });

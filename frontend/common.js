@@ -1,49 +1,47 @@
-﻿// 澶氫粨搴撶鐞嗙郴缁熼€氱敤鑴氭湰
+// 仓储系统通用脚本
 
-// API鍩虹URL
+// API 基础路径
 const API_BASE_URL = 'api';
 
-// 褰撳墠鐢ㄦ埛淇℃伅
+// 当前登录用户及仓库上下文
 let currentUser = null;
 let userWarehouses = [];
 let currentWarehouse = null;
 
-// 椤甸潰鍔犺浇瀹屾垚鍚庢墽琛?
+// 统一 HTML 转义，避免将用户可控内容注入 innerHTML
+function escapeHTML(value) {
+    return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+window.escapeHTML = escapeHTML;
+
+// 页面加载后初始化通用能力
 document.addEventListener('DOMContentLoaded', function() {
-    // 鍒濆鍖栭€氱敤鍔熻兘
     initCommon();
 });
 
-// 鍒濆鍖栭€氱敤鍔熻兘
+// 初始化：鉴权、导航交互、仓库切换、用户菜单、退出登录
 function initCommon() {
-    // 妫€鏌ョ櫥褰曠姸鎬?
     checkLoginStatus();
-    
-    // 璁剧疆渚ц竟鏍忓垏鎹?
     setupSidebarToggle();
-    
-    // 璁剧疆浠撳簱閫夋嫨鍣?
     setupWarehouseSelector();
-    
-    // 璁剧疆鐢ㄦ埛鑿滃崟
     setupUserMenu();
-    
-    // 璁剧疆閫€鍑虹櫥褰?
     setupLogout();
-
-    // 注入 PageAgent（使用后端代理，不暴露 OpenAI Key）
-    initPageAgent();
 }
 
-
-// 妫€鏌ョ櫥褰曠姸鎬?
+// 读取并选择最佳认证信息（本页存储优先，其次父页面）
 function getStoredAuth() {
     const readAuth = (storage) => ({
-        token: storage.getItem('access_token'),
         userInfo: storage.getItem('user'),
         expiry: storage.getItem('token_expiry')
     });
-    const isComplete = (auth) => !!(auth.token && auth.userInfo);
+
+    const isComplete = (auth) => !!auth.userInfo;
     const isExpired = (auth) => !!(auth.expiry && new Date() >= new Date(auth.expiry));
 
     const pickBest = (localAuth, sessionAuth) => {
@@ -57,45 +55,35 @@ function getStoredAuth() {
     const localAuth = readAuth(localStorage);
     const sessionAuth = readAuth(sessionStorage);
     const ownAuth = pickBest(localAuth, sessionAuth);
-    if (ownAuth) {
-        return ownAuth;
-    }
+    if (ownAuth) return ownAuth;
 
+    // 嵌入模式下，兜底从父页面读取会话
     if (isEmbeddedMode()) {
         try {
             if (window.top && window.top !== window && window.top.location.origin === window.location.origin) {
                 const topLocalAuth = readAuth(window.top.localStorage);
                 const topSessionAuth = readAuth(window.top.sessionStorage);
                 const topAuth = pickBest(topLocalAuth, topSessionAuth);
-                if (topAuth) {
-                    return topAuth;
-                }
+                if (topAuth) return topAuth;
             }
         } catch (error) {
-            // ignore cross-context access errors
+            // 忽略跨上下文访问异常
         }
     }
 
-    const legacyToken = localStorage.getItem('token');
-    if (legacyToken) {
-        localStorage.setItem('access_token', legacyToken);
-        localStorage.removeItem('token');
-        return {
-            token: legacyToken,
-            userInfo: localStorage.getItem('user'),
-            expiry: localStorage.getItem('token_expiry')
-        };
-    }
-
-    return { token: null, userInfo: null, expiry: null };
+    return { userInfo: null, expiry: null };
 }
 
-// ??????
+// 校验登录状态并初始化页面上下文
 function checkLoginStatus() {
-    const { token, userInfo, expiry } = getStoredAuth();
+    // 强制清理历史 token 落地，统一改为 HttpOnly Cookie 会话
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('token');
+    sessionStorage.removeItem('access_token');
 
-    if (!token || !userInfo) {
-        // ??????????
+    const { userInfo, expiry } = getStoredAuth();
+
+    if (!userInfo) {
         window.location.href = 'index.html';
         return;
     }
@@ -109,16 +97,14 @@ function checkLoginStatus() {
         currentUser = JSON.parse(userInfo);
         userWarehouses = currentUser.warehouses || [];
 
-        // ????????
         updateUserDisplay();
 
-        // ??????
         if (currentUser.current_warehouse_id) {
             currentWarehouse = userWarehouses.find(w => w.id === currentUser.current_warehouse_id);
             updateWarehouseDisplay();
         }
 
-        // ???????????????????
+        // 非 admin 隐藏仓库管理菜单
         if (getCurrentUserRole() !== 'admin') {
             const warehouseNavLinks = document.querySelectorAll('a[href="warehouse.html"]');
             warehouseNavLinks.forEach(link => {
@@ -126,30 +112,26 @@ function checkLoginStatus() {
             });
         }
 
-        // ???????
+        // 让业务页面执行自身初始化
         if (typeof pageInit === 'function') {
             pageInit();
         }
     } catch (error) {
-        console.error('????????:', error);
+        console.error('解析用户信息失败:', error);
         logout();
     }
 }
 
-
-// 鏇存柊鐢ㄦ埛淇℃伅鏄剧ず
+// 更新右上角用户显示
 function updateUserDisplay() {
     if (currentUser) {
-        // 鏇存柊鐢ㄦ埛澶村儚棣栧瓧姣?
         const initials = currentUser.full_name ? currentUser.full_name.charAt(0).toUpperCase() : 'U';
         document.getElementById('userInitials').textContent = initials;
-        
-        // 鏇存柊鐢ㄦ埛鍚?
         document.getElementById('userName').textContent = currentUser.full_name || currentUser.username;
     }
 }
 
-// 鏇存柊浠撳簱鏄剧ず
+// 更新当前仓库显示
 function updateWarehouseDisplay() {
     if (currentWarehouse) {
         document.getElementById('currentWarehouse').textContent = currentWarehouse.name;
@@ -161,11 +143,11 @@ function updateWarehouseDisplay() {
     }
 }
 
-// 璁剧疆渚ц竟鏍忓垏鎹?
+// 移动端侧边栏收起/展开
 function setupSidebarToggle() {
     const sidebarToggle = document.getElementById('sidebarToggle');
     const sidebar = document.getElementById('sidebar');
-    
+
     if (sidebarToggle && sidebar) {
         sidebarToggle.addEventListener('click', function() {
             sidebar.classList.toggle('hidden');
@@ -173,69 +155,65 @@ function setupSidebarToggle() {
     }
 }
 
-// 璁剧疆浠撳簱閫夋嫨鍣?
+// 仓库选择器交互
 function setupWarehouseSelector() {
     const selector = document.getElementById('warehouseSelector');
     const dropdown = document.getElementById('warehouseDropdown');
     const list = document.getElementById('warehouseList');
-    
+
     if (!selector || !dropdown || !list) return;
-    
-    // 鐐瑰嚮閫夋嫨鍣ㄥ垏鎹笅鎷夋
+
     selector.addEventListener('click', function(e) {
         e.stopPropagation();
         dropdown.classList.toggle('hidden');
         updateWarehouseList();
     });
-    
-    // 鐐瑰嚮鍏朵粬鍦版柟鍏抽棴涓嬫媺妗?
+
     document.addEventListener('click', function() {
         dropdown.classList.add('hidden');
     });
-    
-    // 闃绘涓嬫媺妗嗗唴鐐瑰嚮浜嬩欢鍐掓场
+
     dropdown.addEventListener('click', function(e) {
         e.stopPropagation();
     });
 }
 
-// 鏇存柊浠撳簱鍒楄〃
+// 刷新仓库下拉列表
 function updateWarehouseList() {
     const list = document.getElementById('warehouseList');
-    
     if (!list) return;
-    
+
     list.innerHTML = '';
-    
+
     if (userWarehouses.length === 0) {
         list.innerHTML = `
             <div class="px-4 py-2 text-sm text-gray-500">
-                鏃犲彲鐢ㄤ粨搴?
+                无可用仓库
             </div>
         `;
         return;
     }
-    
+
     userWarehouses.forEach(warehouse => {
         const item = document.createElement('div');
         item.className = `px-4 py-2 text-sm cursor-pointer hover:bg-gray-100 ${currentWarehouse && currentWarehouse.id === warehouse.id ? 'bg-primary text-white' : 'text-gray-700'}`;
         item.innerHTML = `
             <div class="flex items-center justify-between">
-                <span>${warehouse.name}</span>
-                ${warehouse.is_default ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">榛樿</span>' : ''}
+                <span>${escapeHTML(warehouse.name)}</span>
+                ${warehouse.is_default ? '<span class="text-xs bg-green-100 text-green-800 px-2 py-0.5 rounded">默认</span>' : ''}
             </div>
-            <div class="text-xs text-gray-500">${warehouse.code}</div>
+            <div class="text-xs text-gray-500">${escapeHTML(warehouse.code)}</div>
         `;
-        
+
         item.addEventListener('click', function() {
             switchWarehouse(warehouse.id);
         });
-        
+
         list.appendChild(item);
     });
 }
 
-// 鍒囨崲浠撳簱
+// 切换当前仓库
 async function switchWarehouse(warehouseId) {
     try {
         const params = new URLSearchParams({ warehouse_id: warehouseId });
@@ -243,77 +221,67 @@ async function switchWarehouse(warehouseId) {
             method: 'POST',
             headers: getHeaders()
         });
-        
+
         if (!response.ok) {
-            throw new Error('鍒囨崲浠撳簱澶辫触');
+            throw new Error('切换仓库失败');
         }
-        
+
         const result = await response.json();
-        
-        // 鏇存柊褰撳墠浠撳簱
+
         currentWarehouse = userWarehouses.find(w => w.id === warehouseId);
         currentUser.current_warehouse_id = warehouseId;
-        
-        // 鏇存柊鏈湴瀛樺偍
-        if (localStorage.getItem('access_token')) {
+
+        if (localStorage.getItem('user')) {
             localStorage.setItem('user', JSON.stringify(currentUser));
         }
-        if (sessionStorage.getItem('access_token')) {
+        if (sessionStorage.getItem('user')) {
             sessionStorage.setItem('user', JSON.stringify(currentUser));
         }
-        
-        // 鏇存柊鏄剧ず
+
         updateWarehouseDisplay();
         updateWarehouseList();
-        
-        // 鍏抽棴涓嬫媺妗?
         document.getElementById('warehouseDropdown').classList.add('hidden');
-        
-        // 鏄剧ず鎻愮ず
-        showToast('浠撳簱鍒囨崲鎴愬姛', 'success');
-        
-        // 鍒锋柊椤甸潰鏁版嵁
+
+        showToast('仓库切换成功', 'success');
+
+        // 通知各业务页面刷新数据
         if (typeof loadLocations === 'function') loadLocations();
         if (typeof loadGoods === 'function') loadGoods();
         if (typeof loadStock === 'function') loadStock();
         if (typeof loadInboundOrders === 'function') loadInboundOrders();
         if (typeof loadOutboundOrders === 'function') loadOutboundOrders();
         if (typeof loadCheckRecords === 'function') loadCheckRecords();
-        
     } catch (error) {
-        console.error('鍒囨崲浠撳簱澶辫触:', error);
-        showToast('鍒囨崲浠撳簱澶辫触', 'error');
+        console.error('切换仓库失败:', error);
+        showToast('切换仓库失败', 'error');
     }
 }
 
-// 璁剧疆鐢ㄦ埛鑿滃崟
+// 用户菜单交互
 function setupUserMenu() {
     const userMenu = document.getElementById('userMenu');
     const dropdown = document.getElementById('userDropdown');
-    
+
     if (!userMenu || !dropdown) return;
-    
-    // 鐐瑰嚮鐢ㄦ埛鑿滃崟鍒囨崲涓嬫媺妗?
+
     userMenu.addEventListener('click', function(e) {
         e.stopPropagation();
         dropdown.classList.toggle('hidden');
     });
-    
-    // 鐐瑰嚮鍏朵粬鍦版柟鍏抽棴涓嬫媺妗?
+
     document.addEventListener('click', function() {
         dropdown.classList.add('hidden');
     });
-    
-    // 闃绘涓嬫媺妗嗗唴鐐瑰嚮浜嬩欢鍐掓场
+
     dropdown.addEventListener('click', function(e) {
         e.stopPropagation();
     });
 }
 
-// 璁剧疆閫€鍑虹櫥褰?
+// 绑定退出登录按钮
 function setupLogout() {
     const logoutButton = document.getElementById('logoutButton');
-    
+
     if (logoutButton) {
         logoutButton.addEventListener('click', function(e) {
             e.preventDefault();
@@ -322,100 +290,92 @@ function setupLogout() {
     }
 }
 
+// 是否为嵌入模式（iframe / embedded=1）
 function isEmbeddedMode() {
     const params = new URLSearchParams(window.location.search);
     return window.top !== window.self || params.get('embedded') === '1';
 }
 
-function initPageAgent() {
-    if (window.__WMS_PAGE_AGENT_LOADER__) return;
 
-    const script = document.createElement('script');
-    script.type = 'module';
-    script.src = 'assets/js/page-agent-loader.js';
-    script.setAttribute('data-page-agent-loader', '1');
-    script.onerror = () => console.error('PageAgent loader 加载失败');
 
-    window.__WMS_PAGE_AGENT_LOADER__ = true;
-    document.body.appendChild(script);
-}
-// 閫€鍑虹櫥褰?
+// 退出登录并回到登录页
 function logout() {
-    // ??????
+    // 最佳努力通知后端清理 HttpOnly 会话 Cookie
+    fetch(`${API_BASE_URL}/logout`, { method: 'POST', credentials: 'same-origin' })
+        .catch(() => {});
+
     localStorage.removeItem('access_token');
+    localStorage.removeItem('auth_mode');
+    localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('token_expiry');
     sessionStorage.removeItem('access_token');
+    sessionStorage.removeItem('auth_mode');
     sessionStorage.removeItem('user');
     sessionStorage.removeItem('token_expiry');
 
-    // ??????
     window.location.href = 'index.html';
 }
 
-
-// 鑾峰彇璇锋眰澶?
+// 获取带认证头的请求头
 function getHeaders() {
-    const token = localStorage.getItem('access_token') || sessionStorage.getItem('access_token') || localStorage.getItem('token');
     return {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        'Content-Type': 'application/json'
     };
 }
 
-
-// 鏄剧ず鎻愮ず娑堟伅
+// 右上角 Toast 提示
 function showToast(message, type = 'info') {
-    // 鍒涘缓鎻愮ず鍏冪礌
     const toast = document.createElement('div');
     toast.className = `fixed top-4 right-4 px-6 py-3 rounded-md shadow-lg z-50 transform transition-all duration-300 translate-x-full opacity-0`;
-    
-    // 鏍规嵁绫诲瀷璁剧疆鏍峰紡
+
+    const icon = document.createElement('i');
+    icon.className = 'mr-2';
+    const text = document.createElement('span');
+    text.textContent = String(message ?? '');
+
     if (type === 'success') {
         toast.classList.add('bg-green-500', 'text-white');
-        toast.innerHTML = `<i class="fa fa-check-circle mr-2"></i>${message}`;
+        icon.classList.add('fa', 'fa-check-circle');
     } else if (type === 'error') {
         toast.classList.add('bg-red-500', 'text-white');
-        toast.innerHTML = `<i class="fa fa-times-circle mr-2"></i>${message}`;
+        icon.classList.add('fa', 'fa-times-circle');
     } else if (type === 'warning') {
         toast.classList.add('bg-yellow-500', 'text-white');
-        toast.innerHTML = `<i class="fa fa-exclamation-triangle mr-2"></i>${message}`;
+        icon.classList.add('fa', 'fa-exclamation-triangle');
     } else {
         toast.classList.add('bg-blue-500', 'text-white');
-        toast.innerHTML = `<i class="fa fa-info-circle mr-2"></i>${message}`;
+        icon.classList.add('fa', 'fa-info-circle');
     }
-    
-    // 娣诲姞鍒伴〉闈?
+
+    toast.appendChild(icon);
+    toast.appendChild(text);
     document.body.appendChild(toast);
-    
-    // 鏄剧ず鎻愮ず
+
     setTimeout(() => {
         toast.classList.remove('translate-x-full', 'opacity-0');
     }, 100);
-    
-    // 鑷姩闅愯棌
+
     setTimeout(() => {
         toast.classList.add('translate-x-full', 'opacity-0');
-        
-        // 绉婚櫎鍏冪礌
         setTimeout(() => {
             document.body.removeChild(toast);
         }, 300);
     }, 3000);
 }
 
-// 鑾峰彇褰撳墠鐢ㄦ埛瑙掕壊
+// 当前用户角色
 function getCurrentUserRole() {
     return currentUser ? currentUser.role : 'operator';
 }
 
-// 鑾峰彇浠撳簱鍚嶇О
+// 根据仓库 ID 获取仓库名称
 function getWarehouseName(warehouseId) {
     const warehouse = userWarehouses.find(w => w.id === warehouseId);
-    return warehouse ? warehouse.name : '鏈煡浠撳簱';
+    return warehouse ? warehouse.name : '未知仓库';
 }
 
-// 鏍煎紡鍖栨棩鏈熸椂闂?
+// 日期时间格式化
 function formatDateTime(dateString) {
     const date = new Date(dateString);
     return date.toLocaleString('zh-CN', {
@@ -428,7 +388,7 @@ function formatDateTime(dateString) {
     });
 }
 
-// 鏍煎紡鍖栨棩鏈?
+// 日期格式化
 function formatDate(dateString) {
     const date = new Date(dateString);
     return date.toLocaleDateString('zh-CN', {
@@ -438,7 +398,7 @@ function formatDate(dateString) {
     });
 }
 
-// 鏍煎紡鍖栭噾棰?
+// 货币格式化
 function formatCurrency(amount) {
     return new Intl.NumberFormat('zh-CN', {
         style: 'currency',
@@ -448,33 +408,33 @@ function formatCurrency(amount) {
     }).format(amount);
 }
 
-// 鐢熸垚闅忔満ID
+// 生成随机 ID
 function generateId() {
     return Date.now().toString(36) + Math.random().toString(36).substr(2);
 }
 
-// 楠岃瘉琛ㄥ崟瀛楁
+// 表单字段校验
 function validateField(value, type = 'required', min = null, max = null) {
     if (type === 'required' && !value) {
         return false;
     }
-    
+
     if (type === 'number' && value) {
         const num = parseFloat(value);
         if (isNaN(num)) return false;
         if (min !== null && num < min) return false;
         if (max !== null && num > max) return false;
     }
-    
+
     if (type === 'length' && value) {
         if (min !== null && value.length < min) return false;
         if (max !== null && value.length > max) return false;
     }
-    
+
     return true;
 }
 
-// 闃叉姈鍑芥暟
+// 防抖
 function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -487,7 +447,7 @@ function debounce(func, wait) {
     };
 }
 
-// 鑺傛祦鍑芥暟
+// 节流
 function throttle(func, limit) {
     let inThrottle;
     return function() {
@@ -500,5 +460,3 @@ function throttle(func, limit) {
         }
     };
 }
-
-

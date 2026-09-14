@@ -1,0 +1,17 @@
+# 多仓库管理系统 - Python 依赖
+# 安装: pip install -r requirements.txt
+# 说明: 密码哈希使用 passlib + bcrypt；JWT 使用 python-jose[cryptography]
+
+fastapi>=0.110.0
+uvicorn[standard]>=0.29.0
+sqlalchemy>=1.4.0,<2.0
+psycopg2-binary>=2.9.9
+pydantic>=1.10.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.0,<4.1.0
+python-jose[cryptography]>=3.3.0
+python-multipart>=0.0.9
+pandas>=2.0.0
+openpyxl>=3.1.0
+xlsxwriter>=3.1.0  # 盘点单 Excel 导出使用 engine='xlsxwriter'
+ldap3>=2.9.1

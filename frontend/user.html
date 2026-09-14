@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-Qs8ESBDCGS2rbOXrHQE+zWiMugrX282KDyTI0K+/EF8='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>用户管理 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -293,7 +294,7 @@
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">管理员密码</label>
-                    <input type="password" id="ldapAdminPassword" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary" required>
+                    <input type="password" id="ldapAdminPassword" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary" placeholder="留空则不修改">
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">用户搜索过滤器</label>
@@ -330,7 +331,7 @@
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">管理员密码</label>
-                    <input type="password" id="ldapConfigAdminPassword" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary" required>
+                    <input type="password" id="ldapConfigAdminPassword" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary" placeholder="留空则不修改">
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">用户搜索过滤器</label>
@@ -351,6 +352,15 @@
         let currentEditUserId = null;
         let currentWarehouseUserId = null;
         let currentWarehouseAssignments = [];
+
+        function escapeHTML(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
 
         function pageInit() {
             // 权限检查：只有管理员可以访问用户管理页面
@@ -420,7 +430,7 @@
             if (errorMessage) {
                 tbody.innerHTML = `
                     <tr>
-                        <td colspan="6" class="px-6 py-6 text-center text-red-500">${errorMessage}</td>
+                        <td colspan="6" class="px-6 py-6 text-center text-red-500">${escapeHTML(errorMessage)}</td>
                     </tr>
                 `;
                 return;
@@ -454,10 +464,10 @@
                 return `
                     <tr class="hover:bg-gray-50">
                         <td class="px-6 py-4">
-                            <div class="text-sm font-medium text-gray-900">${user.username}</div>
+                            <div class="text-sm font-medium text-gray-900">${escapeHTML(user.username)}</div>
                         </td>
                         <td class="px-6 py-4">
-                            <div class="text-sm text-gray-900">${user.full_name}</div>
+                            <div class="text-sm text-gray-900">${escapeHTML(user.full_name)}</div>
                         </td>
                         <td class="px-6 py-4">
                             <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${roleClass}">${roleLabel}</span>
@@ -490,10 +500,14 @@
             warehouses.forEach(warehouse => {
                 const label = document.createElement('label');
                 label.className = 'flex items-center space-x-2 text-sm text-gray-700';
-                label.innerHTML = `
-                    <input type="checkbox" value="${warehouse.id}" class="rounded border-gray-300 text-primary focus:ring-primary">
-                    <span>${warehouse.name}</span>
-                `;
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.value = String(warehouse.id);
+                checkbox.className = 'rounded border-gray-300 text-primary focus:ring-primary';
+                const span = document.createElement('span');
+                span.textContent = warehouse.name || '';
+                label.appendChild(checkbox);
+                label.appendChild(span);
                 container.appendChild(label);
             });
         }
@@ -543,7 +557,7 @@
                         document.getElementById('ldapServer').value = config.ldap_server || '';
                         document.getElementById('ldapBaseDn').value = config.ldap_base_dn || '';
                         document.getElementById('ldapAdminDn').value = config.ldap_admin_dn || '';
-                        document.getElementById('ldapAdminPassword').value = config.ldap_admin_password || '';
+                        document.getElementById('ldapAdminPassword').value = '';
                         document.getElementById('ldapUserFilter').value = config.ldap_user_search_filter || '(uid={})';
                     }
                 } catch (error) {
@@ -567,7 +581,7 @@
                         document.getElementById('ldapConfigServer').value = config.ldap_server || '';
                         document.getElementById('ldapConfigBaseDn').value = config.ldap_base_dn || '';
                         document.getElementById('ldapConfigAdminDn').value = config.ldap_admin_dn || '';
-                        document.getElementById('ldapConfigAdminPassword').value = config.ldap_admin_password || '';
+                        document.getElementById('ldapConfigAdminPassword').value = '';
                         document.getElementById('ldapConfigUserFilter').value = config.ldap_user_search_filter || '(uid={})';
                     }
                 } catch (error) {
@@ -630,16 +644,20 @@
 
                 try {
                     // 发送LDAP用户导入请求
+                    const ldapPayload = {
+                        ldap_server: ldapServer,
+                        base_dn: ldapBaseDn,
+                        admin_dn: ldapAdminDn,
+                        user_filter: ldapUserFilter
+                    };
+                    if (ldapAdminPassword) {
+                        ldapPayload.admin_password = ldapAdminPassword;
+                    }
+
                     const response = await fetch(`${API_BASE_URL}/ldap/import-users`, {
                         method: 'POST',
                         headers: getHeaders(),
-                        body: JSON.stringify({
-                            ldap_server: ldapServer,
-                            base_dn: ldapBaseDn,
-                            admin_dn: ldapAdminDn,
-                            admin_password: ldapAdminPassword,
-                            user_filter: ldapUserFilter
-                        })
+                        body: JSON.stringify(ldapPayload)
                     });
 
                     if (!response.ok) {
@@ -668,16 +686,20 @@
 
                 try {
                     // 发送LDAP配置保存请求
+                    const configPayload = {
+                        ldap_server: ldapServer,
+                        ldap_base_dn: ldapBaseDn,
+                        ldap_admin_dn: ldapAdminDn,
+                        ldap_user_search_filter: ldapUserFilter
+                    };
+                    if (ldapAdminPassword) {
+                        configPayload.ldap_admin_password = ldapAdminPassword;
+                    }
+
                     const response = await fetch(`${API_BASE_URL}/ldap/config`, {
                         method: 'PUT',
                         headers: getHeaders(),
-                        body: JSON.stringify({
-                            ldap_server: ldapServer,
-                            ldap_base_dn: ldapBaseDn,
-                            ldap_admin_dn: ldapAdminDn,
-                            ldap_admin_password: ldapAdminPassword,
-                            ldap_user_search_filter: ldapUserFilter
-                        })
+                        body: JSON.stringify(configPayload)
                     });
 
                     if (!response.ok) {
@@ -927,10 +949,15 @@
                 warehouses.forEach(warehouse => {
                     const label = document.createElement('label');
                     label.className = 'flex items-center space-x-2 text-sm text-gray-700';
-                    label.innerHTML = `
-                        <input type="checkbox" value="${warehouse.id}" class="rounded border-gray-300 text-primary focus:ring-primary" ${assignedIds.has(warehouse.id) ? 'checked' : ''}>
-                        <span>${warehouse.name}</span>
-                    `;
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.value = String(warehouse.id);
+                    checkbox.className = 'rounded border-gray-300 text-primary focus:ring-primary';
+                    checkbox.checked = assignedIds.has(warehouse.id);
+                    const span = document.createElement('span');
+                    span.textContent = warehouse.name || '';
+                    label.appendChild(checkbox);
+                    label.appendChild(span);
                     list.appendChild(label);
                 });
 

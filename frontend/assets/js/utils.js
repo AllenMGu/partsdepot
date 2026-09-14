@@ -1,9 +1,8 @@
-// 统一的工具函数文件
-
-// API基础URL
+﻿// 通用工具函数文件
+// API 基础路径
 const API_BASE_URL = 'api';
 
-// 全局变量
+// 全局状态
 let currentUser = null;
 let accessToken = null;
 let warehouses = [];
@@ -11,12 +10,11 @@ let currentWarehouseId = null;
 
 // ==================== 认证相关 ====================
 
-// 检查认证状态
 function checkAuth() {
-    accessToken = localStorage.getItem('access_token');
-    const userStr = localStorage.getItem('user');
+    accessToken = null;
+    const userStr = localStorage.getItem('user') || sessionStorage.getItem('user');
     
-    if (!accessToken || !userStr) {
+    if (!userStr) {
         return false;
     }
     
@@ -24,19 +22,19 @@ function checkAuth() {
         currentUser = JSON.parse(userStr);
         return true;
     } catch (e) {
-        console.error('解析用户信息失败:', e);
+        console.error('瑙ｆ瀽鐢ㄦ埛淇℃伅澶辫触:', e);
         return false;
     }
 }
 
-// 获取认证头
 function getAuthHeaders() {
-    return {
-        'Authorization': `Bearer ${accessToken}`
-    };
+    if (!accessToken) {
+        return {};
+    }
+    return { 'Authorization': `Bearer ${accessToken}` };
 }
 
-// 获取完整的请求头
+// 获取完整请求头
 function getHeaders(contentType = 'application/json') {
     const headers = {
         ...getAuthHeaders(),
@@ -50,20 +48,25 @@ function getHeaders(contentType = 'application/json') {
     return headers;
 }
 
-// 退出登录
 function logout() {
+    fetch(`${API_BASE_URL}/logout`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
     localStorage.removeItem('access_token');
+    localStorage.removeItem('auth_mode');
+    localStorage.removeItem('token');
     localStorage.removeItem('user');
     localStorage.removeItem('token_expiry');
+    sessionStorage.removeItem('access_token');
+    sessionStorage.removeItem('auth_mode');
+    sessionStorage.removeItem('user');
+    sessionStorage.removeItem('token_expiry');
     window.location.href = 'index.html';
 }
 
-// ==================== API调用相关 ====================
+// ==================== API 调用 ====================
 
-// 通用GET请求
+// 通用 GET 请求
 async function apiGet(endpoint, params = {}) {
     try {
-        // 构建查询字符串
         const queryString = Object.keys(params).length > 0 
             ? '?' + new URLSearchParams(params).toString() 
             : '';
@@ -84,7 +87,7 @@ async function apiGet(endpoint, params = {}) {
     }
 }
 
-// 通用POST请求
+// 通用 POST 请求
 async function apiPost(endpoint, data = {}, contentType = 'application/json') {
     try {
         let body;
@@ -96,7 +99,7 @@ async function apiPost(endpoint, data = {}, contentType = 'application/json') {
             body = new URLSearchParams(data).toString();
         } else if (contentType === 'multipart/form-data') {
             body = data;
-            delete headers['Content-Type']; // 让浏览器自动设置
+            delete headers['Content-Type']; // 璁╂祻瑙堝櫒鑷姩璁剧疆
         }
         
         const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -109,7 +112,6 @@ async function apiPost(endpoint, data = {}, contentType = 'application/json') {
             handleApiError(response);
         }
         
-        // 检查响应是否为空
         const contentTypeHeader = response.headers.get('content-type');
         if (contentTypeHeader && contentTypeHeader.includes('application/json')) {
             return await response.json();
@@ -122,7 +124,7 @@ async function apiPost(endpoint, data = {}, contentType = 'application/json') {
     }
 }
 
-// 通用PUT请求
+// 通用 PUT 请求
 async function apiPut(endpoint, data = {}) {
     try {
         const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -142,7 +144,7 @@ async function apiPut(endpoint, data = {}) {
     }
 }
 
-// 通用DELETE请求
+// 通用 DELETE 请求
 async function apiDelete(endpoint) {
     try {
         const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -161,7 +163,7 @@ async function apiDelete(endpoint) {
     }
 }
 
-// 处理API错误
+// 处理 API 错误
 async function handleApiError(response) {
     try {
         const errorData = await response.json();
@@ -170,22 +172,22 @@ async function handleApiError(response) {
         } else if (errorData.message) {
             throw new Error(errorData.message);
         } else {
-            throw new Error(`API错误: ${response.status} ${response.statusText}`);
+            throw new Error(`API閿欒: ${response.status} ${response.statusText}`);
         }
     } catch (error) {
         if (error instanceof SyntaxError) {
-            throw new Error(`API错误: ${response.status} ${response.statusText}`);
+            throw new Error(`API閿欒: ${response.status} ${response.statusText}`);
         }
         throw error;
     }
 }
 
-// 处理Fetch错误
+// 处理 Fetch 错误
 function handleFetchError(error) {
-    console.error('API请求失败:', error);
+    console.error('API璇锋眰澶辫触:', error);
     
     if (error.message.includes('Failed to fetch')) {
-        throw new Error('网络连接失败，请检查您的网络');
+        throw new Error('网络连接失败，请检查网络设置');
     }
     
     throw error;
@@ -199,7 +201,7 @@ async function loadUserWarehouses() {
         warehouses = await apiGet(`/users/${currentUser.id}/warehouses`);
         return warehouses;
     } catch (error) {
-        console.error('加载仓库列表失败:', error);
+        console.error('鍔犺浇浠撳簱鍒楄〃澶辫触:', error);
         throw error;
     }
 }
@@ -211,17 +213,17 @@ async function switchUserWarehouse(warehouseId) {
             warehouse_id: warehouseId 
         });
         
-        // 更新全局变量
+        // 更新全局状态
         currentWarehouseId = warehouseId;
         
-        // 更新本地存储的用户信息
+        // 更新本地存储中的用户信息
         currentUser.current_warehouse_id = warehouseId;
         currentUser.current_warehouse_name = response.current_warehouse_name;
         localStorage.setItem('user', JSON.stringify(currentUser));
         
         return response;
     } catch (error) {
-        console.error('切换仓库失败:', error);
+        console.error('鍒囨崲浠撳簱澶辫触:', error);
         throw error;
     }
 }
@@ -235,12 +237,11 @@ function getCurrentWarehouse() {
     return warehouses.find(w => w.id === currentWarehouseId) || warehouses[0];
 }
 
-// ==================== UI相关 ====================
+// ==================== UI 相关 ====================
 
-// 显示加载状态
 function showLoading(element) {
     const originalContent = element.innerHTML;
-    element.innerHTML = '<span class="loading mr-2"></span>加载中...';
+    element.innerHTML = '<span class="loading mr-2"></span>鍔犺浇涓?..';
     element.disabled = true;
     
     return function hideLoading() {
@@ -253,12 +254,15 @@ function showLoading(element) {
 function showMessage(message, type = 'info', duration = 3000) {
     const messageDiv = document.createElement('div');
     messageDiv.className = `alert alert-${type} fixed top-4 right-4 z-50 max-w-md`;
-    messageDiv.innerHTML = `
-        <div class="flex items-center">
-            <i class="fa fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'} mr-2"></i>
-            <span>${message}</span>
-        </div>
-    `;
+    const row = document.createElement('div');
+    row.className = 'flex items-center';
+    const icon = document.createElement('i');
+    icon.className = `fa fa-${type === 'success' ? 'check-circle' : type === 'error' ? 'exclamation-circle' : type === 'warning' ? 'exclamation-triangle' : 'info-circle'} mr-2`;
+    const text = document.createElement('span');
+    text.textContent = String(message ?? '');
+    row.appendChild(icon);
+    row.appendChild(text);
+    messageDiv.appendChild(row);
     
     document.body.appendChild(messageDiv);
     
@@ -302,31 +306,53 @@ function showWarning(message, duration = 4000) {
     return showMessage(message, 'warning', duration);
 }
 
-// 显示确认对话框
 function showConfirm(message, onConfirm, onCancel) {
     const modal = document.createElement('div');
     modal.className = 'modal show';
-    modal.innerHTML = `
-        <div class="modal-content max-w-md">
-            <div class="modal-header">
-                <h3 class="text-lg font-semibold text-gray-800">确认操作</h3>
-                <button class="text-gray-500 hover:text-gray-700 focus:outline-none" onclick="this.closest('.modal').remove()">
-                    <i class="fa fa-times"></i>
-                </button>
-            </div>
-            <div class="modal-body">
-                <p class="text-gray-700">${message}</p>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-secondary" onclick="this.closest('.modal').remove(); if (typeof onCancel === 'function') onCancel();">
-                    取消
-                </button>
-                <button class="btn-danger" onclick="this.closest('.modal').remove(); if (typeof onConfirm === 'function') onConfirm();">
-                    确认
-                </button>
-            </div>
-        </div>
-    `;
+    const content = document.createElement('div');
+    content.className = 'modal-content max-w-md';
+    const header = document.createElement('div');
+    header.className = 'modal-header';
+    const title = document.createElement('h3');
+    title.className = 'text-lg font-semibold text-gray-800';
+    title.textContent = '确认操作';
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'text-gray-500 hover:text-gray-700 focus:outline-none';
+    closeBtn.innerHTML = '<i class="fa fa-times"></i>';
+    closeBtn.addEventListener('click', () => modal.remove());
+    header.appendChild(title);
+    header.appendChild(closeBtn);
+
+    const body = document.createElement('div');
+    body.className = 'modal-body';
+    const messageText = document.createElement('p');
+    messageText.className = 'text-gray-700';
+    messageText.textContent = String(message ?? '');
+    body.appendChild(messageText);
+
+    const footer = document.createElement('div');
+    footer.className = 'modal-footer';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn-secondary';
+    cancelBtn.textContent = '取消';
+    cancelBtn.addEventListener('click', () => {
+        modal.remove();
+        if (typeof onCancel === 'function') onCancel();
+    });
+    const confirmBtn = document.createElement('button');
+    confirmBtn.className = 'btn-danger';
+    confirmBtn.textContent = '确认';
+    confirmBtn.addEventListener('click', () => {
+        modal.remove();
+        if (typeof onConfirm === 'function') onConfirm();
+    });
+    footer.appendChild(cancelBtn);
+    footer.appendChild(confirmBtn);
+
+    content.appendChild(header);
+    content.appendChild(body);
+    content.appendChild(footer);
+    modal.appendChild(content);
     
     document.body.appendChild(modal);
     
@@ -335,7 +361,7 @@ function showConfirm(message, onConfirm, onCancel) {
         e.stopPropagation();
     });
     
-    // 点击背景关闭
+    // 点击遮罩关闭
     modal.addEventListener('click', e => {
         if (e.target === modal) {
             modal.remove();
@@ -346,7 +372,6 @@ function showConfirm(message, onConfirm, onCancel) {
     return modal;
 }
 
-// 格式化日期时间
 function formatDateTime(date) {
     if (!date) return '';
     
@@ -360,17 +385,15 @@ function formatDateTime(date) {
     return `${year}-${month}-${day} ${hours}:${minutes}`;
 }
 
-// 格式化数字（保留2位小数）
+// 格式化数字（保留小数位）
 function formatNumber(num, decimals = 2) {
     if (num === null || num === undefined) return '0';
     return parseFloat(num).toFixed(decimals);
 }
 
-// ==================== 初始化函数 ====================
+// ==================== 初始化相关 ====================
 
-// 页面初始化（用于需要认证的页面）
-async function initAuthenticatedPage() {
-    // 检查登录状态
+function initAuthenticatedPage() {
     if (!checkAuth()) {
         window.location.href = 'index.html';
         return false;
@@ -382,7 +405,6 @@ async function initAuthenticatedPage() {
     return true;
 }
 
-// 初始化用户信息显示
 function initUserInfo() {
     const userNameEl = document.getElementById('userName');
     const userInitialsEl = document.getElementById('userInitials');
@@ -400,7 +422,7 @@ function initUserInfo() {
         welcomeUserEl.textContent = currentUser.full_name || currentUser.username;
     }
     
-    // 设置当前仓库ID
+    // 设置当前仓库 ID
     if (currentUser.current_warehouse_id) {
         currentWarehouseId = currentUser.current_warehouse_id;
     }
@@ -418,7 +440,6 @@ function initSidebar() {
     }
 }
 
-// 初始化用户菜单
 function initUserMenu() {
     const userMenu = document.getElementById('userMenu');
     const userDropdown = document.getElementById('userDropdown');
@@ -445,7 +466,7 @@ function initUserMenu() {
         });
     }
     
-    // 点击其他地方关闭下拉菜单
+    // 点击页面其他区域关闭下拉菜单
     document.addEventListener('click', () => {
         if (userDropdown) {
             userDropdown.classList.add('hidden');
@@ -453,7 +474,6 @@ function initUserMenu() {
     });
 }
 
-// 初始化仓库选择器
 async function initWarehouseSelector() {
     const warehouseSelector = document.getElementById('warehouseSelector');
     const warehouseDropdown = document.getElementById('warehouseDropdown');
@@ -476,7 +496,6 @@ async function initWarehouseSelector() {
                 selectedWarehouse = warehouses.find(w => w.id === currentWarehouseId);
             }
             
-            // 如果没有找到，使用默认仓库
             if (!selectedWarehouse) {
                 selectedWarehouse = warehouses.find(w => w.is_current) || warehouses[0];
                 currentWarehouseId = selectedWarehouse.id;
@@ -485,7 +504,7 @@ async function initWarehouseSelector() {
             // 更新显示
             currentWarehouseEl.textContent = selectedWarehouse.name;
             
-            // 填充仓库列表
+            // 填充仓库下拉列表
             warehouseList.innerHTML = '';
             warehouses.forEach(warehouse => {
                 const item = document.createElement('a');
@@ -503,7 +522,7 @@ async function initWarehouseSelector() {
                     try {
                         await switchUserWarehouse(warehouseId);
                         
-                        // 更新UI
+                        // 更新 UI
                         currentWarehouseEl.textContent = warehouseName;
                         
                         // 更新选中状态
@@ -519,7 +538,7 @@ async function initWarehouseSelector() {
                         }));
                         
                     } catch (error) {
-                        showError('切换仓库失败: ' + error.message);
+                        showError('鍒囨崲浠撳簱澶辫触: ' + error.message);
                     }
                     
                     // 隐藏下拉菜单
@@ -553,7 +572,7 @@ async function initWarehouseSelector() {
     }
 }
 
-// 完整的页面初始化
+// 完整页面初始化
 async function initPage() {
     if (!(await initAuthenticatedPage())) {
         return;
@@ -564,7 +583,7 @@ async function initPage() {
     await initWarehouseSelector();
 }
 
-// 导出函数（如果使用模块）
+// 导出函数（模块环境）
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
         checkAuth,
@@ -594,3 +613,8 @@ if (typeof module !== 'undefined' && module.exports) {
         initPage
     };
 }
+
+
+
+
+

@@ -3,13 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-1hLRwYmF8pL3cPfFFx1YfxJjW3c5rQf5zgZ5AUFsjyE='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>盘点管理 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <!-- Font Awesome -->
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
     <!-- ZXing JavaScript Library for barcode/qr code scanning -->
-    <script src="https://unpkg.com/@zxing/library@latest"></script>
+    <script src="assets/js/zxing-library-0.21.3.umd.min.js"></script>
     <!-- SheetJS for Excel export -->
     <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
     <!-- 统一的 Tailwind 配置 -->
@@ -471,6 +472,15 @@
         let totalPages = 1;
         let totalCount = 0;
 
+        function escapeHTML(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
         // 页面初始化
         function pageInit() {
             loadLocationData(); // 加载库位数据
@@ -642,13 +652,13 @@
                 return `
                     <tr class="hover:bg-gray-50">
                         <td class="px-6 py-4">
-                            <div class="text-sm font-medium text-gray-900">${order.order_no}</div>
+                            <div class="text-sm font-medium text-gray-900">${escapeHTML(order.order_no)}</div>
                         </td>
                         <td class="px-6 py-4">
-                            <div class="text-sm text-gray-900">${order.warehouse_name}</div>
+                            <div class="text-sm text-gray-900">${escapeHTML(order.warehouse_name)}</div>
                         </td>
                         <td class="px-6 py-4">
-                            <div class="text-sm text-gray-900">${order.operator_name}</div>
+                            <div class="text-sm text-gray-900">${escapeHTML(order.operator_name)}</div>
                         </td>
                         <td class="px-6 py-4">
                             <div class="text-sm text-gray-900">${order.item_count}</div>
@@ -663,16 +673,16 @@
                         </td>
                         <td class="px-6 py-4">
                             <div class="flex space-x-2">
-                                <button onclick="viewCheckOrder(${order.id})" class="px-3 py-1 bg-info text-white text-sm rounded-md hover:bg-primary">
+                                <button onclick="viewCheckOrder(${Number(order.id) || 0})" class="px-3 py-1 bg-info text-white text-sm rounded-md hover:bg-primary">
                                     <i class="fa fa-eye mr-1"></i> 查看
                                 </button>
                                 ${order.status !== 'COMPLETED' ? `
-                                    <button onclick="startCheckOrder(${order.id})" class="px-3 py-1 bg-primary text-white text-sm rounded-md hover:bg-secondary">
+                                    <button onclick="startCheckOrder(${Number(order.id) || 0})" class="px-3 py-1 bg-primary text-white text-sm rounded-md hover:bg-secondary">
                                         <i class="fa fa-qrcode mr-1"></i> 扫码盘点
                                     </button>
                                 ` : ''}
                                 ${order.status === 'COMPLETED' ? `
-                                    <button onclick="exportCheckOrder(${order.id})" class="px-3 py-1 bg-success text-white text-sm rounded-md hover:bg-green-700">
+                                    <button onclick="exportCheckOrder(${Number(order.id) || 0})" class="px-3 py-1 bg-success text-white text-sm rounded-md hover:bg-green-700">
                                         <i class="fa fa-file-excel-o mr-1"></i> 导出
                                     </button>
                                 ` : ''}
@@ -896,18 +906,18 @@
                         <div class="flex items-center justify-between">
                             <div class="flex items-center">
                                 <i class="fa ${isMatched ? 'fa-check-circle' : 'fa-exclamation-circle'} mr-2"></i>
-                                <span class="font-medium">${item.goods_name}</span>
+                                <span class="font-medium">${escapeHTML(item.goods_name)}</span>
                             </div>
                             <span class="text-xs text-gray-500">${formatDateTime(item.create_time)}</span>
                         </div>
                         <div class="mt-2 space-y-1 text-sm">
                             <div class="flex justify-between">
                                 <span>条码:</span>
-                                <span class="font-medium">${item.goods_barcode}</span>
+                                <span class="font-medium">${escapeHTML(item.goods_barcode)}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span>库位:</span>
-                                <span>${item.location_code}</span>
+                                <span>${escapeHTML(item.location_code)}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span>系统库存:</span>
@@ -1208,7 +1218,7 @@
             }
 
             titleEl.textContent = title;
-            contentEl.innerHTML = content;
+            contentEl.textContent = String(content ?? '');
 
             modal.classList.remove('hidden');
         }

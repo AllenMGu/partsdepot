@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-o6ofpOZvmXwJJJdzJQSL/1DAWi+BdvDF4b4Bx4f50Ic=' 'sha256-DesxnuYZbvF1FLG0C0+n7h+8+wJicD98EWtiIpNtRSM='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>备件管理系统 - 登录</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -14,12 +15,11 @@
 
             try {
                 if (window.top && window.top !== window && window.top.location.origin === window.location.origin) {
-                    const topToken = window.top.localStorage.getItem('access_token')
-                        || window.top.sessionStorage.getItem('access_token')
-                        || window.top.localStorage.getItem('token');
                     const topUser = window.top.localStorage.getItem('user')
                         || window.top.sessionStorage.getItem('user');
-                    if (topToken && topUser) {
+                    const topExpiry = window.top.localStorage.getItem('token_expiry')
+                        || window.top.sessionStorage.getItem('token_expiry');
+                    if (topUser && (!topExpiry || new Date() < new Date(topExpiry))) {
                         const next = new URL('dashboard-view.html', window.location.href);
                         next.searchParams.set('embedded', '1');
                         window.location.replace(next.toString());
@@ -130,6 +130,7 @@
 
                 const response = await fetch(`${API_BASE_URL}/token`, {
                     method: 'POST',
+                    credentials: 'same-origin',
                     headers: {
                         'Content-Type': 'application/x-www-form-urlencoded'
                     },
@@ -146,25 +147,27 @@
                 const data = await response.json();
 
                 if (remember) {
-                    sessionStorage.removeItem('access_token');
+                    sessionStorage.removeItem('auth_mode');
                     sessionStorage.removeItem('user');
                     sessionStorage.removeItem('token_expiry');
 
-                    localStorage.setItem('access_token', data.access_token);
+                    localStorage.setItem('auth_mode', 'cookie');
                     localStorage.setItem('user', JSON.stringify(data.user));
-
-                    const expiryDate = new Date();
-                    expiryDate.setDate(expiryDate.getDate() + 7);
-                    localStorage.setItem('token_expiry', expiryDate.toISOString());
+                    localStorage.setItem('token_expiry', data.expiry);
                 } else {
-                    localStorage.removeItem('access_token');
+                    localStorage.removeItem('auth_mode');
                     localStorage.removeItem('user');
                     localStorage.removeItem('token_expiry');
 
-                    sessionStorage.setItem('access_token', data.access_token);
+                    sessionStorage.setItem('auth_mode', 'cookie');
                     sessionStorage.setItem('user', JSON.stringify(data.user));
                     sessionStorage.setItem('token_expiry', data.expiry);
                 }
+
+                // 清理历史遗留 token，避免继续落地存储
+                localStorage.removeItem('access_token');
+                localStorage.removeItem('token');
+                sessionStorage.removeItem('access_token');
 
                 window.location.href = 'dashboard.html';
             } catch (error) {
@@ -175,22 +178,24 @@
         });
 
         document.addEventListener('DOMContentLoaded', function() {
-            let token = localStorage.getItem('access_token');
+            let user = localStorage.getItem('user');
             let expiry = localStorage.getItem('token_expiry');
 
-            if (!token) {
-                token = sessionStorage.getItem('access_token');
+            if (!user) {
+                user = sessionStorage.getItem('user');
                 expiry = sessionStorage.getItem('token_expiry');
             }
 
-            if (token) {
+            if (user) {
                 if (!expiry || new Date() < new Date(expiry)) {
                     window.location.href = 'dashboard.html';
                 } else {
                     localStorage.removeItem('access_token');
+                    localStorage.removeItem('auth_mode');
                     localStorage.removeItem('user');
                     localStorage.removeItem('token_expiry');
                     sessionStorage.removeItem('access_token');
+                    sessionStorage.removeItem('auth_mode');
                     sessionStorage.removeItem('user');
                     sessionStorage.removeItem('token_expiry');
                 }

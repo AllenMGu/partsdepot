@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-mNHhAYJBqSFgnFHuErj5epd5n/UrWwHLV5vyDBdyx/4='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>货物管理 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -392,6 +393,15 @@
         const pageSize = 10;
         let allGoods = [];  // 保存所有货物数据
         let filteredGoods = [];  // 保存筛选后的货物数据
+
+        function escapeHTML(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
         
         // DOM元素
         const sidebarToggle = document.getElementById('sidebarToggle');
@@ -440,17 +450,18 @@
         // 检查认证状态
         function checkAuth() {
             console.log('进入checkAuth函数');
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('token');
+            sessionStorage.removeItem('access_token');
             const localAuth = {
-                token: localStorage.getItem('access_token'),
                 userStr: localStorage.getItem('user'),
                 expiry: localStorage.getItem('token_expiry')
             };
             const sessionAuth = {
-                token: sessionStorage.getItem('access_token'),
                 userStr: sessionStorage.getItem('user'),
                 expiry: sessionStorage.getItem('token_expiry')
             };
-            const isComplete = (auth) => !!(auth.token && auth.userStr);
+            const isComplete = (auth) => !!auth.userStr;
             const isExpired = (auth) => !!(auth.expiry && new Date() >= new Date(auth.expiry));
 
             let auth = null;
@@ -464,12 +475,11 @@
                 auth = sessionAuth;
             }
 
-            const token = auth ? auth.token : null;
             const userStr = auth ? auth.userStr : null;
             const expiry = auth ? auth.expiry : null;
 
-            if (!token || !userStr) {
-                console.log('未找到token或用户信息，跳转到登录页');
+            if (!userStr) {
+                console.log('未找到用户信息，跳转到登录页');
                 window.location.href = 'index.html';
                 return false;
             }
@@ -483,7 +493,7 @@
 
             try {
                 currentUser = JSON.parse(userStr);
-                accessToken = token;
+                accessToken = null;
                 return true;
             } catch (e) {
                 console.error('解析用户信息失败:', e);
@@ -491,12 +501,24 @@
             }
         }
 
+        function getAuthHeaders() {
+            const headers = {};
+            if (accessToken) {
+                headers['Authorization'] = `Bearer ${accessToken}`;
+            }
+            return headers;
+        }
+
         // 退出登录
         function logout() {
+            fetch(`${API_BASE_URL}/logout`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
             localStorage.removeItem('access_token');
+            localStorage.removeItem('auth_mode');
+            localStorage.removeItem('token');
             localStorage.removeItem('user');
             localStorage.removeItem('token_expiry');
             sessionStorage.removeItem('access_token');
+            sessionStorage.removeItem('auth_mode');
             sessionStorage.removeItem('user');
             sessionStorage.removeItem('token_expiry');
             window.location.href = 'index.html';
@@ -557,7 +579,7 @@
             try {
                 const response = await fetch(`${API_BASE_URL}/users/${currentUser.id}/warehouses`, {
                     headers: {
-                        'Authorization': `Bearer ${accessToken}`
+                        ...getAuthHeaders()
                     }
                 });
                 
@@ -632,7 +654,7 @@
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${accessToken}`
+                        ...getAuthHeaders()
                     },
                     body: JSON.stringify({ warehouse_id: warehouseId })
                 });
@@ -647,10 +669,10 @@
                 
                 // 更新本地存储的用户信息
                 currentUser.current_warehouse_id = warehouseId;
-                if (localStorage.getItem('access_token')) {
+                if (localStorage.getItem('user')) {
                     localStorage.setItem('user', JSON.stringify(currentUser));
                 }
-                if (sessionStorage.getItem('access_token')) {
+                if (sessionStorage.getItem('user')) {
                     sessionStorage.setItem('user', JSON.stringify(currentUser));
                 }
             } catch (error) {
@@ -668,7 +690,7 @@
                 // 获取货物列表
                 const response = await fetch(`${API_BASE_URL}/goods/`, {
                     headers: {
-                        'Authorization': `Bearer ${accessToken}`
+                        ...getAuthHeaders()
                     }
                 });
 
@@ -851,25 +873,25 @@
                 // 条码
                 const barcodeCell = document.createElement('td');
                 barcodeCell.className = 'px-6 py-4 whitespace-nowrap';
-                barcodeCell.innerHTML = `<div class="text-sm font-medium text-gray-900">${goods.barcode}</div>`;
+                barcodeCell.innerHTML = `<div class="text-sm font-medium text-gray-900">${escapeHTML(goods.barcode)}</div>`;
                 row.appendChild(barcodeCell);
                 
                 // 货物名称
                 const nameCell = document.createElement('td');
                 nameCell.className = 'px-6 py-4';
-                nameCell.innerHTML = `<div class="text-sm text-gray-900">${goods.name}</div>`;
+                nameCell.innerHTML = `<div class="text-sm text-gray-900">${escapeHTML(goods.name)}</div>`;
                 row.appendChild(nameCell);
                 
                 // 规格型号
                 const specCell = document.createElement('td');
                 specCell.className = 'px-6 py-4';
-                specCell.innerHTML = `<div class="text-sm text-gray-900">${goods.spec || '-'}</div>`;
+                specCell.innerHTML = `<div class="text-sm text-gray-900">${escapeHTML(goods.spec || '-')}</div>`;
                 row.appendChild(specCell);
                 
                 // 单位
                 const unitCell = document.createElement('td');
                 unitCell.className = 'px-6 py-4 whitespace-nowrap';
-                unitCell.innerHTML = `<div class="text-sm text-gray-900">${goods.unit}</div>`;
+                unitCell.innerHTML = `<div class="text-sm text-gray-900">${escapeHTML(goods.unit)}</div>`;
                 row.appendChild(unitCell);
                 
                 // 单价
@@ -963,7 +985,7 @@
                 // 获取货物详情
                 const response = await fetch(`${API_BASE_URL}/goods/${id}`, {
                     headers: {
-                        'Authorization': `Bearer ${accessToken}`
+                        ...getAuthHeaders()
                     }
                 });
                 
@@ -1036,7 +1058,7 @@
                         method: 'PUT',
                         headers: {
                             'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${accessToken}`
+                            ...getAuthHeaders()
                         },
                         body: JSON.stringify(goodsData)
                     });
@@ -1046,7 +1068,7 @@
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'Authorization': `Bearer ${accessToken}`
+                            ...getAuthHeaders()
                         },
                         body: JSON.stringify(goodsData)
                     });
@@ -1090,7 +1112,7 @@
                 const response = await fetch(`${API_BASE_URL}/goods/${currentDeleteId}`, {
                     method: 'DELETE',
                     headers: {
-                        'Authorization': `Bearer ${accessToken}`
+                        ...getAuthHeaders()
                     }
                 });
                 
@@ -1209,7 +1231,12 @@
             `;
 
             // 打开新窗口打印
-            const printWindow = window.open('', '_blank');
+            const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+            if (!printWindow) {
+                showToast('无法打开打印窗口，请检查浏览器弹窗设置', 'error');
+                return;
+            }
+            printWindow.opener = null;
             printWindow.document.write(printHTML);
             printWindow.document.close();
             printWindow.focus();
@@ -1269,7 +1296,7 @@
             try {
                 const response = await fetch(`${API_BASE_URL}/goods/export`, {
                     headers: {
-                        'Authorization': `Bearer ${accessToken}`
+                        ...getAuthHeaders()
                     }
                 });
 
@@ -1314,7 +1341,7 @@
                 const response = await fetch(`${API_BASE_URL}/goods/import`, {
                     method: 'POST',
                     headers: {
-                        'Authorization': `Bearer ${accessToken}`
+                        ...getAuthHeaders()
                     },
                     body: formData
                 });
@@ -1331,7 +1358,7 @@
                 importSuccess.textContent = `成功导入 ${result.success_count} 条货物数据`;
 
                 if (result.error_count > 0) {
-                    importErrors.innerHTML = `失败 ${result.error_count} 条：<br>` + result.errors.join('<br>');
+                    importErrors.innerHTML = `失败 ${result.error_count} 条：<br>` + result.errors.map((err) => escapeHTML(err)).join('<br>');
                 } else {
                     importErrors.textContent = '';
                 }
@@ -1393,10 +1420,14 @@
             // 退出登录
             logoutButton.addEventListener('click', function(e) {
                 e.preventDefault();
+                fetch(`${API_BASE_URL}/logout`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
                 localStorage.removeItem('access_token');
+                localStorage.removeItem('auth_mode');
+                localStorage.removeItem('token');
                 localStorage.removeItem('user');
                 localStorage.removeItem('token_expiry');
                 sessionStorage.removeItem('access_token');
+                sessionStorage.removeItem('auth_mode');
                 sessionStorage.removeItem('user');
                 sessionStorage.removeItem('token_expiry');
                 window.location.href = 'index.html';

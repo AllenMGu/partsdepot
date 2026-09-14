@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-OmNOdXpg1klpctH3WZJJVRiDDtfF68xzoQFbyl2aZJE='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>仓库管理 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -309,6 +310,15 @@
         let currentDeleteId = null;
         let currentPage = 1;
         const pageSize = 10;
+
+        function escapeHTML(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
         
         // DOM元素
         const sidebarToggle = document.getElementById('sidebarToggle');
@@ -347,17 +357,18 @@
         // 检查认证状态
         function checkAuth() {
             console.log('进入checkAuth函数');
+            localStorage.removeItem('access_token');
+            localStorage.removeItem('token');
+            sessionStorage.removeItem('access_token');
             const localAuth = {
-                token: localStorage.getItem('access_token'),
                 userStr: localStorage.getItem('user'),
                 expiry: localStorage.getItem('token_expiry')
             };
             const sessionAuth = {
-                token: sessionStorage.getItem('access_token'),
                 userStr: sessionStorage.getItem('user'),
                 expiry: sessionStorage.getItem('token_expiry')
             };
-            const isComplete = (auth) => !!(auth.token && auth.userStr);
+            const isComplete = (auth) => !!auth.userStr;
             const isExpired = (auth) => !!(auth.expiry && new Date() >= new Date(auth.expiry));
 
             let auth = null;
@@ -371,16 +382,11 @@
                 auth = sessionAuth;
             }
 
-            const token = auth ? auth.token : null;
             const userStr = auth ? auth.userStr : null;
             const expiry = auth ? auth.expiry : null;
 
-            console.log('localStorage中的token:', token);
-            console.log('localStorage中的用户信息:', userStr);
-            console.log('localStorage中的过期时间:', expiry);
-
-            if (!token || !userStr) {
-                console.log('未找到有效的token或用户信息');
+            if (!userStr) {
+                console.log('未找到有效的用户信息');
                 return false;
             }
 
@@ -388,9 +394,12 @@
                 console.log('token已过期');
                 // token已过期，清除
                 localStorage.removeItem('access_token');
+                localStorage.removeItem('auth_mode');
+                localStorage.removeItem('token');
                 localStorage.removeItem('user');
                 localStorage.removeItem('token_expiry');
                 sessionStorage.removeItem('access_token');
+                sessionStorage.removeItem('auth_mode');
                 sessionStorage.removeItem('user');
                 sessionStorage.removeItem('token_expiry');
                 return false;
@@ -604,19 +613,19 @@
                 // 仓库编码
                 const codeCell = document.createElement('td');
                 codeCell.className = 'px-6 py-4 whitespace-nowrap';
-                codeCell.innerHTML = `<div class="text-sm font-medium text-gray-900">${warehouse.code || '-'}</div>`;
+                codeCell.innerHTML = `<div class="text-sm font-medium text-gray-900">${escapeHTML(warehouse.code || '-')}</div>`;
                 row.appendChild(codeCell);
 
                 // 仓库名称
                 const nameCell = document.createElement('td');
                 nameCell.className = 'px-6 py-4 whitespace-nowrap';
-                nameCell.innerHTML = `<div class="text-sm text-gray-900">${warehouse.name || '-'}</div>`;
+                nameCell.innerHTML = `<div class="text-sm text-gray-900">${escapeHTML(warehouse.name || '-')}</div>`;
                 row.appendChild(nameCell);
 
                 // 地址
                 const addressCell = document.createElement('td');
                 addressCell.className = 'px-6 py-4';
-                addressCell.innerHTML = `<div class="text-sm text-gray-900">${warehouse.address || '-'}</div>`;
+                addressCell.innerHTML = `<div class="text-sm text-gray-900">${escapeHTML(warehouse.address || '-')}</div>`;
                 row.appendChild(addressCell);
 
                 // 状态
@@ -638,7 +647,7 @@
                             <button class="text-primary hover:text-secondary edit-btn" data-id="${warehouse.id}">
                                 <i class="fa fa-pencil"></i> 编辑
                             </button>
-                            <button class="text-red-500 hover:text-red-600 delete-btn" data-id="${warehouse.id}" data-name="${warehouse.name}">
+                            <button class="text-red-500 hover:text-red-600 delete-btn" data-id="${warehouse.id}" data-name="${escapeHTML(warehouse.name)}">
                                 <i class="fa fa-trash"></i> 删除
                             </button>
                         </div>
@@ -854,10 +863,14 @@
             // 退出登录
             logoutButton.addEventListener('click', function(e) {
                 e.preventDefault();
+                fetch(`${API_BASE_URL}/logout`, { method: 'POST', credentials: 'same-origin' }).catch(() => {});
                 localStorage.removeItem('access_token');
+                localStorage.removeItem('auth_mode');
+                localStorage.removeItem('token');
                 localStorage.removeItem('user');
                 localStorage.removeItem('token_expiry');
                 sessionStorage.removeItem('access_token');
+                sessionStorage.removeItem('auth_mode');
                 sessionStorage.removeItem('user');
                 sessionStorage.removeItem('token_expiry');
                 window.location.href = 'index.html';
