@@ -14,12 +14,11 @@ import os
 
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from core.database import engine, SessionLocal, Base
+# 注：建表由 core/models.py 在导入时执行（Base.metadata.create_all，
+#     等价于原单体 main.py 中模型定义后的那次调用），此处不再重复。
+from core.database import SessionLocal
 from core.models import UserRole, Warehouse, UserWarehouse, User
 from core.security import get_password_hash
-
-# 创建所有表（等价于原 main.py 中 Base.metadata.create_all）
-Base.metadata.create_all(bind=engine)
 
 # ------------------- FastAPI应用初始化 -------------------
 app = FastAPI(title="多仓库管理系统API")
