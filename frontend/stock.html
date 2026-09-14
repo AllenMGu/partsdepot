@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-sOsVwSc+w3cuFwyQ7kg++VLahFXQMd8vmlNAlaqywRU=' 'sha256-n9d4KVGHFB9Ns6bX9bI9Yx+6xmIe9MvVVCgbRyCI7mo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>库存查询 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -357,7 +358,6 @@
         function pageInit() {
             loadWarehouses();
             loadLocations();
-            loadGoods();
             loadStock();
             setupStockEventListeners();
         }
@@ -453,6 +453,7 @@
         
         // 加载货物列表
         async function loadGoods() {
+            return;
             try {
                 const response = await fetch(`${API_BASE_URL}/goods/`, {
                     headers: getHeaders()
@@ -521,9 +522,9 @@
                     stock.goods_barcode.toLowerCase().includes(searchTerm) ||
                     stock.location_code.toLowerCase().includes(searchTerm);
                 
-                const matchesWarehouse = !warehouseId || stock.warehouse_name === getWarehouseName(parseInt(warehouseId));
+                const matchesWarehouse = !warehouseId || Number(stock.warehouse_id) === Number(warehouseId);
                 
-                const matchesLocation = !locationId || stock.location_code === getLocationCode(parseInt(locationId));
+                const matchesLocation = !locationId || Number(stock.location_id) === Number(locationId);
                 
                 return matchesSearch && matchesWarehouse && matchesLocation;
             });
@@ -533,8 +534,7 @@
         }
 
         function getStockUnitPrice(stock) {
-            const goodsItem = getGoodsById(stock.goods_id);
-            return goodsItem ? Number(goodsItem.price || 0) : 0;
+            return Number(stock.goods_price || 0);
         }
 
         function getStockValue(stock) {
@@ -574,14 +574,14 @@
                         <td class="px-6 py-4">
                             <div class="flex items-center">
                                 <div>
-                                    <div class="text-sm font-medium text-gray-900">${stock.goods_name}</div>
-                                    <div class="text-xs text-gray-500">${stock.goods_barcode}</div>
+                                    <div class="text-sm font-medium text-gray-900">${escapeHTML(stock.goods_name)}</div>
+                                    <div class="text-xs text-gray-500">${escapeHTML(stock.goods_barcode)}</div>
                                 </div>
                             </div>
                         </td>
                         <td class="px-6 py-4">
-                            <div class="text-sm text-gray-900">${stock.warehouse_name}</div>
-                            <div class="text-xs text-gray-500">${stock.location_code} - ${stock.location_name}</div>
+                            <div class="text-sm text-gray-900">${escapeHTML(stock.warehouse_name)}</div>
+                            <div class="text-xs text-gray-500">${escapeHTML(stock.location_code)} - ${escapeHTML(stock.location_name)}</div>
                         </td>
                         <td class="px-6 py-4">
                             <div class="text-sm font-medium text-gray-900">${stock.quantity}</div>
@@ -596,7 +596,7 @@
                             <div class="text-sm text-gray-500">${new Date(stock.update_time).toLocaleString()}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <button onclick="viewStockDetail(${stock.id})" class="text-primary hover:text-secondary">
+                            <button onclick="viewStockDetail(${Number(stock.id) || 0})" class="text-primary hover:text-secondary">
                                 <i class="fa fa-eye"></i> 查看
                             </button>
                         </td>
@@ -631,8 +631,7 @@
             
             // 计算库存总价值
             const totalValue = filteredStocks.reduce((sum, stock) => {
-                const goods = getGoodsById(stock.goods_id);
-                return sum + (goods ? goods.price * stock.quantity : 0);
+                return sum + getStockValue(stock);
             }, 0);
             document.getElementById('totalValue').textContent = `¥${totalValue.toFixed(2)}`;
             
@@ -657,8 +656,7 @@
                 if (!warehouseStats[stock.warehouse_name]) {
                     warehouseStats[stock.warehouse_name] = 0;
                 }
-                const goods = getGoodsById(stock.goods_id);
-                warehouseStats[stock.warehouse_name] += goods ? goods.price * stock.quantity : 0;
+                warehouseStats[stock.warehouse_name] += getStockValue(stock);
             });
             
             const labels = Object.keys(warehouseStats);
@@ -716,8 +714,7 @@
             const today = new Date();
             const baseQuantity = filteredStocks.reduce((sum, stock) => sum + stock.quantity, 0);
             const baseValue = filteredStocks.reduce((sum, stock) => {
-                const goods = getGoodsById(stock.goods_id);
-                return sum + (goods ? goods.price * stock.quantity : 0);
+                return sum + getStockValue(stock);
             }, 0);
             for (let i = 6; i >= 0; i--) {
                 const date = new Date(today);
@@ -817,19 +814,19 @@
                         <div class="space-y-2">
                             <div class="flex justify-between">
                                 <span class="text-gray-600">货物名称:</span>
-                                <span class="font-medium">${stock.goods_name}</span>
+                                <span class="font-medium">${escapeHTML(stock.goods_name)}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">货物条码:</span>
-                                <span class="font-mono">${stock.goods_barcode}</span>
+                                <span class="font-mono">${escapeHTML(stock.goods_barcode)}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">规格型号:</span>
-                                <span>${goods ? goods.spec || '无' : '无'}</span>
+                                <span>${escapeHTML(goods ? goods.spec || '无' : '无')}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">单位:</span>
-                                <span>${goods ? goods.unit : '个'}</span>
+                                <span>${escapeHTML(goods ? goods.unit : '个')}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">单价:</span>
@@ -843,15 +840,15 @@
                         <div class="space-y-2">
                             <div class="flex justify-between">
                                 <span class="text-gray-600">所属仓库:</span>
-                                <span class="font-medium">${stock.warehouse_name}</span>
+                                <span class="font-medium">${escapeHTML(stock.warehouse_name)}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">库位编码:</span>
-                                <span class="font-mono">${stock.location_code}</span>
+                                <span class="font-mono">${escapeHTML(stock.location_code)}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">库位名称:</span>
-                                <span>${stock.location_name}</span>
+                                <span>${escapeHTML(stock.location_name)}</span>
                             </div>
                             <div class="flex justify-between">
                                 <span class="text-gray-600">库存数量:</span>
@@ -935,14 +932,13 @@
 
             try {
                 const rows = filteredStocks.map(stock => {
-                    const goodsItem = getGoodsById(stock.goods_id);
-                    const unitPrice = getStockUnitPrice(stock);
+                            const unitPrice = getStockUnitPrice(stock);
                     const stockValue = getStockValue(stock);
                     return {
                         '货物名称': stock.goods_name || '',
                         '货物条码': stock.goods_barcode || '',
-                        '规格型号': goodsItem ? (goodsItem.spec || '') : '',
-                        '单位': goodsItem ? (goodsItem.unit || '') : '',
+                        '规格型号': stock.goods_spec || '',
+                        '单位': stock.goods_unit || '',
                         '仓库': stock.warehouse_name || '',
                         '库位编码': stock.location_code || '',
                         '库位名称': stock.location_name || '',

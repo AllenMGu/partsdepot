@@ -3,3 +3,9 @@ __pycache__/
 *.py[cod]
 .venv/
 *.log
+*.db
+*.sqlite3
+node_modules/
+
+# PostgreSQL 测试集群数据（本地临时，勿提交）
+pgdata/
