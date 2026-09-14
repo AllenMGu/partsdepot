@@ -2973,12 +2973,13 @@ async def complete_check_order(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 查询盘点单
-    order = db.query(CheckOrderHeader).filter(CheckOrderHeader.id == order_id).first()
+    # 查询盘点单（单据头行级锁：串行化同一盘点单的并发完成，防止两个并发完成
+    # 都看到"未完成"而各自回写/新建库存）
+    order = lock_order_header(db, CheckOrderHeader, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="盘点单不存在")
 
-    # 检查盘点单状态
+    # 检查盘点单状态（持锁后判定：并发完成中先提交者置 COMPLETED，后到者在此被拒）
     if order.status == "COMPLETED":
         raise HTTPException(status_code=400, detail="盘点单已完成")
 
@@ -3000,6 +3001,11 @@ async def complete_check_order(
     items = db.query(CheckOrderItem).filter(CheckOrderItem.header_id == order_id).all()
     for item in items:
         stock = lock_stock_row(db, order.warehouse_id, item.goods_id, item.location_id)
+        if stock is None:
+            # 与入库/扫码入库同一把咨询锁：串行化"同一 (仓库,货物,库位)"的并发建行，
+            # 避免盘点完成与首次扫码入库并发时都看到"无库存行"而各建一条。
+            advisory_lock_stock_key(db, order.warehouse_id, item.goods_id, item.location_id)
+            stock = lock_stock_row(db, order.warehouse_id, item.goods_id, item.location_id)
         baseline = item.actual_quantity if item.actual_quantity is not None else 0.0
         goods_name = item.goods.name if item.goods else f"货物#{item.goods_id}"
         location_name = item.location.location_code if item.location else f"库位#{item.location_id}"
@@ -3010,7 +3016,7 @@ async def complete_check_order(
                     status_code=409,
                     detail=f"盘点期间 {goods_name}（{location_name}）的库存记录已变化（基线 {baseline} → 无记录），为避免覆盖期间出入库，请重新盘点该明细"
                 )
-            # 录入时系统无该库位记录，期间也无新增 → 按盘点数量新建库存行
+            # 持锁重查后仍无行：录入时系统无该库位记录，期间也无新增 → 按盘点数量新建库存行
             if (item.check_quantity or 0) > 0:
                 db.add(Stock(
                     warehouse_id=order.warehouse_id,

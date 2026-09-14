@@ -15,7 +15,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.dirname(HERE)
 DB = os.environ.get("WMS_TEST_DB", os.path.join(HERE, "test.db"))
 
-os.environ["DATABASE_URL"] = "sqlite:///" + DB
+# DB 可能是裸文件路径（sqlite）或完整 URL（sqlite/postgres），统一成 SQLAlchemy URL
+if "://" not in DB:
+    DB = "sqlite:///" + DB
+os.environ["DATABASE_URL"] = DB
 os.environ.setdefault("SECRET_KEY", "test-secret-123")
 for k in ("LDAP_SERVER", "LDAP_BASE_DN", "LDAP_ADMIN_DN", "LDAP_ADMIN_PASSWORD", "LDAP_USER_SEARCH_FILTER"):
     os.environ.pop(k, None)

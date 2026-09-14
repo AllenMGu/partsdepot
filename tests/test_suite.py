@@ -9,6 +9,23 @@ BASE = os.environ.get("WMS_TEST_BASE", "http://127.0.0.1:8091")
 DB = os.environ.get("WMS_TEST_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "test.db"))
 LOG = os.environ.get("WMS_TEST_LOG", os.path.join(os.path.dirname(os.path.abspath(__file__)), "server.log"))
 
+def _db_url():
+    """DB 可能是裸文件路径（sqlite）或完整 URL（sqlite/postgres），统一成 SQLAlchemy URL。"""
+    if "://" in DB:
+        return DB
+    return "sqlite:///" + os.path.abspath(DB)
+
+def db_execute(sql, params=()):
+    """方言无关的直连 DB 执行（SQLite / PostgreSQL 均可），返回结果行。"""
+    from sqlalchemy import create_engine, text
+    eng = create_engine(_db_url())
+    try:
+        with eng.begin() as conn:
+            res = conn.execute(text(sql), params)
+            return res.fetchall() if getattr(res, "returns_rows", True) else []
+    finally:
+        eng.dispose()
+
 results = []
 def check(name, cond, detail=""):
     results.append((name, bool(cond), detail))
@@ -99,7 +116,7 @@ s, cfg = req("GET", "/api/ldap/config", token=admin)
 vals = {k: v for k, v in (cfg or {}).items() if k.startswith("ldap_")} or {}
 no_internal = not any(("10.80.101" in str(v) or "cutiatx" in str(v)) for v in vals.values())
 check("P1-4 配置接口无内部环境值", s == 200 and no_internal, f"cfg={cfg}")
-con = sqlite3.connect(DB); n = con.execute("select count(*) from config where key like 'ldap%'").fetchone()[0]; con.close()
+n = db_execute("select count(*) from config where key like 'ldap%'")[0][0]
 check("P1-4 get_ldap_config 不再写回内置默认值(无ldap_*配置行)", n == 0, f"ldap_* config rows={n}")
 
 # ---------- 5. P1-7 入库单/明细编辑 ----------
@@ -214,6 +231,26 @@ req("POST", "/api/check-orders/items/", {"header_id": C2, "goods_barcode": "G001
 s, b = req("POST", f"/api/check-orders/{C2}/complete", {}, op)
 check("P0-2 负差异盘点(9→2)正常", s == 200 and stock_of() == 2, f"status={s} stock={stock_of()}")
 
+# ---------- 7b. 四轮：盘点完成"无库存行"建行路径 ----------
+# 场景：该 (货物,库位) 从未有库存行（基线=0），盘点实盘 N → 完成时新建库存行；
+# 重复完成必须被拒（单头锁串行化 + 状态复核），不得二次过账。
+s, g2 = req("POST", "/api/goods/", {"barcode": "G002", "name": "测试物料2", "price": 20}, admin)
+check("四轮 创建物料 G002", s == 200, f"status={s} body={g2}")
+s, l4 = req("POST", "/api/locations/", {"warehouse_id": W1, "location_code": "L4", "name": "库位4"}, admin)
+check("四轮 创建库位 L4(W1)", s == 200, f"status={s} body={l4}")
+s, c3 = req("POST", "/api/check-orders/", {"warehouse_id": W1}, op)
+C3 = (c3 or {}).get("id")
+s, b = req("POST", "/api/check-orders/items/", {"header_id": C3, "goods_barcode": "G002",
+                                                "location_code": "L4", "check_quantity": 6}, op)
+check("四轮 C3 录入(基线=0 无库存行, 实盘6)", s == 200 and (b or {}).get("actual_quantity") == 0,
+      f"status={s} body={b}")
+s, b = req("POST", f"/api/check-orders/{C3}/complete", {}, op)
+check("四轮 盘点完成新建库存行 → 库存=6", s == 200 and stock_of("G002", "L4") == 6,
+      f"status={s} stock={stock_of('G002', 'L4')}")
+s, b = req("POST", f"/api/check-orders/{C3}/complete", {}, op)
+check("四轮 重复完成同一盘点单 → 400 且不二次过账", s == 400 and stock_of("G002", "L4") == 6,
+      f"status={s} detail={b} stock={stock_of('G002', 'L4')}")
+
 # ---------- 8. P1-8 单号取最大尾号 ----------
 s, i2 = req("POST", "/api/inbound-orders/", {"supplier": "S2"}, admin)
 s2, i3 = req("POST", "/api/inbound-orders/", {"supplier": "S3"}, admin)
@@ -316,9 +353,7 @@ check("三轮P1 配置接口回显已写入值", s == 200 and (cfg or {}).get("l
 s, b = req("POST", "/api/token", {"username": "ghost-3rd", "password": "x"}, form=True)
 check("三轮P1 有配置时未知用户登录 → 401(非500)", s == 401, f"status={s}")
 # 撤销：删除 DB 中的 ldap_* 配置行
-con = sqlite3.connect(DB)
-con.execute("delete from config where key like 'ldap%'")
-con.commit(); con.close()
+db_execute("delete from config where key like 'ldap%'")
 s, cfg = req("GET", "/api/ldap/config", token=admin)
 all_none = all((cfg or {}).get(k) in (None, "") for k in
                ["ldap_server","ldap_base_dn","ldap_admin_dn","ldap_admin_password","ldap_user_search_filter"])

@@ -10,11 +10,20 @@ PORT="${PORT:-8091}"
 DB="tests/regression.db"
 LOG="tests/server.log"
 
-rm -f "$DB"
-echo "==> 启动测试服务 (port $PORT, fresh sqlite DB)"
+if [ -n "${WMS_DATABASE_URL:-}" ]; then
+  DB_URL="$WMS_DATABASE_URL"
+  DBREF="$DB_URL"
+  echo "==> 启动测试服务 (port $PORT, PostgreSQL: 行级锁/咨询锁语义真正生效)"
+else
+  DB_URL="sqlite:///$PWD/$DB"
+  DBREF="$PWD/$DB"
+  rm -f "$DB"
+  echo "==> 启动测试服务 (port $PORT, fresh sqlite DB)"
+fi
+
 env -u LDAP_SERVER -u LDAP_BASE_DN -u LDAP_ADMIN_DN -u LDAP_ADMIN_PASSWORD -u LDAP_USER_SEARCH_FILTER \
   SECRET_KEY=test-secret-123 \
-  DATABASE_URL="sqlite:///$PWD/$DB" \
+  DATABASE_URL="$DB_URL" \
   ADMIN_USERNAME=admin ADMIN_PASSWORD=Admin-Test-2026 \
   "$PY" -m uvicorn main:app --host 127.0.0.1 --port "$PORT" > "$LOG" 2>&1 &
 SRV=$!
@@ -29,12 +38,12 @@ done
 [ "$ready" = "1" ] || { echo "FATAL: 服务未就绪"; tail -20 "$LOG"; exit 2; }
 
 echo "==> 运行 HTTP 回归套件"
-WMS_TEST_BASE="http://127.0.0.1:$PORT" WMS_TEST_DB="$PWD/$DB" WMS_TEST_LOG="$PWD/$LOG" \
+WMS_TEST_BASE="http://127.0.0.1:$PORT" WMS_TEST_DB="$DBREF" WMS_TEST_LOG="$PWD/$LOG" \
   "$PY" tests/test_suite.py
 SUITE_RC=$?
 
 echo "==> 运行 LDAP 配置加载进程内测试"
-WMS_TEST_DB="$PWD/$DB" "$PY" tests/ldap_revoke_unit.py
+WMS_TEST_DB="$DBREF" "$PY" tests/ldap_revoke_unit.py
 UNIT_RC=$?
 
 if [ $SUITE_RC -eq 0 ] && [ $UNIT_RC -eq 0 ]; then

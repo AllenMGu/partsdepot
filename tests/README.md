@@ -11,9 +11,35 @@ bash tests/run_regression.sh
 
 - 自动启动临时服务（端口 8091，可用 `PORT` 覆盖）、全新 `tests/regression.db`
 - 依次运行：
-  - `test_suite.py` —— 黑盒 HTTP 回归（61 项检查）
+  - `test_suite.py` —— 黑盒 HTTP 回归（66 项检查）
   - `ldap_revoke_unit.py` —— 进程内验证 LDAP 配置加载（全局值清除、env>DB 优先级）
 - 全部通过则退出码 0
+
+## 在 PostgreSQL 上运行（评审要求：行级锁/咨询锁语义真实生效）
+
+默认用 SQLite。若要验证真实 PG 的行级排他锁与 `pg_advisory_xact_lock`，
+把 `WMS_DATABASE_URL` 指向一个**空** PG 库即可（脚本会用该 URL 起服务并跑同一套 66 项）：
+
+```bash
+# 例：本地已有一个空的 postgres 库 wms_pgtest
+export WMS_DATABASE_URL="postgresql://postgres:@/wms_pgtest?host=/path/to/pgsocket"
+bash tests/run_regression.sh
+```
+
+另附**并发复测**脚本，专门验证"并发建行/并发完成"路径（评审重点）：
+它会先 **DROP 掉 `stock` 的 (warehouse,goods,location) 复合唯一约束**，
+模拟"生产库尚无该约束"的现状，再断言"恰好一条库存行"——
+从而证明防重复靠的是代码里的行级锁+咨询锁，而不是数据库约束兜底：
+
+```bash
+WMS_DATABASE_URL="postgresql://postgres:@/wms_pgconc?host=..." \
+  .venv/bin/python tests/pg_concurrency.py
+```
+
+三个场景（均 13/13 通过）：
+- **A** 两线程并发"首次入库"同一 (货物,库位) → 两单均 200，**恰好 1 条库存行**，库存=3+4=7
+- **B** 两线程并发"完成同一盘点单"（基线0、无库存行）→ 恰一个 200、另一个 400，**恰好 1 条库存行**
+- **C** 盘点完成 ∥ 首次扫码入库 并发同组合 → 无 500，**恰好 1 条库存行**
 
 ## 覆盖的修复项（对应 PR #1 三轮评审）
 
@@ -30,13 +56,15 @@ bash tests/run_regression.sh
 | P1 入库编辑明细 500（单价可选） | 表头/明细编辑 200，省略单价回退物料价 |
 | P1 出库明细编辑 500 + 无跨仓校验（三轮新增） | 省略单价 200（非 500）；改到 B 仓库位 400 |
 | P1 入库单同(货物,库位)多条明细唯一约束 500（三轮新增） | 两条明细提交 200，库存=合计 |
+| P0 盘点完成"无库存行"建行无锁（四轮新增） | 基线=0 实盘6 完成→新建库存行=6；重复完成→400 且不二次过账（单头锁+咨询锁串行化） |
 | P1 删除草稿后单号复用撞号 | 新建=全局最大尾号+1 |
 | 其他 | JWT 30 分钟、管理员自举、README/静态托管 |
 
 ## 说明与限制
 
 - 并发用例在 SQLite 下验证**不变量**（库存非负、扣减与成功数一致）；
-  行级排他性（恰好一个 200）依赖 PostgreSQL 的 `FOR UPDATE` + 咨询锁，
-  上线后建议在生产同构环境按本套件场景复核。
+  行级排他性（恰好一个 200）依赖 PostgreSQL 的 `FOR UPDATE` + 咨询锁。
+  **已在真实 PostgreSQL 上复测**（66/66 + 并发 13/13，见上文"在 PostgreSQL 上运行"），
+  上线前仍建议在生产同构环境按本套件场景复核。
 - `xlsxwriter` 已列入 `requirements.txt`（盘点 Excel 导出 `engine='xlsxwriter'` 依赖）。
 - 测试凭据（admin/Admin-Test-2026 等）仅用于本地临时实例，不写入生产。
