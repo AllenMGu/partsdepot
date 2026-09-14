@@ -44,9 +44,34 @@ WMS_TEST_BASE="http://127.0.0.1:$PORT" WMS_TEST_DB="$DBREF" WMS_TEST_LOG="$PWD/$
   "$PY" tests/test_suite.py
 SUITE_RC=$?
 
-echo "==> 运行 LDAP 配置加载进程内测试"
+echo "==> 运行 LDAP 配置加载进程内测试（只使用独立临时库，不得修改目标测试库）"
+# 六轮回归：在目标测试库插入标记行——单元测试若误触碰目标库（删除 ldap% 配置行）此标记即丢失
+SECRET_KEY=test-secret-123 DATABASE_URL="$DB_URL" "$PY" - <<'EOF'
+import sys; sys.path.insert(0, ".")
+import main
+db = main.SessionLocal()
+if not db.query(main.Config).filter(main.Config.key == "ldap_round6_marker").first():
+    db.add(main.Config(key="ldap_round6_marker", value="must-survive-ldap-revoke-unit",
+                       description="round6 marker: unit test must not touch target DB"))
+    db.commit()
+db.close()
+EOF
 WMS_TEST_DB="$DBREF" "$PY" tests/ldap_revoke_unit.py
 UNIT_RC=$?
+# 标记行必须仍在（证明单元测试只使用独立临时库、未修改目标库）
+SECRET_KEY=test-secret-123 DATABASE_URL="$DB_URL" "$PY" - <<'EOF'
+import sys; sys.path.insert(0, ".")
+import main
+db = main.SessionLocal()
+row = db.query(main.Config).filter(main.Config.key == "ldap_round6_marker").first()
+db.close()
+sys.exit(0 if row and row.value == "must-survive-ldap-revoke-unit" else 1)
+EOF
+MARK_RC=$?
+if [ $MARK_RC -ne 0 ]; then
+  echo "FAIL | ldap_revoke_unit.py 修改了目标测试库（必须只使用独立临时库）"
+  exit 1
+fi
 
 if [ $SUITE_RC -eq 0 ] && [ $UNIT_RC -eq 0 ]; then
   echo "==> 全部回归测试通过"

@@ -5,27 +5,43 @@
 黑盒 HTTP 测试无法观察"进程内全局配置"，本脚本直接 import main 模块验证：
 1. 撤销（DB 配置清空/删除）且无环境变量时，上一次加载留下的旧全局值
    （旧服务器/凭据/搜索过滤器）必须被清除——每次调用从空值重新构造；
-2. 环境变量优先级高于数据库配置。
+2. 环境变量优先级高于数据库配置；
+3. 配置不完整时 ldap_authenticate 直接不可用（不尝试连接）。
 
-用法：与 tests/run_regression.sh 相同环境（同一 sqlite DB、无 LDAP_* 环境变量）。
+安全设计（六轮评审 P0）：
+本脚本**只使用独立临时库**（tempfile 创建、进程退出即删除），
+**忽略 WMS_TEST_DB 环境变量**（若设置则提示被忽略）。
+即使被单独运行，也不可能修改任何既有数据库——本脚本包含删除配置行的
+操作（wipe_db_ldap），历史上若指向现有库会误删其 LDAP 配置。
+
+用法：与 tests/run_regression.sh 相同环境（无 LDAP_* 环境变量即可）。
 """
-import os, sys
+import atexit
+import os
+import sys
+import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.dirname(HERE)
-DB = os.environ.get("WMS_TEST_DB", os.path.join(HERE, "test.db"))
 
-# DB 可能是裸文件路径（sqlite）或完整 URL（sqlite/postgres），统一成 SQLAlchemy URL
-if "://" not in DB:
-    DB = "sqlite:///" + DB
+# ---- 安全：只使用独立临时库，绝不触碰任何既有数据库（六轮 P0 修复）----
+if os.environ.get("WMS_TEST_DB"):
+    print("NOTE | 检测到 WMS_TEST_DB=%s —— 本单元测试只使用独立临时库，该值被忽略。"
+          % os.environ.get("WMS_TEST_DB"))
+_fd, DB_PATH = tempfile.mkstemp(suffix=".db", prefix="ldap_revoke_unit_")
+os.close(_fd)
+os.remove(DB_PATH)  # 让 main 的 create_all 全新建库（文件不存在时建表）
+atexit.register(lambda: os.path.exists(DB_PATH) and os.remove(DB_PATH) or None)
+DB = "sqlite:///" + DB_PATH
 os.environ["DATABASE_URL"] = DB
+os.environ.pop("WMS_TEST_DB", None)  # 防止任何被 import 的代码读到指向既有库的值
 os.environ.setdefault("SECRET_KEY", "test-secret-123")
 for k in ("LDAP_SERVER", "LDAP_BASE_DN", "LDAP_ADMIN_DN", "LDAP_ADMIN_PASSWORD", "LDAP_USER_SEARCH_FILTER"):
     os.environ.pop(k, None)
 
 os.chdir(APP_DIR)
 sys.path.insert(0, APP_DIR)
-import main  # noqa: E402  （import 会执行模块级初始化，无 ADMIN_* 时自举为 no-op）
+import main  # noqa: E402  （import 会执行模块级初始化，建全新临时库的表）
 
 def wipe_db_ldap(db):
     db.query(main.Config).filter(main.Config.key.like("ldap%")).delete(synchronize_session=False)

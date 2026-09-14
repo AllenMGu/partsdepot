@@ -2,15 +2,16 @@
 
 PR 评审修复项的回归测试套件（黑盒 HTTP + 进程内单元），本地 SQLite 即可运行，**无需 PostgreSQL**。
 
-## ⚠️ 安全警告（必读，五轮评审 P0）
+## ⚠️ 安全警告（必读，五轮/六轮评审 P0）
 
 **切勿将生产连接串传给本目录任何脚本。** 这些脚本会对目标库执行破坏性操作：
 
 - `test_suite.py` 会**删除 config 表的 ldap_* 行**（LDAP 撤销场景）
 - 所有脚本都会新建/删除仓库、货物、库位、库存、单据等**业务数据**
 - `pg_concurrency.py` 还会 **DROP `stock` 的 (仓库,货物,库位) 复合唯一约束**
+- `ldap_revoke_unit.py` 会**删除 config 表的 ldap_* 行**（撤销场景）——**该脚本已改为只使用独立临时库（tempfile 创建、退出即删），忽略 `WMS_TEST_DB`，即使单独运行也不可能触碰既有库**（六轮评审 P0 修复；`run_regression.sh` 另以"标记行"回归断言它未修改目标库）
 
-为此内置了**测试库安全护栏**（`tests/test_db_guard.py`，三个入口在启动服务前强制校验）：
+为此内置了**测试库安全护栏**（`tests/test_db_guard.py`，主回归/HTTP 套件/PG 并发三个入口在启动服务前强制校验；`ldap_revoke_unit.py` 以"独立临时库"方式天然隔离）：
 
 | 规则 | 行为 |
 |---|---|
@@ -33,7 +34,8 @@ bash tests/run_regression.sh
 - 自动启动临时服务（端口 8091，可用 `PORT` 覆盖）、全新 `tests/regression.db`
 - 依次运行：
   - `test_suite.py` —— 黑盒 HTTP 回归（72 项检查）
-  - `ldap_revoke_unit.py` —— 进程内验证 LDAP 配置加载（全局值清除、env>DB 优先级）
+  - `ldap_revoke_unit.py` —— 进程内验证 LDAP 配置加载（全局值清除、env>DB 优先级）；**只使用独立临时库，不触碰目标测试库**
+  - "标记行"回归：断言 `ldap_revoke_unit.py` 运行前后目标库的标记行仍在
 - 全部通过则退出码 0
 
 ## 在 PostgreSQL 上运行（评审要求：行级锁/咨询锁语义真实生效）
@@ -84,6 +86,7 @@ WMS_DATABASE_URL="postgresql://postgres:@/wms_pgconc?host=..." \
 | P0 盘点完成"无库存行"建行无锁（四轮新增） | 基线=0 实盘6 完成→新建库存行=6；重复完成→400 且不二次过账（单头锁+咨询锁串行化） |
 | P0 明细写入未与提交共用单头锁（五轮新增） | 11 个写接口（入/出库明细新增/编辑/删除、盘点录入、入/出库表头编辑、入/出库单据删除）均先 `lock_order_header` 锁单头再在锁内复核状态；终态单据新增/编辑明细→400（顺序）+ 并发交错 D~G（新明细要么随提交/完成过账、要么 400 拒绝，两次运行各命中一个分支） |
 | P0 测试脚本可误伤现有数据库（五轮新增） | `test_db_guard.py` 护栏：黑名单库名硬拒（逃生开关不豁免）；核心表非空拒绝（可 `WMS_ALLOW_NONEMPTY_TEST_DB=1` 豁免）；不可达 fail-closed；三个入口（run_regression.sh / test_suite.py / pg_concurrency.py）启动服务前强制校验 |
+| P0 单元测试未纳入护栏、单独运行可删现有库 LDAP 配置（六轮新增） | `ldap_revoke_unit.py` 改为**只使用独立临时库**（tempfile 创建、退出即删、忽略 `WMS_TEST_DB`），即使单独运行也不可能触碰既有库；`run_regression.sh` 以"标记行"回归断言其运行前后目标库未被修改 |
 | P1 删除草稿后单号复用撞号 | 新建=全局最大尾号+1 |
 | 其他 | JWT 30 分钟、管理员自举、README/静态托管 |
 
@@ -94,4 +97,5 @@ WMS_DATABASE_URL="postgresql://postgres:@/wms_pgconc?host=..." \
   **已在真实 PostgreSQL 上复测**（回归 72/72 + 并发 25/25，见上文"在 PostgreSQL 上运行"），
   上线前仍建议在生产同构环境按本套件场景复核。
 - `xlsxwriter` 已列入 `requirements.txt`（盘点 Excel 导出 `engine='xlsxwriter'` 依赖）。
+- `ldap_revoke_unit.py` 自包含：只使用 tempfile 独立临时库（六轮 P0），不依赖、也不修改任何外部库；单独运行安全。
 - 测试凭据（admin/Admin-Test-2026 等）仅用于本地临时实例，不写入生产。

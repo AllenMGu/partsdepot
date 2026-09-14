@@ -94,7 +94,14 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
 - API 文档：`http://<host>:8000/docs`
 - 首次登录：使用 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 创建的管理员账号
 
-### 4. 既有数据库升级注意（重要）
+### 4. 既有数据库升级注意（重要·部署前置条件）
+
+> **部署前置条件清单（上线前逐项核验）**
+> 1. **备份已就位**：代码备份 + 数据库 dump（`pg_dump warehouse_db > wms-db-backup-*.sql`），可回滚；
+> 2. **重复库存行预检 = 0 行**（执行下方法 2 的第一条 SQL）；
+> 3. **`stock` (仓库,货物,库位) 复合唯一约束已补加**（下方法 2），并在部署后执行"方法 3"的核验 SQL 确认约束存在；
+> 4. **部署后冒烟**：登录、仓库/库存查询、一笔出入库、一笔盘点各走一遍，确认无 5xx；
+> 5. 应用层防并发依赖**行级锁 + 咨询锁**（代码已含）；数据库级兜底依赖上表约束——两者齐备方可上线。
 
 `Base.metadata.create_all` **不会**修改已存在的表。若你从旧版本升级，请手动执行：
 
@@ -116,7 +123,19 @@ ALTER TABLE outbound_order_header ADD CONSTRAINT outbound_order_no_key UNIQUE (o
 ALTER TABLE check_order_header ADD CONSTRAINT check_order_no_key UNIQUE (order_no);
 ```
 
-> 2026-09-14 对既有生产库（warehouse_db）只读实测：`stock_quantity_non_negative` CHECK 与三张单据表 `order_no` UNIQUE 均已存在（单据表约束为 `inbound_order_header_order_no_key` 等旧命名）；**`stock` 复合唯一缺失**，且当前无重复库存行，可安全补加。
+**方法 3：部署后核验（部署前置条件清单第 3 项的验证）**
+
+```sql
+-- 复合唯一约束必须存在（应返回 1 行 _warehouse_goods_location_uc）
+SELECT conname FROM pg_constraint
+WHERE conrelid = 'stock'::regclass AND conname = '_warehouse_goods_location_uc';
+
+-- 应用层防并发验证（可选）：并发首入库同组合后应恰好 1 条库存行
+SELECT warehouse_id, goods_id, location_id, count(*) FROM stock
+GROUP BY 1,2,3 HAVING count(*) > 1;   -- 应恒为 0 行
+```
+
+> 2026-09-14 对既有生产库（warehouse_db）只读实测：`stock_quantity_non_negative` CHECK 与三张单据表 `order_no` UNIQUE 均已存在（单据表约束为 `inbound_order_header_order_no_key` 等旧命名）；**`stock` 复合唯一缺失**，且当前无重复库存行，可安全补加。**该补加步骤为部署前置条件**（见本节顶部清单），部署后须以"方法 3"核验。
 
 ## 安全基线（本次修复后）
 
