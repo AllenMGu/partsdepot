@@ -2867,8 +2867,9 @@ async def add_check_order_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 查询盘点单
-    order = db.query(CheckOrderHeader).filter(CheckOrderHeader.id == item.header_id).first()
+    # 查询盘点单（行级锁：与"并发完成"串行化，锁内复核状态，
+    # 防止"已完成单据出现未过账新明细"的竞争窗口）
+    order = lock_order_header(db, CheckOrderHeader, item.header_id)
     if not order:
         raise HTTPException(status_code=404, detail="盘点单不存在")
 
@@ -3205,11 +3206,10 @@ async def add_inbound_order_item(
 ):
     """向入库单添加明细项"""
     try:
-        # 检查订单是否存在且属于当前用户仓库
-        order = db.query(InboundOrderHeader).filter(
-            InboundOrderHeader.id == order_id
-        ).first()
-        
+        # 检查订单是否存在且属于当前用户仓库（行级锁：与"并发提交"串行化，
+        # 防止"已提交单据出现未过账新明细"的竞争窗口）
+        order = lock_order_header(db, InboundOrderHeader, order_id)
+
         if not order:
             raise HTTPException(status_code=404, detail="入库单不存在")
         
@@ -3507,8 +3507,8 @@ async def update_inbound_order(
 ):
     """更新入库单（仅允许更新草稿状态的订单）"""
     try:
-        # 查询订单
-        db_order = db.query(InboundOrderHeader).filter(InboundOrderHeader.id == order_id).first()
+        # 查询订单（行级锁：与"并发提交"串行化，锁内复核状态）
+        db_order = lock_order_header(db, InboundOrderHeader, order_id)
 
         if not db_order:
             raise HTTPException(status_code=404, detail="入库单不存在")
@@ -3567,8 +3567,8 @@ async def update_inbound_order_item(
 ):
     """更新入库单明细（仅允许更新草稿状态的订单的明细）"""
     try:
-        # 查询订单
-        order = db.query(InboundOrderHeader).filter(InboundOrderHeader.id == order_id).first()
+        # 查询订单（行级锁：与"并发提交"串行化，锁内复核状态）
+        order = lock_order_header(db, InboundOrderHeader, order_id)
 
         if not order:
             raise HTTPException(status_code=404, detail="入库单不存在")
@@ -3659,8 +3659,8 @@ async def delete_inbound_order_item(
 ):
     """删除入库单明细（仅允许删除草稿状态的订单的明细）"""
     try:
-        # 查询订单
-        order = db.query(InboundOrderHeader).filter(InboundOrderHeader.id == order_id).first()
+        # 查询订单（行级锁：与"并发提交"串行化，锁内复核状态）
+        order = lock_order_header(db, InboundOrderHeader, order_id)
 
         if not order:
             raise HTTPException(status_code=404, detail="入库单不存在")
@@ -3787,8 +3787,8 @@ async def delete_inbound_order(
 ):
     """删除入库单（仅允许删除草稿状态的订单）"""
     try:
-        # 查询订单
-        order = db.query(InboundOrderHeader).filter(InboundOrderHeader.id == order_id).first()
+        # 查询订单（行级锁：与"并发提交"串行化，锁内复核状态）
+        order = lock_order_header(db, InboundOrderHeader, order_id)
 
         if not order:
             raise HTTPException(status_code=404, detail="入库单不存在")
@@ -3886,10 +3886,9 @@ async def add_outbound_order_item(
 ):
     """向出库单添加明细项"""
     try:
-        order = db.query(OutboundOrderHeader).filter(
-            OutboundOrderHeader.id == order_id
-        ).first()
-        
+        # 行级锁：与"并发提交"串行化，锁内复核状态
+        order = lock_order_header(db, OutboundOrderHeader, order_id)
+
         if not order:
             raise HTTPException(status_code=404, detail="出库单不存在")
         
@@ -4186,8 +4185,8 @@ async def update_outbound_order(
 ):
     """更新出库单（仅允许更新草稿状态的订单）"""
     try:
-        # 查询订单
-        db_order = db.query(OutboundOrderHeader).filter(OutboundOrderHeader.id == order_id).first()
+        # 查询订单（行级锁：与"并发提交"串行化，锁内复核状态）
+        db_order = lock_order_header(db, OutboundOrderHeader, order_id)
 
         if not db_order:
             raise HTTPException(status_code=404, detail="出库单不存在")
@@ -4231,8 +4230,8 @@ async def update_outbound_order_item(
 ):
     """更新出库单明细（仅允许更新草稿状态的订单的明细）"""
     try:
-        # 查询订单
-        order = db.query(OutboundOrderHeader).filter(OutboundOrderHeader.id == order_id).first()
+        # 查询订单（行级锁：与"并发提交"串行化，锁内复核状态）
+        order = lock_order_header(db, OutboundOrderHeader, order_id)
 
         if not order:
             raise HTTPException(status_code=404, detail="出库单不存在")
@@ -4311,8 +4310,8 @@ async def delete_outbound_order_item(
 ):
     """删除出库单明细（仅允许删除草稿状态的订单的明细）"""
     try:
-        # 查询订单
-        order = db.query(OutboundOrderHeader).filter(OutboundOrderHeader.id == order_id).first()
+        # 查询订单（行级锁：与"并发提交"串行化，锁内复核状态）
+        order = lock_order_header(db, OutboundOrderHeader, order_id)
 
         if not order:
             raise HTTPException(status_code=404, detail="出库单不存在")
@@ -4362,8 +4361,8 @@ async def delete_outbound_order(
 ):
     """删除出库单（仅允许删除草稿状态的订单）"""
     try:
-        # 查询订单
-        order = db.query(OutboundOrderHeader).filter(OutboundOrderHeader.id == order_id).first()
+        # 查询订单（行级锁：与"并发提交"串行化，锁内复核状态）
+        order = lock_order_header(db, OutboundOrderHeader, order_id)
 
         if not order:
             raise HTTPException(status_code=404, detail="出库单不存在")

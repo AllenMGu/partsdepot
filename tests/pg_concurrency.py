@@ -1,10 +1,19 @@
 #!/usr/bin/env python3
 # PostgreSQL 并发复测（评审要求）
 #
-# 目的：在真实 PostgreSQL 上验证并发建行/并发完成路径。
+# 目的：在真实 PostgreSQL 上验证并发建行/并发完成/并发"明细写入∥提交"路径。
 # 关键点：先 DROP 掉 stock 的 (warehouse,goods,location) 复合唯一约束，
 #         模拟"生产库尚无该约束"的现状 —— 这样若应用层锁失效，就会真的写出重复库存行。
 #         测试断言"恰好一条库存行"，证明防重复来自代码（行级锁 + 咨询锁），而非数据库约束。
+#
+# 场景：A 并发首次入库同组合 | B 并发重复完成盘点 | C 盘点完成∥首次扫码入库
+#       D 入库 新增明细∥提交 | E 盘点 录入明细∥完成 | F 出库 新增明细∥提交 | G 入库 编辑明细∥提交
+#       D~G 断言"终态单据不得出现未过账/未扣减的新明细"：
+#       新明细要么随提交/完成一起过账，要么被 400 拒绝 —— 二者必居其一，不允许中间态。
+#
+# 安全：启动前先过 tests/test_db_guard.py 护栏 —— 目标库必须是可丢弃的空测试库
+#       （黑名单库名硬拒；核心表非空拒；WMS_ALLOW_NONEMPTY_TEST_DB=1 可豁免非空检查）。
+#       **切勿传入生产连接串。**
 #
 # 前置：一个空的 PostgreSQL 测试库（WMS_DATABASE_URL），服务未启动（本脚本自行启动）。
 # 用法：WMS_DATABASE_URL="postgresql://user:pw@host/db" .venv/bin/python tests/pg_concurrency.py
@@ -60,6 +69,16 @@ def db(sql, params=(), fetch=False):
         if fetch:
             return res.fetchall()
     return None
+
+# ---------- 测试库安全护栏（防误伤含真实数据的库） ----------
+# 本脚本会 DROP stock 复合唯一约束并写入业务数据；目标库必须是可丢弃的空测试库。
+sys.path.insert(0, HERE)
+from test_db_guard import guard as _db_guard, GuardError as _GuardError
+try:
+    _name, _ne = _db_guard(PGURL, include_users=True)
+except _GuardError as _e:
+    print(f"FATAL: 测试库安全护栏拒绝执行\n{_e}", file=sys.stderr)
+    raise SystemExit(3)
 
 # ---------- 启动服务 ----------
 import subprocess
@@ -195,6 +214,160 @@ try:
     codesC = {k: v[0] for k, v in resC.items()}
     check("场景C 无 500(不触发唯一约束冲突)", no500, f"codes={codesC}")
     check("场景C 该组合恰好 1 条库存行(盘点∥扫码不重复建行)", rowsC == 1, f"stock_rows={rowsC} codes={codesC}")
+
+    # ---------- 场景 D-G 通用查询助手 ----------
+    def stock_qty_of(barcode, loc):
+        r = db("SELECT COALESCE(sum(quantity),0), count(*) FROM stock s JOIN goods g ON s.goods_id=g.id JOIN locations l ON s.location_id=l.id WHERE g.barcode=:b AND l.location_code=:l",
+               {"b": barcode, "l": loc}, fetch=True)
+        return (r[0][0] or 0), r[0][1]
+
+    def items_count(table, order_id):
+        return db(f"SELECT count(*) FROM {table} WHERE header_id=:i", {"i": order_id}, fetch=True)[0][0]
+
+    def header_status(table, order_id):
+        return db(f"SELECT status FROM {table} WHERE id=:i", {"i": order_id}, fetch=True)[0][0]
+
+    # ============================================================
+    # 场景 D：入库"新增明细" ∥ "提交" 强制交错 —— 不允许出现已提交单据挂着未过账明细
+    # ============================================================
+    print("\n--- 场景 D：入库 新增明细 ∥ 提交 ---")
+    s, g4 = req("POST","/api/goods/",{"barcode":"G004","name":"物料4","price":40}, admin)
+    s, l4 = req("POST","/api/locations/",{"warehouse_id":W1,"location_code":"L4","name":"库位4"}, admin)
+    s, oD = req("POST","/api/inbound-orders/",{"supplier":"SD"}, admin); OD=(oD or {}).get("id")
+    req("POST", f"/api/inbound-orders/{OD}/items", {"goods_barcode":"G004","location_code":"L4","quantity":2}, admin)
+    check("场景D 入库单(1条明细 qty=2)就绪", OD, f"OD={OD} items={items_count('inbound_order_item', OD)}")
+
+    resD = {}
+    barD = threading.Barrier(2)
+    def addD():
+        barD.wait()
+        s, b = req("POST", f"/api/inbound-orders/{OD}/items", {"goods_barcode":"G004","location_code":"L4","quantity":3}, admin)
+        resD["add"] = (s,b)
+    def submitD():
+        barD.wait()
+        s, b = req("POST", f"/api/inbound-orders/{OD}/submit", {}, admin)
+        resD["submit"] = (s,b)
+    t1 = threading.Thread(target=addD); t2 = threading.Thread(target=submitD)
+    t1.start(); t2.start(); t1.join(); t2.join()
+    qtyD, rowsD = stock_qty_of("G004", "L4")
+    nD = items_count("inbound_order_item", OD)
+    stD = header_status("inbound_order_header", OD)
+    codesD = {k: v[0] for k, v in resD.items()}
+    okD = all(v[0] != 500 for v in resD.values())
+    consistentD = (
+        (resD["add"][0] == 200 and resD["submit"][0] == 200 and nD == 2 and qtyD == 5)
+        or (resD["add"][0] == 400 and resD["submit"][0] == 200 and nD == 1 and qtyD == 2)
+    )
+    check("场景D 无 500", okD, f"codes={codesD} status={stD} items={nD} stock={qtyD}")
+    check("场景D 结果一致(新明细要么随提交过账、要么被 400 拒绝)", consistentD,
+          f"codes={codesD} status={stD} items={nD} stock={qtyD}(期望 2+3=5 或 2)")
+
+    # ============================================================
+    # 场景 E：盘点"录入明细" ∥ "完成" 强制交错 —— 已完成单据不允许出现未过账新明细
+    # ============================================================
+    print("\n--- 场景 E：盘点 录入明细 ∥ 完成 ---")
+    s, l5 = req("POST","/api/locations/",{"warehouse_id":W1,"location_code":"L5","name":"库位5"}, admin)
+    s, l6 = req("POST","/api/locations/",{"warehouse_id":W1,"location_code":"L6","name":"库位6"}, admin)
+    s, cE = req("POST","/api/check-orders/",{"warehouse_id":W1}, op); CE=(cE or {}).get("id")
+    req("POST","/api/check-orders/items/",{"header_id":CE,"goods_barcode":"G004","location_code":"L5","check_quantity":5}, op)
+    check("场景E 盘点单(明细1: G004/L5 实盘5)就绪", CE, f"CE={CE} items={items_count('check_order_item', CE)}")
+
+    resE = {}
+    barE = threading.Barrier(2)
+    def addE():
+        barE.wait()
+        s, b = req("POST","/api/check-orders/items/",{"header_id":CE,"goods_barcode":"G004","location_code":"L6","check_quantity":3}, op)
+        resE["add"] = (s,b)
+    def completeE():
+        barE.wait()
+        s, b = req("POST", f"/api/check-orders/{CE}/complete", {}, op)
+        resE["complete"] = (s,b)
+    t1 = threading.Thread(target=addE); t2 = threading.Thread(target=completeE)
+    t1.start(); t2.start(); t1.join(); t2.join()
+    qE5, rE5 = stock_qty_of("G004", "L5")
+    qE6, rE6 = stock_qty_of("G004", "L6")
+    nE = items_count("check_order_item", CE)
+    stE = header_status("check_order_header", CE)
+    codesE = {k: v[0] for k, v in resE.items()}
+    okE = all(v[0] != 500 for v in resE.values())
+    consistentE = (
+        (resE["add"][0] == 200 and resE["complete"][0] == 200 and nE == 2 and qE5 == 5 and qE6 == 3)
+        or (resE["add"][0] == 400 and resE["complete"][0] == 200 and nE == 1 and qE5 == 5 and qE6 == 0)
+    )
+    check("场景E 无 500", okE, f"codes={codesE} status={stE} items={nE} stock5={qE5} stock6={qE6}")
+    check("场景E 结果一致(新明细要么随完成过账、要么被 400 拒绝)", consistentE,
+          f"codes={codesE} status={stE} items={nE} stock5={qE5} stock6={qE6}")
+
+    # ============================================================
+    # 场景 F：出库"新增明细" ∥ "提交" 强制交错 —— 不允许出现已提交单据挂着未扣减明细
+    # ============================================================
+    print("\n--- 场景 F：出库 新增明细 ∥ 提交 ---")
+    s, g5 = req("POST","/api/goods/",{"barcode":"G005","name":"物料5","price":50}, admin)
+    s, l7 = req("POST","/api/locations/",{"warehouse_id":W1,"location_code":"L7","name":"库位7"}, admin)
+    s, b = req("POST","/api/inventory/scan",{"goods_barcode":"G005","location_code":"L7","type":"入库","quantity":4}, op)
+    s, oF = req("POST","/api/outbound-orders/",{"supplier":"SF","customer":"CF"}, admin); OF=(oF or {}).get("id")
+    req("POST", f"/api/outbound-orders/{OF}/items", {"goods_barcode":"G005","location_code":"L7","quantity":1}, admin)
+    check("场景F 出库单(1条明细 qty=1, 库存=4)就绪", OF and s == 200, f"OF={OF} stock={stock_qty_of('G005','L7')[0]}")
+
+    resF = {}
+    barF = threading.Barrier(2)
+    def addF():
+        barF.wait()
+        s, b = req("POST", f"/api/outbound-orders/{OF}/items", {"goods_barcode":"G005","location_code":"L7","quantity":2}, admin)
+        resF["add"] = (s,b)
+    def submitF():
+        barF.wait()
+        s, b = req("POST", f"/api/outbound-orders/{OF}/submit", {}, admin)
+        resF["submit"] = (s,b)
+    t1 = threading.Thread(target=addF); t2 = threading.Thread(target=submitF)
+    t1.start(); t2.start(); t1.join(); t2.join()
+    qtyF, _ = stock_qty_of("G005", "L7")
+    nF = items_count("outbound_order_item", OF)
+    stF = header_status("outbound_order_header", OF)
+    codesF = {k: v[0] for k, v in resF.items()}
+    okF = all(v[0] != 500 for v in resF.values())
+    consistentF = (
+        (resF["add"][0] == 200 and resF["submit"][0] == 200 and nF == 2 and qtyF == 4 - 3)
+        or (resF["add"][0] == 400 and resF["submit"][0] == 200 and nF == 1 and qtyF == 4 - 1)
+    )
+    check("场景F 无 500", okF, f"codes={codesF} status={stF} items={nF} stock={qtyF}")
+    check("场景F 结果一致(新明细要么随提交扣减、要么被 400 拒绝)", consistentF,
+          f"codes={codesF} status={stF} items={nF} stock={qtyF}(期望 4-3=1 或 4-1=3)")
+
+    # ============================================================
+    # 场景 G：入库"编辑明细" ∥ "提交" 强制交错 —— 编辑要么生效并过账、要么被 400 拒绝
+    # ============================================================
+    print("\n--- 场景 G：入库 编辑明细 ∥ 提交 ---")
+    s, g6 = req("POST","/api/goods/",{"barcode":"G006","name":"物料6","price":60}, admin)
+    s, l8 = req("POST","/api/locations/",{"warehouse_id":W1,"location_code":"L8","name":"库位8"}, admin)
+    s, oG = req("POST","/api/inbound-orders/",{"supplier":"SG"}, admin); OG=(oG or {}).get("id")
+    s, itG = req("POST", f"/api/inbound-orders/{OG}/items", {"goods_barcode":"G006","location_code":"L8","quantity":2}, admin)
+    item_id_G = (itG or {}).get("id")
+    check("场景G 入库单(1条明细 qty=2, 可编辑)就绪", OG and item_id_G, f"OG={OG} item={item_id_G}")
+
+    resG = {}
+    barG = threading.Barrier(2)
+    def editG():
+        barG.wait()
+        s, b = req("PUT", f"/api/inbound-orders/{OG}/items/{item_id_G}", {"goods_barcode":"G006","location_code":"L8","quantity":9}, admin)
+        resG["edit"] = (s,b)
+    def submitG():
+        barG.wait()
+        s, b = req("POST", f"/api/inbound-orders/{OG}/submit", {}, admin)
+        resG["submit"] = (s,b)
+    t1 = threading.Thread(target=editG); t2 = threading.Thread(target=submitG)
+    t1.start(); t2.start(); t1.join(); t2.join()
+    qtyG, _ = stock_qty_of("G006", "L8")
+    stG = header_status("inbound_order_header", OG)
+    codesG = {k: v[0] for k, v in resG.items()}
+    okG = all(v[0] != 500 for v in resG.values())
+    consistentG = (
+        (resG["edit"][0] == 200 and resG["submit"][0] == 200 and qtyG == 9)
+        or (resG["edit"][0] == 400 and resG["submit"][0] == 200 and qtyG == 2)
+    )
+    check("场景G 无 500", okG, f"codes={codesG} status={stG} stock={qtyG}")
+    check("场景G 结果一致(编辑要么生效并过账=9、要么被 400 拒绝后按 2 过账)", consistentG,
+          f"codes={codesG} status={stG} stock={qtyG}(期望 9 或 2)")
 
 finally:
     srv.terminate()

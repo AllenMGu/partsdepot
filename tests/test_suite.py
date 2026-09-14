@@ -3,6 +3,7 @@
 # 覆盖：P0-1 出库汇总/并发重复提交 | P0-2 盘点基线冲突 | P1-3 扫码单事务
 #      P1-4 LDAP 未配置降级 | P1-5 零仓库新用户 | P1-6 库位管理员专属
 #      P1-7 入库编辑 500 | P1-8 单号撞号 | JWT 30min | 管理员自举 | 静态托管
+#      五轮：终态单据(已提交/已完成)拒绝一切明细写入(顺序不变量) | 测试库安全护栏
 import base64, json, os, sqlite3, sys, threading, time, urllib.parse, urllib.request, urllib.error
 
 BASE = os.environ.get("WMS_TEST_BASE", "http://127.0.0.1:8091")
@@ -52,6 +53,17 @@ def req(method, path, body=None, token=None, expect_error=False, form=False):
         return e.code, parsed
     except Exception as e:
         return -1, str(e)
+
+# ---------- 0a. 测试库安全护栏（防误伤含真实数据的库） ----------
+# 本套件会删除 config 表 ldap_* 行、建删业务数据；目标库必须是可丢弃的空测试库。
+# 服务自举的 admin 属正常，故 users 表不参与非空判定（include_users=False）。
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from test_db_guard import guard as _db_guard, GuardError as _GuardError
+try:
+    _name, _ne = _db_guard(_db_url(), include_users=False)
+except _GuardError as _e:
+    print(f"FATAL: 测试库安全护栏拒绝执行\n{_e}")
+    sys.exit(3)
 
 # ---------- 0. 服务就绪 ----------
 for _ in range(50):
@@ -340,6 +352,23 @@ def stock_of_loc(loc):
             return r.get("quantity")
     return 0
 check("三轮P1 同组合库存 = 3+4 = 7", stock_of_loc("L3") == 7, f"stock={stock_of_loc('L3')}")
+
+# ---------- 13b. 五轮：单据终态后任何明细写入 → 400（顺序不变量；并发交错版见 pg_concurrency D~G） ----------
+s, b = req("POST", f"/api/inbound-orders/{I7}/items",
+           {"goods_barcode": "G001", "location_code": "L3", "quantity": 2}, admin)
+check("五轮 入库：已提交单据新增明细 → 400", s == 400, f"status={s} detail={b}")
+check("五轮 入库：已提交单据库存未被该请求改变(仍=7)", stock_of_loc("L3") == 7, f"stock={stock_of_loc('L3')}")
+iid7 = (it7a or {}).get("id")
+s, b = req("PUT", f"/api/inbound-orders/{I7}/items/{iid7}",
+           {"goods_barcode": "G001", "location_code": "L3", "quantity": 9}, admin)
+check("五轮 入库：已提交单据编辑明细 → 400", s == 400, f"status={s} detail={b}")
+s, b = req("POST", f"/api/outbound-orders/{O2}/items",
+           {"goods_barcode": "G001", "location_code": "L1", "quantity": 1}, admin)
+check("五轮 出库：已提交单据新增明细 → 400", s == 400, f"status={s} detail={b}")
+s, b = req("POST", "/api/check-orders/items/", {"header_id": C3, "goods_barcode": "G002",
+                                                "location_code": "L4", "check_quantity": 1}, op)
+check("五轮 盘点：已完成单据录入明细 → 400", s == 400, f"status={s} detail={b}")
+check("五轮 盘点：已完成单据库存未被该请求改变(仍=6)", stock_of("G002", "L4") == 6, f"stock={stock_of('G002','L4')}")
 
 # ---------- 14. 三轮 P1：LDAP 配置撤销后不可再用旧值 ----------
 s, b = req("PUT", "/api/ldap/config", {

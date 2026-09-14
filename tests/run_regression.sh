@@ -13,6 +13,8 @@ LOG="tests/server.log"
 if [ -n "${WMS_DATABASE_URL:-}" ]; then
   DB_URL="$WMS_DATABASE_URL"
   DBREF="$DB_URL"
+  # 安全护栏：外部传入的库必须是"可丢弃的空测试库"（会删 LDAP 配置行/建删业务数据）
+  "$PY" tests/test_db_guard.py "$DB_URL" || exit 2
   echo "==> 启动测试服务 (port $PORT, PostgreSQL: 行级锁/咨询锁语义真正生效)"
 else
   DB_URL="sqlite:///$PWD/$DB"
