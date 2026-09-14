@@ -1,0 +1,205 @@
+/* ==========================================================================
+   polish.css — 统一视觉打磨层（v2, 2026-09-14）
+
+   作用域约定（评审后收紧）：
+   1. 所有规则仅对 <body> 显式加了 polish 类的页面生效（页面级 opt-in），
+      未引用本文件或未加该类的新页面、新组件不受任何影响；
+   2. 组件类样式一律使用专用类（.polish-modal / .polish-login-card），
+      不用 class 组合去"猜"某个 div 是什么组件；
+   3. 只做视觉增强：不改布局、不改交互、不改 JS、不改打印行为；
+   4. 配色沿用既有设计：主色 #1A56DB，品牌渐变 #1e3a8a → #3b82f6。
+
+   页面接入方式：
+   - <head> 引入本文件（style-src 'self' 允许同域 CSS）；
+   - <body> class 追加 polish。
+   ========================================================================== */
+
+/* ---------- 1. 基础 ---------- */
+body.polish {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+}
+body.polish ::selection {
+    background: rgba(26, 86, 219, 0.18);
+    color: #1e3a8a;
+}
+/* 细滚动条（Firefox + WebKit） */
+body.polish * {
+    scrollbar-width: thin;
+    scrollbar-color: #c7d0dc transparent;
+}
+body.polish *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+body.polish *::-webkit-scrollbar-track {
+    background: transparent;
+}
+body.polish *::-webkit-scrollbar-thumb {
+    background: #c7d0dc;
+    border-radius: 8px;
+}
+body.polish *::-webkit-scrollbar-thumb:hover {
+    background: #a9b6c8;
+}
+
+/* ---------- 2. 按钮（元素级状态样式） ---------- */
+body.polish button:not(:disabled) {
+    transition: transform 0.16s ease, box-shadow 0.16s ease,
+                background-color 0.16s ease, color 0.16s ease,
+                border-color 0.16s ease;
+}
+body.polish button:not(:disabled):not(.transform):hover {
+    transform: translateY(-1px);
+}
+body.polish button:not(:disabled):not(.transform):active {
+    transform: translateY(0) scale(0.99);
+}
+/* 主色按钮悬停时带同色系投影 */
+body.polish button.bg-primary:hover {
+    box-shadow: 0 4px 14px -2px rgba(26, 86, 219, 0.45);
+}
+body.polish button.bg-blue-500:hover,
+body.polish button.bg-blue-600:hover {
+    box-shadow: 0 4px 14px -2px rgba(59, 130, 246, 0.42);
+}
+body.polish button.bg-green-500:hover,
+body.polish button.bg-green-600:hover {
+    box-shadow: 0 4px 14px -2px rgba(34, 197, 94, 0.4);
+}
+body.polish button.bg-red-500:hover,
+body.polish button.bg-red-600:hover {
+    box-shadow: 0 4px 14px -2px rgba(239, 68, 68, 0.4);
+}
+body.polish button.bg-yellow-500:hover {
+    box-shadow: 0 4px 14px -2px rgba(234, 179, 8, 0.4);
+}
+
+/* 键盘焦点可见性 */
+body.polish a:focus-visible,
+body.polish button:focus-visible,
+body.polish input:focus-visible,
+body.polish select:focus-visible,
+body.polish textarea:focus-visible {
+    outline: 2px solid rgba(26, 86, 219, 0.5);
+    outline-offset: 2px;
+}
+
+/* ---------- 3. 表格 ---------- */
+body.polish thead.bg-gray-50 th {
+    font-weight: 600;
+    color: #5b6b80;
+    letter-spacing: 0.02em;
+    border-bottom: 1px solid #e6ebf2;
+}
+body.polish tbody tr {
+    transition: background-color 0.15s ease;
+}
+body.polish tbody tr:hover {
+    background-color: #f5f8fc;
+}
+/* 行分隔线颜色略调柔和（覆盖 divide-gray-200） */
+body.polish .divide-gray-200 > :not([hidden]) ~ :not([hidden]) {
+    border-color: #e9eef5;
+}
+
+/* ---------- 4. 表单 ---------- */
+body.polish input:not([type=file]):not([type=checkbox]):not([type=radio]),
+body.polish select,
+body.polish textarea {
+    transition: border-color 0.15s ease, box-shadow 0.15s ease,
+                background-color 0.15s ease;
+}
+/* 注：输入框聚焦环一律使用页面自身的 focus:ring-* 工具类或 :focus-visible outline，
+   本层不设置 focus box-shadow，避免覆盖 Tailwind 已有的 ring */
+body.polish input::placeholder,
+body.polish textarea::placeholder {
+    color: #98a4b5;
+}
+body.polish label {
+    font-weight: 500;
+}
+body.polish select {
+    cursor: pointer;
+}
+
+/* ---------- 5. 顶栏 ---------- */
+body.polish header {
+    border-bottom: 1px solid #e9eef5;
+}
+
+/* 下拉菜单：细边框 + 更圆润 + 展开动画（id 精确限定） */
+body.polish #warehouseDropdown,
+body.polish #userDropdown {
+    border: 1px solid #eef1f6;
+    border-radius: 0.5rem;
+}
+body.polish #warehouseDropdown:not(.hidden),
+body.polish #userDropdown:not(.hidden) {
+    animation: polDropIn 0.18s ease;
+}
+@keyframes polDropIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* ---------- 6. 侧边栏（id / 路由属性 / 既有专用类） ---------- */
+body.polish aside#sidebar {
+    border-right: 1px solid #e9eef5;
+    box-shadow: none;
+}
+body.polish a[data-route] {
+    font-weight: 500;
+    transition: background-color 0.15s ease, color 0.15s ease, box-shadow 0.2s ease;
+}
+body.polish a[data-route]:hover .sidebar-icon {
+    color: #1a56db;
+}
+body.polish a[data-route].sidebar-active {
+    background-image: linear-gradient(135deg, #1e3a8a, #3b82f6);
+    box-shadow: 0 2px 10px -2px rgba(30, 58, 138, 0.4);
+    font-weight: 600;
+}
+body.polish a[data-route].sidebar-active .sidebar-icon {
+    color: #ffffff;
+}
+
+/* ---------- 7. 模态框（专用类 .polish-modal，不再用 class 组合猜测） ---------- */
+body.polish .polish-modal {
+    background-color: rgba(15, 23, 42, 0.55);
+    -webkit-backdrop-filter: blur(2px);
+    backdrop-filter: blur(2px);
+}
+body.polish .polish-modal > div {
+    border-radius: 0.75rem;
+    box-shadow: 0 24px 60px -16px rgba(15, 23, 42, 0.4);
+}
+body.polish .polish-modal:not(.hidden) > div {
+    animation: polModalIn 0.2s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+@keyframes polModalIn {
+    from { opacity: 0; transform: translateY(12px) scale(0.97); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* ---------- 8. 登录卡片（专用类 .polish-login-card，仅 index.html） ---------- */
+body.polish .polish-login-card {
+    animation: polCardIn 0.45s cubic-bezier(0.2, 0.8, 0.3, 1);
+    box-shadow: 0 24px 50px -12px rgba(15, 23, 42, 0.3);
+}
+@keyframes polCardIn {
+    from { opacity: 0; transform: translateY(14px) scale(0.985); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* ---------- 9. 动效偏好 ---------- */
+@media (prefers-reduced-motion: reduce) {
+    body.polish *,
+    body.polish *::before,
+    body.polish *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
