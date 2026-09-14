@@ -53,7 +53,7 @@ body.polish button:not(:disabled) {
 body.polish button:not(:disabled):not(.transform):hover {
     transform: translateY(-1px);
 }
-body.polish button:not(:disabled):active {
+body.polish button:not(:disabled):not(.transform):active {
     transform: translateY(0) scale(0.99);
 }
 /* 主色按钮悬停时带同色系投影 */
@@ -111,12 +111,8 @@ body.polish textarea {
     transition: border-color 0.15s ease, box-shadow 0.15s ease,
                 background-color 0.15s ease;
 }
-/* 为未声明 focus 工具类的输入框补一层柔光环（已有 focus:ring 的元素以其为准） */
-body.polish input:focus,
-body.polish select:focus,
-body.polish textarea:focus {
-    box-shadow: 0 0 0 3px rgba(26, 86, 219, 0.14);
-}
+/* 注：输入框聚焦环一律使用页面自身的 focus:ring-* 工具类或 :focus-visible outline，
+   本层不设置 focus box-shadow，避免覆盖 Tailwind 已有的 ring */
 body.polish input::placeholder,
 body.polish textarea::placeholder {
     color: #98a4b5;
