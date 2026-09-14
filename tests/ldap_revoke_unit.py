@@ -42,7 +42,13 @@ for k in ("LDAP_SERVER", "LDAP_BASE_DN", "LDAP_ADMIN_DN", "LDAP_ADMIN_PASSWORD",
 
 os.chdir(APP_DIR)
 sys.path.insert(0, APP_DIR)
-import main  # noqa: E402  （import 会执行模块级初始化，建全新临时库的表）
+# 拆分后（main.py → core/ + api/），LDAP 可变状态（LDAP_*）与
+# load_ldap_config_from_db / ldap_authenticate 统一位于 core/ldap.py（单一事实来源）。
+# 本测试是白盒测试，直接读写"该状态所有者模块"的全局变量；重构把状态从 main 模块移入
+# core/ldap，因此这里仅把导入目标 main 改指向 core.ldap——下方所有行为断言与拆分前逐字节一致。
+import core.ldap as main  # noqa: E402  （import 会执行模块级初始化，建全新临时库的表）
+from core.database import SessionLocal as _SessionLocal  # noqa: E402
+main.SessionLocal = _SessionLocal  # 兼容既有 main.SessionLocal 引用
 
 def wipe_db_ldap(db):
     db.query(main.Config).filter(main.Config.key.like("ldap%")).delete(synchronize_session=False)

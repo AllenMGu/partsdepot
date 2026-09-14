@@ -49,6 +49,8 @@ echo "==> 运行 LDAP 配置加载进程内测试（只使用独立临时库，�
 SECRET_KEY=test-secret-123 DATABASE_URL="$DB_URL" "$PY" - <<'EOF'
 import sys; sys.path.insert(0, ".")
 import main
+from core.models import Config as _C  # 拆分后 Config 位于 core.models
+main.Config = _C
 db = main.SessionLocal()
 if not db.query(main.Config).filter(main.Config.key == "ldap_round6_marker").first():
     db.add(main.Config(key="ldap_round6_marker", value="must-survive-ldap-revoke-unit",
@@ -62,6 +64,8 @@ UNIT_RC=$?
 SECRET_KEY=test-secret-123 DATABASE_URL="$DB_URL" "$PY" - <<'EOF'
 import sys; sys.path.insert(0, ".")
 import main
+from core.models import Config as _C  # 拆分后 Config 位于 core.models
+main.Config = _C
 db = main.SessionLocal()
 row = db.query(main.Config).filter(main.Config.key == "ldap_round6_marker").first()
 db.close()
