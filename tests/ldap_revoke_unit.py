@@ -25,9 +25,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 APP_DIR = os.path.dirname(HERE)
 
 # ---- 安全：只使用独立临时库，绝不触碰任何既有数据库（六轮 P0 修复）----
+# 七轮 P1：仅提示"检测到并忽略"，**不打印变量值**——URL 可能含密码，
+# 打印会泄露到终端/CI 日志。
 if os.environ.get("WMS_TEST_DB"):
-    print("NOTE | 检测到 WMS_TEST_DB=%s —— 本单元测试只使用独立临时库，该值被忽略。"
-          % os.environ.get("WMS_TEST_DB"))
+    print("NOTE | 检测到 WMS_TEST_DB —— 本单元测试只使用独立临时库，该值被忽略（按安全要求不打印其内容）。")
 _fd, DB_PATH = tempfile.mkstemp(suffix=".db", prefix="ldap_revoke_unit_")
 os.close(_fd)
 os.remove(DB_PATH)  # 让 main 的 create_all 全新建库（文件不存在时建表）

@@ -70,15 +70,16 @@ def guard(url, include_users=True):
                 raise GuardError(
                     "目标库不是空测试库，拒绝执行（本套测试会删除 LDAP 配置行、建删业务数据，"
                     "并发专项还会 DROP stock 复合唯一约束）。\n"
-                    f"      目标库: {name or url}\n"
+                    f"      目标库: {name if name else '(未能解析库名；为防凭据泄露不打印完整 URL)'}\n"
                     f"      非空表: {', '.join(nonempty)}\n"
                     "      请另建一个可整体丢弃的空测试数据库（建议配受限账号，仅授权该测试库）后重试。\n"
                     "      如已确认该库可整体丢弃，可设 WMS_ALLOW_NONEMPTY_TEST_DB=1 跳过本检查。")
         except GuardError:
             raise
         except Exception as e:
+            # 七轮 P1：只保留异常类型，不打印异常原文——原文可能含连接串/凭据
             raise GuardError(
-                f"无法连接目标库以完成安全校验（{type(e).__name__}: {e}）。\n"
+                f"无法连接目标库以完成安全校验（{type(e).__name__}）。\n"
                 "      无法确认目标库是否为空测试库，为安全起见拒绝执行。")
     finally:
         eng.dispose()
