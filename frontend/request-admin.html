@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-+dNCyi3BsqaLmWZkfq0S/7fibzGWf+cGlJj8SITr9uU='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-H4/kpEOoTp06LyMxH/wtCots7tDgR358DLAZx8+9kA8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -210,6 +210,27 @@
         // 申请单管理（管理员）
         (function () {
             'use strict';
+
+            // 权限检查：只有管理员可以访问申请管理页面（与 user.html 同规则）
+            // 注意：currentUser 是 common.js 的 let 全局（不挂 window），直接引用
+            if (typeof currentUser === 'undefined' || !currentUser || currentUser.role !== 'admin') {
+                const mainEl = document.querySelector('main');
+                if (mainEl) {
+                    mainEl.innerHTML =
+                        '<div class="flex items-center justify-center h-64">' +
+                        '<div class="text-center">' +
+                        '<i class="fa fa-lock text-6xl text-gray-400 mb-4"></i>' +
+                        '<h1 class="text-2xl font-bold text-gray-800 mb-2">无权限访问</h1>' +
+                        '<p class="text-gray-600">只有系统管理员才能访问申请管理页面</p>' +
+                        '</div></div>';
+                }
+                const requestMenuLink = document.querySelector('a[href="request-admin.html"]');
+                if (requestMenuLink) {
+                    requestMenuLink.style.display = 'none';
+                }
+                return;
+            }
+
             const STATUS_TEXT = { pending: '待处理', approved: '已通过', rejected: '已驳回' };
             const ARCHIVE_PAGE_SIZE = 50;
             let archivePage = 1;
