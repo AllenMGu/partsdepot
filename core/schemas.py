@@ -302,11 +302,10 @@ class RequestSubmit(BaseModel):
     category: str = Field(..., min_length=1, max_length=50, description="申请类别")
     description: str = Field(..., min_length=1, max_length=2000, description="事由描述")
     attachment_note: Optional[str] = Field(None, max_length=500, description="附件说明（可选）")
-    goods_barcode: Optional[str] = Field(None, max_length=100, description="相关货物条码（可选）")
-    goods_name: Optional[str] = Field(None, max_length=100, description="相关货物名称（可选）")
-    goods_spec: Optional[str] = Field(None, max_length=100, description="相关货物规格（可选）")
-    goods_unit: Optional[str] = Field(None, max_length=20, description="相关货物单位（可选）")
-    goods_quantity: Optional[float] = Field(None, gt=0, description="相关货物数量（可选，选货物时必填）")
+    # 相关货物（可选）：客户端只提交 条码+数量；名称/规格/单位由后端按条码查库填充，
+    # 不接收客户端快照字段（防伪造：真实条码配假名称、或提交不存在的条码）
+    goods_barcode: Optional[str] = Field(None, max_length=100, description="相关货物条码（可选，必须存在于货物表）")
+    goods_quantity: Optional[float] = Field(None, gt=0, description="相关货物数量（可选，选货物时必填且>0）")
 
 class RequestResponse(BaseModel):
     id: int
