@@ -14,7 +14,7 @@
     <button class="btn-primary" loading="{{loading}}" bindtap="handleLogin">登录</button>
   </view>
 
-  <view class="subtitle" style="text-align:center;margin-top: 24rpx;">
-    API: https://HOSTS/api
+  <view class="card" style="margin-top: 20rpx;">
+    <button class="btn-ghost" bindtap="goApply">匿名提交申请（无需登录）</button>
   </view>
 </view>
