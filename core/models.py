@@ -284,6 +284,9 @@ class Request(Base):
     handle_time = Column(DateTime, comment="处理时间")
     create_time = Column(DateTime, default=datetime.now, index=True)
     update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+    # ORM 级联（评审 P1 方案 A）：对象级删除 Request 时连同明细删除；
+    # passive_deletes=True 让数据库 ondelete=CASCADE 兜底，避免删除前额外加载明细
+    items = relationship("RequestItem", backref="request", cascade="all, delete-orphan", passive_deletes=True)
 
 # 12.2 申请单归档表（由归档任务从 requests 移入，数据不丢失）
 class RequestArchive(Base):
@@ -315,7 +318,10 @@ class RequestArchive(Base):
 class RequestItem(Base):
     __tablename__ = "request_items"
     id = Column(Integer, primary_key=True, index=True)
-    request_id = Column(Integer, index=True, comment="所属申请单ID（requests.id）")
+    # 真实外键 + 级联删除（评审 P1）：申请单被删时明细由数据库级联清除，不留孤儿行；
+    # 归档流程仍在同一事务内显式删除明细（双保险，且不依赖数据库级联是否启用）
+    request_id = Column(Integer, ForeignKey("requests.id", ondelete="CASCADE"), index=True,
+                        comment="所属申请单ID（requests.id，级联删除）")
     sort = Column(Integer, default=0, comment="行序（0 起）")
     barcode = Column(String(100), nullable=False, comment="货物条码（必须存在于货物表）")
     name = Column(String(100), comment="货物名称（提交时快照）")
@@ -327,8 +333,10 @@ class RequestItem(Base):
 class RequestItemArchive(Base):
     __tablename__ = "request_items_archive"
     id = Column(Integer, primary_key=True, index=True)
-    archive_id = Column(Integer, index=True, comment="所属归档单ID（requests_archive.id）")
-    original_request_id = Column(Integer, index=True, comment="原申请单ID（requests.id）")
+    # 外键指向归档单（防同类孤儿行）；original_request_id 是历史引用（原单已删），不能建 FK
+    archive_id = Column(Integer, ForeignKey("requests_archive.id", ondelete="CASCADE"), index=True,
+                        comment="所属归档单ID（requests_archive.id，级联删除）")
+    original_request_id = Column(Integer, index=True, comment="原申请单ID（requests.id，历史引用）")
     sort = Column(Integer, default=0, comment="行序（0 起）")
     barcode = Column(String(100), nullable=False, comment="货物条码")
     name = Column(String(100), comment="货物名称")
@@ -341,13 +349,10 @@ Base.metadata.create_all(bind=engine)
 
 # 存量库兼容迁移（create_all 不会改动已存在的表结构）：
 # 申请类别停用后允许为空。生产库 requests / requests_archive 当前无数据，DROP NOT NULL 零风险。
-# 测试库由 create_all 按新模型（nullable）直接建表，无需迁移。
-try:
-    if engine.dialect.name == "postgresql":
-        with engine.begin() as _mig_conn:
-            _mig_conn.execute(text("ALTER TABLE requests ALTER COLUMN category DROP NOT NULL"))
-            _mig_conn.execute(text("ALTER TABLE requests_archive ALTER COLUMN category DROP NOT NULL"))
-except Exception:
-    # 迁移失败不阻塞启动：新表已由 create_all 建立，旧数据不受影响
-    import logging as _logging
-    _logging.getLogger(__name__).warning("category 列可空迁移执行失败（不影响新表创建）", exc_info=True)
+# 测试库（SQLite）由 create_all 按新模型（nullable）直接建表，无需迁移。
+# fail-fast（评审 P2）：迁移失败直接让启动失败——若带着旧 NOT NULL 约束继续运行，
+# 每张新申请都会在 commit 时 500，"启动成功但服务不可用"比拒绝启动更糟。
+if engine.dialect.name == "postgresql":
+    with engine.begin() as _mig_conn:
+        _mig_conn.execute(text("ALTER TABLE requests ALTER COLUMN category DROP NOT NULL"))
+        _mig_conn.execute(text("ALTER TABLE requests_archive ALTER COLUMN category DROP NOT NULL"))
