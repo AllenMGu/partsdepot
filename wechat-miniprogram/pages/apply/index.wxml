@@ -1,0 +1,82 @@
+<view class="container">
+  <view class="card">
+    <view class="title">申请提交</view>
+    <view class="subtitle">免登录匿名提交 · 提交后请保存申请编号</view>
+  </view>
+
+  <view class="card">
+    <view class="subtitle" style="margin-bottom: 12rpx;">申请信息</view>
+    <input class="input" placeholder="申请人（必填）" value="{{applicantName}}" bindinput="onApplicantInput" maxlength="100" />
+    <input class="input" placeholder="部门（选填）" value="{{department}}" bindinput="onDepartmentInput" maxlength="100" />
+    <input class="input" type="text" placeholder="联系邮箱（必填，如 zhangsan@example.com）" value="{{contact}}" bindinput="onContactInput" maxlength="200" />
+    <textarea
+      class="textarea"
+      placeholder="事由描述（必填）"
+      value="{{description}}"
+      bindinput="onDescriptionInput"
+      maxlength="2000"
+      auto-height
+    />
+    <textarea
+      class="textarea"
+      placeholder="备注（选填，如附件说明）"
+      value="{{attachmentNote}}"
+      bindinput="onAttachmentNoteInput"
+      maxlength="500"
+      auto-height
+    />
+  </view>
+
+  <view class="card">
+    <view class="row" style="margin-bottom: 12rpx;">
+      <text>相关货物（选填，可多行）</text>
+      <text class="muted">已加 {{goodsItems.length}} 行</text>
+    </view>
+    <input
+      class="input"
+      placeholder="输入条码或名称搜索货物"
+      value="{{goodsKeyword}}"
+      bindinput="onGoodsKeyword"
+      confirm-type="search"
+    />
+    <view wx:if="{{searching}}" class="hint">搜索中…</view>
+    <view wx:if="{{searchError}}" class="error">{{searchError}}</view>
+    <view wx:if="{{!searching && !searchError && goodsKeyword && goodsResults.length === 0}}" class="hint">未找到匹配货物</view>
+
+    <view
+      class="goods-hit"
+      wx:for="{{goodsResults}}"
+      wx:key="barcode"
+      data-goods="{{item}}"
+      bindtap="onPickGoods"
+    >
+      <view class="goods-name">{{item.name}}</view>
+      <view class="subtitle">{{item.barcode}}{{item.spec ? " · " + item.spec : ""}}{{item.unit ? " · " + item.unit : ""}}</view>
+    </view>
+
+    <view class="goods-row" wx:for="{{goodsItems}}" wx:key="barcode">
+      <view class="goods-main">
+        <view class="goods-name">{{item.name}}</view>
+        <view class="subtitle">{{item.spec || "—"}} / {{item.unit || "单位"}}</view>
+      </view>
+      <input
+        class="qty-input"
+        type="digit"
+        placeholder="数量"
+        value="{{item.qty}}"
+        data-idx="{{index}}"
+        bindinput="onQtyInput"
+      />
+      <text class="del" data-idx="{{index}}" bindtap="onRemoveGoods">删除</text>
+    </view>
+  </view>
+
+  <button
+    class="btn-primary submit-btn"
+    loading="{{submitting}}"
+    disabled="{{submitting}}"
+    bindtap="submit"
+  >
+    提交申请
+  </button>
+</view>

@@ -24,6 +24,9 @@ Page({
   onPasswordInput(e) {
     this.setData({ password: e.detail.value });
   },
+  goApply() {
+    wx.navigateTo({ url: "/pages/apply/index" });
+  },
   async handleLogin() {
     const { username, password } = this.data;
     if (!username || !password) {

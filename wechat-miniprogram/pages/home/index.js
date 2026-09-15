@@ -1,19 +1,23 @@
 const { request } = require("../../utils/api");
 const { getUser, clearAuth } = require("../../utils/auth");
-const { requireLogin } = require("../../utils/guard");
+const { isLoggedIn } = require("../../utils/guard");
 const { fmtNum } = require("../../utils/format");
 
 Page({
   data: {
+    loggedIn: false,
     user: {},
     stockCount: 0,
     totalQty: "0.00",
     logsCount: 0
   },
   async onShow() {
-    if (!requireLogin()) return;
-    this.setData({ user: getUser() || {} });
-    await this.loadOverview();
+    // 首页匿名可用：未登录时不跳转，只显示申请入口与登录入口
+    const loggedIn = isLoggedIn();
+    this.setData({ loggedIn, user: loggedIn ? (getUser() || {}) : {} });
+    if (loggedIn) {
+      await this.loadOverview();
+    }
   },
   async loadOverview() {
     wx.showLoading({ title: "加载中" });
@@ -42,6 +46,12 @@ Page({
   },
   goStock() {
     wx.switchTab({ url: "/pages/stock/index" });
+  },
+  goApply() {
+    wx.navigateTo({ url: "/pages/apply/index" });
+  },
+  goLogin() {
+    wx.reLaunch({ url: "/pages/login/index" });
   },
   logout() {
     clearAuth();

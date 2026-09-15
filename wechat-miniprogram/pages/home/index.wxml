@@ -1,20 +1,39 @@
 <view class="container">
-  <view class="card">
-    <view class="title">你好，{{user.full_name || user.username}}</view>
-    <view class="subtitle">当前仓库：{{user.current_warehouse_name || "未选择"}}</view>
+  <!-- 申请入口：匿名与登录用户均可用 -->
+  <view class="card apply-entry" bindtap="goApply">
+    <view class="row">
+      <view>
+        <view class="title">提交申请</view>
+        <view class="subtitle">免登录匿名提交 · 可添加多行货物</view>
+      </view>
+      <text class="arrow">›</text>
+    </view>
   </view>
 
-  <view class="card">
-    <view class="row"><text>库存条目</text><text>{{stockCount}}</text></view>
-    <view class="row" style="margin-top:12rpx;"><text>库存总量</text><text>{{totalQty}}</text></view>
-    <view class="row" style="margin-top:12rpx;"><text>最近日志</text><text>{{logsCount}}</text></view>
-  </view>
+  <block wx:if="{{loggedIn}}">
+    <view class="card">
+      <view class="title">你好，{{user.full_name || user.username}}</view>
+      <view class="subtitle">当前仓库：{{user.current_warehouse_name || "未选择"}}</view>
+    </view>
 
-  <view class="card">
-    <view class="subtitle" style="margin-bottom: 12rpx;">快捷操作</view>
-    <button class="btn-ghost" style="margin-bottom:12rpx;" bindtap="goOrders">单据中心</button>
-    <button class="btn-primary" bindtap="goScan">扫码出入库/盘点</button>
-    <button class="btn-ghost" style="margin-top:12rpx;" bindtap="goStock">查看库存</button>
-    <button class="btn-ghost" style="margin-top:12rpx;" bindtap="logout">退出登录</button>
+    <view class="card">
+      <view class="row"><text>库存条目</text><text>{{stockCount}}</text></view>
+      <view class="row" style="margin-top:12rpx;"><text>库存总量</text><text>{{totalQty}}</text></view>
+      <view class="row" style="margin-top:12rpx;"><text>最近日志</text><text>{{logsCount}}</text></view>
+    </view>
+
+    <view class="card">
+      <view class="subtitle" style="margin-bottom: 12rpx;">快捷操作</view>
+      <button class="btn-primary" style="margin-bottom:12rpx;" bindtap="goScan">扫码出入库/盘点</button>
+      <button class="btn-ghost" style="margin-bottom:12rpx;" bindtap="goOrders">单据中心</button>
+      <button class="btn-ghost" style="margin-bottom:12rpx;" bindtap="goStock">查看库存</button>
+      <button class="btn-ghost" bindtap="logout">退出登录</button>
+    </view>
+  </block>
+
+  <view class="card" wx:else>
+    <view class="title">欢迎使用备件仓储管理</view>
+    <view class="subtitle" style="margin-bottom: 16rpx;">无需登录即可提交申请；登录后使用扫码出入库、盘点等功能。</view>
+    <button class="btn-primary" bindtap="goLogin">登录系统</button>
   </view>
 </view>
