@@ -283,8 +283,10 @@ class Request(Base):
 # 12.2 申请单归档表（由归档任务从 requests 移入，数据不丢失）
 class RequestArchive(Base):
     __tablename__ = "requests_archive"
+    # 同一原申请单最多归档一次：并发归档（后台任务 vs 手动触发、多 worker）的幂等兜底
+    __table_args__ = (UniqueConstraint("original_id", name="uq_requests_archive_original_id"),)
     id = Column(Integer, primary_key=True, index=True)
-    original_id = Column(Integer, index=True, comment="原申请单ID（requests.id）")
+    original_id = Column(Integer, index=True, comment="原申请单ID（requests.id），全表唯一")
     applicant_name = Column(String(100), nullable=False, comment="申请人")
     department = Column(String(100), comment="部门")
     contact = Column(String(200), nullable=False, comment="联系方式（电话/邮箱）")
