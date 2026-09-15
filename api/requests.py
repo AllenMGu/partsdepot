@@ -87,12 +87,13 @@ def get_request_categories():
     return REQUEST_CATEGORIES
 
 # ------------------- 公开货物搜索限流（独立桶，比提交更宽松，但仍防枚举滥用） -------------------
-SEARCH_RATE_MAX_PER_IP = 30          # 单 IP 10 分钟内最多 30 次搜索
-SEARCH_RATE_MAX_GLOBAL = 120         # 全局 10 分钟内最多 120 次
+SEARCH_RATE_WINDOW_SECONDS = 60      # 搜索专用 1 分钟窗口（搜索是键入即查的交互，不宜用 10 分钟窗口）
+SEARCH_RATE_MAX_PER_IP = 30          # 单 IP 1 分钟内最多 30 次搜索
+SEARCH_RATE_MAX_GLOBAL = 120         # 全局 1 分钟内最多 120 次
 
 def _check_search_rate_limit(ip: str) -> None:
     now = time.monotonic()
-    cutoff = now - RATE_WINDOW_SECONDS
+    cutoff = now - SEARCH_RATE_WINDOW_SECONDS
     with _rate_lock:
         global_hits = [t for t in _rate_hits.get("search:__global__", []) if t > cutoff]
         ip_hits = [t for t in _rate_hits.get("search:" + ip, []) if t > cutoff]
@@ -150,10 +151,22 @@ def submit_request(
             detail=f"无效的申请类别：{category}（可选：{'、'.join(REQUEST_CATEGORIES)}）"
         )
 
-    # 相关货物（可选，快照存储）：选了货物必须填数量；名称/规格/单位以提交时的货物数据为准
+    # 相关货物（可选，快照存储）：匿名端只接受 条码+数量；名称/规格/单位一律由后端
+    # 按条码精确查库填充（不信任客户端快照字段）；条码必须真实存在
     goods_barcode = (payload.goods_barcode or "").strip() or None
-    if goods_barcode and not payload.goods_quantity:
+    goods_quantity = payload.goods_quantity
+    if goods_barcode and goods_quantity is None:
         raise HTTPException(status_code=422, detail="选择相关货物时必须填写数量")
+    if not goods_barcode and goods_quantity is not None:
+        raise HTTPException(status_code=422, detail="填写数量时必须选择相关货物（条码）")
+    goods_name = goods_spec = goods_unit = None
+    if goods_barcode:
+        goods_row = db.query(Goods).filter(Goods.barcode == goods_barcode).order_by(Goods.id).first()
+        if not goods_row:
+            raise HTTPException(status_code=422, detail=f"货物不存在：{goods_barcode}（请确认条码有效）")
+        goods_name = goods_row.name or None
+        goods_spec = goods_row.spec or None
+        goods_unit = goods_row.unit or None
 
     new_request = Request(
         applicant_name=payload.applicant_name.strip(),
@@ -163,10 +176,10 @@ def submit_request(
         description=payload.description.strip(),
         attachment_note=(payload.attachment_note or "").strip() or None,
         goods_barcode=goods_barcode,
-        goods_name=(payload.goods_name or "").strip() or None,
-        goods_spec=(payload.goods_spec or "").strip() or None,
-        goods_unit=(payload.goods_unit or "").strip() or None,
-        goods_quantity=payload.goods_quantity,
+        goods_name=goods_name,
+        goods_spec=goods_spec,
+        goods_unit=goods_unit,
+        goods_quantity=goods_quantity,
         status=RequestStatus.PENDING.value,
     )
     db.add(new_request)
