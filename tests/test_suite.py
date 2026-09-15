@@ -416,34 +416,42 @@ def _first_item(r):
     return items[0] if isinstance(items, list) and items else {}
 
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111",
+    "applicant_name": "货物测试", "contact": "user@example.com",
     "description": "带货物申请", "items": [{"barcode": "G001", "quantity": 2}]})
 check("带货物提交：明细行 条码+数量 → 201", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
 rid = (b or {}).get("id")
 check("带货物提交：响应含 id/reference/message", isinstance(b, dict) and b.get("id") and b.get("reference") and b.get("message"), f"body={b}")
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111",
+    "applicant_name": "货物测试", "contact": "user@example.com",
     "description": "多行申请", "items": [{"barcode": "G001", "quantity": 1}, {"barcode": "G001", "quantity": 3}]})
 check("带货物提交：2 个明细行 → 201（多行）", s == 201, f"status={s} body={b}")
 _multi_id = (b or {}).get("id")
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111",
+    "applicant_name": "货物测试", "contact": "user@example.com",
     "description": "x", "items": [{"barcode": "G001"}]})
 check("带货物提交：有条码无数量 → 422", s == 422, f"status={s} body={b}")
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111",
+    "applicant_name": "货物测试", "contact": "user@example.com",
     "description": "x", "items": [{"barcode": "G001", "quantity": 0}]})
 check("带货物提交：数量=0 → 422（gt=0）", s == 422, f"status={s} body={b}")
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111",
+    "applicant_name": "货物测试", "contact": "user@example.com",
     "description": "x", "items": [{"quantity": 3}]})
 check("带货物提交：有数量无条码 → 422（防脏数据）", s == 422, f"status={s} body={b}")
 s, b = req("POST", "/api/requests/", {
     "applicant_name": "货物测试", "contact": "13900001111",
+    "description": "邮箱校验"})
+check("邮箱校验：手机号 → 422", s == 422, f"status={s} body={b}")
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "货物测试", "contact": "abc",
+    "description": "邮箱校验"})
+check("邮箱校验：任意文本 → 422", s == 422, f"status={s} body={b}")
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "货物测试", "contact": "user@example.com",
     "description": "x", "items": [{"barcode": "ZZ-NO-SUCH-BARCODE", "quantity": 1}]})
 check("带货物提交：不存在的条码 → 422（防假条码）", s == 422, f"status={s} body={b}")
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111",
+    "applicant_name": "货物测试", "contact": "user@example.com",
     "description": "防伪造", "items": [{"barcode": "G001", "quantity": 1,
     "name": "伪造名称", "spec": "伪造规格", "unit": "伪造单位"}]})
 check("防伪造：真实条码+客户端假名称 → 仍 201（多余字段被忽略）", s == 201, f"status={s} body={b}")
@@ -469,6 +477,9 @@ _old = (_dt.now() - _td(days=40)).strftime("%Y-%m-%d %H:%M:%S")
 db_execute("update requests set create_time = :ts where id = :i", {"ts": _old, "i": rid})
 s, b = req("POST", f"/api/requests/{rid}/status", {"status": "approved"}, admin)
 check("归档测试：通过带货物的申请单", s == 200, f"status={s} body={b}")
+check("状态更新响应：items 为真实明细（契约一致，非空数组）",
+      s == 200 and isinstance(b, dict) and isinstance(b.get("items"), list) and len(b["items"]) == 1
+      and b["items"][0].get("barcode") == "G001" and b["items"][0].get("quantity") == 2, f"body={b}")
 s, b = req("POST", "/api/requests/archive-now", {}, admin)
 check("归档测试：立即归档 → archived ≥ 1", s == 200 and isinstance(b, dict) and (b.get("archived") or 0) >= 1, f"status={s} body={b}")
 s, arows = req("GET", "/api/requests/archive/?page=1&page_size=10", token=admin)
@@ -480,6 +491,9 @@ check("归档拷贝：货物明细字段完整",
       and _first_item(_a).get("quantity") == 2, f"row={_a}")
 s, rows = req("GET", "/api/requests/", token=admin)
 check("归档：该申请单已从近期列表移走", all(isinstance(r, dict) and r.get("id") != rid for r in (rows or [])), f"rows={[r.get('id') for r in (rows or [])]}")
+_orphan = db_execute("SELECT COUNT(*) FROM request_items WHERE request_id = :rid", {"rid": rid})
+check("P1 回归：归档后 request_items 无孤儿行（原单明细已删，归档表有拷贝）",
+      _orphan and _orphan[0][0] == 0, f"orphan_rows={_orphan}")
 # 15e. 归档列表分页参数生效
 s, a1 = req("GET", "/api/requests/archive/?page=1&page_size=1", token=admin)
 check("归档分页：page_size=1 → 恰好 1 条", s == 200 and isinstance(a1, list) and len(a1) == 1, f"status={s} len={len(a1) if isinstance(a1, list) else a1}")
