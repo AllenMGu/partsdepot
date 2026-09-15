@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-H4/kpEOoTp06LyMxH/wtCots7tDgR358DLAZx8+9kA8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qGkJ/jgW0PaC9FMrpnZEXmrH5MFRFkFRUu5RTu3eJ18='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -208,28 +208,11 @@
     <script src="assets/js/common.js"></script>
     <script>
         // 申请单管理（管理员）
+        // 时序约束：currentUser 由 common.js 在 DOMContentLoaded -> initCommon -> checkLoginStatus() 中赋值，
+        // 之后才回调全局 pageInit()。因此权限检查与初始化统一放在 pageInit 内（同 user.html 模式），
+        // 不可在本脚本顶层直接读 currentUser（解析阶段它仍为 null，管理员也会被误判无权限）。
         (function () {
             'use strict';
-
-            // 权限检查：只有管理员可以访问申请管理页面（与 user.html 同规则）
-            // 注意：currentUser 是 common.js 的 let 全局（不挂 window），直接引用
-            if (typeof currentUser === 'undefined' || !currentUser || currentUser.role !== 'admin') {
-                const mainEl = document.querySelector('main');
-                if (mainEl) {
-                    mainEl.innerHTML =
-                        '<div class="flex items-center justify-center h-64">' +
-                        '<div class="text-center">' +
-                        '<i class="fa fa-lock text-6xl text-gray-400 mb-4"></i>' +
-                        '<h1 class="text-2xl font-bold text-gray-800 mb-2">无权限访问</h1>' +
-                        '<p class="text-gray-600">只有系统管理员才能访问申请管理页面</p>' +
-                        '</div></div>';
-                }
-                const requestMenuLink = document.querySelector('a[href="request-admin.html"]');
-                if (requestMenuLink) {
-                    requestMenuLink.style.display = 'none';
-                }
-                return;
-            }
 
             const STATUS_TEXT = { pending: '待处理', approved: '已通过', rejected: '已驳回' };
             const ARCHIVE_PAGE_SIZE = 50;
@@ -440,18 +423,6 @@
                 else loadArchive();
             }
 
-            el('tabRecent').addEventListener('click', function () { switchTab('recent'); });
-            el('tabArchived').addEventListener('click', function () { switchTab('archived'); });
-            el('filterCategory').addEventListener('change', loadRecent);
-            el('filterStatus').addEventListener('change', loadRecent);
-            el('archiveNowBtn').addEventListener('click', archiveNow);
-            el('archivePrevBtn').addEventListener('click', function () {
-                if (archivePage > 1) { archivePage -= 1; loadArchive(); }
-            });
-            el('archiveNextBtn').addEventListener('click', function () {
-                if (!el('archiveNextBtn').disabled) { archivePage += 1; loadArchive(); }
-            });
-
             function updateArchivePager() {
                 const totalPages = Math.max(1, Math.ceil(archiveTotal / ARCHIVE_PAGE_SIZE));
                 if (archivePage > totalPages) archivePage = totalPages;
@@ -460,9 +431,46 @@
                 el('archiveNextBtn').disabled = archivePage >= totalPages;
             }
 
-            // 初始加载
-            loadMeta();
-            loadRecent();
+            // 初始化：common.js 在 checkLoginStatus() 成功解析用户后回调本函数（与 user.html 同模式）
+            function pageInit() {
+                // 权限检查：只有管理员可以访问申请管理页面
+                if (typeof currentUser === 'undefined' || !currentUser || currentUser.role !== 'admin') {
+                    const mainEl = document.querySelector('main');
+                    if (mainEl) {
+                        mainEl.innerHTML =
+                            '<div class="flex items-center justify-center h-64">' +
+                            '<div class="text-center">' +
+                            '<i class="fa fa-lock text-6xl text-gray-400 mb-4"></i>' +
+                            '<h1 class="text-2xl font-bold text-gray-800 mb-2">无权限访问</h1>' +
+                            '<p class="text-gray-600">只有系统管理员才能访问申请管理页面</p>' +
+                            '</div></div>';
+                    }
+                    const requestMenuLink = document.querySelector('a[href="request-admin.html"]');
+                    if (requestMenuLink) {
+                        requestMenuLink.style.display = 'none';
+                    }
+                    return;
+                }
+
+                el('tabRecent').addEventListener('click', function () { switchTab('recent'); });
+                el('tabArchived').addEventListener('click', function () { switchTab('archived'); });
+                el('filterCategory').addEventListener('change', loadRecent);
+                el('filterStatus').addEventListener('change', loadRecent);
+                el('archiveNowBtn').addEventListener('click', archiveNow);
+                el('archivePrevBtn').addEventListener('click', function () {
+                    if (archivePage > 1) { archivePage -= 1; loadArchive(); }
+                });
+                el('archiveNextBtn').addEventListener('click', function () {
+                    if (!el('archiveNextBtn').disabled) { archivePage += 1; loadArchive(); }
+                });
+
+                // 初始加载
+                loadMeta();
+                loadRecent();
+            }
+
+            // common.js 通过全局 pageInit 回调（typeof pageInit === 'function'）
+            window.pageInit = pageInit;
         })();
     </script>
 </body>
