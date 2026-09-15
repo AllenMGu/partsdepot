@@ -6,9 +6,9 @@
 
   <view class="card">
     <view class="subtitle" style="margin-bottom: 12rpx;">申请信息</view>
-    <input class="input" placeholder="申请人（必填）" value="{{applicantName}}" bindinput="onApplicantInput" />
-    <input class="input" placeholder="部门（选填）" value="{{department}}" bindinput="onDepartmentInput" />
-    <input class="input" type="text" placeholder="联系邮箱（必填，如 zhangsan@example.com）" value="{{contact}}" bindinput="onContactInput" />
+    <input class="input" placeholder="申请人（必填）" value="{{applicantName}}" bindinput="onApplicantInput" maxlength="100" />
+    <input class="input" placeholder="部门（选填）" value="{{department}}" bindinput="onDepartmentInput" maxlength="100" />
+    <input class="input" type="text" placeholder="联系邮箱（必填，如 zhangsan@example.com）" value="{{contact}}" bindinput="onContactInput" maxlength="200" />
     <textarea
       class="textarea"
       placeholder="事由描述（必填）"
@@ -71,5 +71,12 @@
     </view>
   </view>
 
-  <button class="btn-primary submit-btn" loading="{{submitting}}" bindtap="submit">提交申请</button>
+  <button
+    class="btn-primary submit-btn"
+    loading="{{submitting}}"
+    disabled="{{submitting}}"
+    bindtap="submit"
+  >
+    提交申请
+  </button>
 </view>
