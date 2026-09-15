@@ -1,7 +1,7 @@
 """数据库模型（ORM）与枚举定义。"""
 
 from fastapi import status
-from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean, Enum, UniqueConstraint, CheckConstraint
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean, Enum, UniqueConstraint, CheckConstraint, text
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -270,15 +270,15 @@ class Request(Base):
     id = Column(Integer, primary_key=True, index=True)
     applicant_name = Column(String(100), nullable=False, comment="申请人")
     department = Column(String(100), comment="部门")
-    contact = Column(String(200), nullable=False, comment="联系方式（电话/邮箱）")
-    category = Column(String(50), nullable=False, comment="申请类别")
+    contact = Column(String(200), nullable=False, comment="邮箱")
+    category = Column(String(50), comment="申请类别（已停用，保留兼容）")
     description = Column(Text, nullable=False, comment="事由描述")
-    attachment_note = Column(String(500), comment="附件说明（v1 不支持二进制上传）")
-    goods_barcode = Column(String(100), comment="相关货物：条码（提交时快照）")
-    goods_name = Column(String(100), comment="相关货物：名称（提交时快照）")
-    goods_spec = Column(String(100), comment="相关货物：规格型号（提交时快照）")
-    goods_unit = Column(String(20), comment="相关货物：单位（提交时快照）")
-    goods_quantity = Column(Float, comment="相关货物：数量（提交时快照）")
+    attachment_note = Column(String(500), comment="备注（附件文件名与交付方式等，v1 不支持二进制上传）")
+    goods_barcode = Column(String(100), comment="（已停用，货物改存 request_items）条码")
+    goods_name = Column(String(100), comment="（已停用，货物改存 request_items）名称")
+    goods_spec = Column(String(100), comment="（已停用，货物改存 request_items）规格型号")
+    goods_unit = Column(String(20), comment="（已停用，货物改存 request_items）单位")
+    goods_quantity = Column(Float, comment="（已停用，货物改存 request_items）数量")
     status = Column(String(20), default=RequestStatus.PENDING.value, index=True, comment="状态: pending/approved/rejected")
     handler_name = Column(String(100), comment="处理人")
     handle_time = Column(DateTime, comment="处理时间")
@@ -294,15 +294,15 @@ class RequestArchive(Base):
     original_id = Column(Integer, index=True, comment="原申请单ID（requests.id），全表唯一")
     applicant_name = Column(String(100), nullable=False, comment="申请人")
     department = Column(String(100), comment="部门")
-    contact = Column(String(200), nullable=False, comment="联系方式（电话/邮箱）")
-    category = Column(String(50), nullable=False, comment="申请类别")
+    contact = Column(String(200), nullable=False, comment="邮箱")
+    category = Column(String(50), comment="申请类别（已停用，保留兼容）")
     description = Column(Text, nullable=False, comment="事由描述")
-    attachment_note = Column(String(500), comment="附件说明")
-    goods_barcode = Column(String(100), comment="相关货物：条码（提交时快照）")
-    goods_name = Column(String(100), comment="相关货物：名称（提交时快照）")
-    goods_spec = Column(String(100), comment="相关货物：规格型号（提交时快照）")
-    goods_unit = Column(String(20), comment="相关货物：单位（提交时快照）")
-    goods_quantity = Column(Float, comment="相关货物：数量（提交时快照）")
+    attachment_note = Column(String(500), comment="备注")
+    goods_barcode = Column(String(100), comment="（已停用，货物改存 request_items_archive）条码")
+    goods_name = Column(String(100), comment="（已停用，货物改存 request_items_archive）名称")
+    goods_spec = Column(String(100), comment="（已停用，货物改存 request_items_archive）规格型号")
+    goods_unit = Column(String(20), comment="（已停用，货物改存 request_items_archive）单位")
+    goods_quantity = Column(Float, comment="（已停用，货物改存 request_items_archive）数量")
     status = Column(String(20), default=RequestStatus.PENDING.value, comment="归档时状态")
     handler_name = Column(String(100), comment="处理人")
     handle_time = Column(DateTime, comment="处理时间")
@@ -311,5 +311,43 @@ class RequestArchive(Base):
     archived_at = Column(DateTime, default=datetime.now, comment="归档时间")
     archive_batch = Column(String(20), index=True, comment="归档批次，如 2026-10")
 
+# 12.3 申请单货物明细（一行一种货物，提交时按条码查库快照；替代 requests 单货物字段）
+class RequestItem(Base):
+    __tablename__ = "request_items"
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(Integer, index=True, comment="所属申请单ID（requests.id）")
+    sort = Column(Integer, default=0, comment="行序（0 起）")
+    barcode = Column(String(100), nullable=False, comment="货物条码（必须存在于货物表）")
+    name = Column(String(100), comment="货物名称（提交时快照）")
+    spec = Column(String(100), comment="规格型号（提交时快照）")
+    unit = Column(String(20), comment="单位（提交时快照）")
+    quantity = Column(Float, nullable=False, comment="数量（>0）")
+
+# 12.4 归档货物明细（归档时从 request_items 拷贝，数据不丢失）
+class RequestItemArchive(Base):
+    __tablename__ = "request_items_archive"
+    id = Column(Integer, primary_key=True, index=True)
+    archive_id = Column(Integer, index=True, comment="所属归档单ID（requests_archive.id）")
+    original_request_id = Column(Integer, index=True, comment="原申请单ID（requests.id）")
+    sort = Column(Integer, default=0, comment="行序（0 起）")
+    barcode = Column(String(100), nullable=False, comment="货物条码")
+    name = Column(String(100), comment="货物名称")
+    spec = Column(String(100), comment="规格型号")
+    unit = Column(String(20), comment="单位")
+    quantity = Column(Float, nullable=False, comment="数量")
+
 # 创建所有表
 Base.metadata.create_all(bind=engine)
+
+# 存量库兼容迁移（create_all 不会改动已存在的表结构）：
+# 申请类别停用后允许为空。生产库 requests / requests_archive 当前无数据，DROP NOT NULL 零风险。
+# 测试库由 create_all 按新模型（nullable）直接建表，无需迁移。
+try:
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as _mig_conn:
+            _mig_conn.execute(text("ALTER TABLE requests ALTER COLUMN category DROP NOT NULL"))
+            _mig_conn.execute(text("ALTER TABLE requests_archive ALTER COLUMN category DROP NOT NULL"))
+except Exception:
+    # 迁移失败不阻塞启动：新表已由 create_all 建立，旧数据不受影响
+    import logging as _logging
+    _logging.getLogger(__name__).warning("category 列可空迁移执行失败（不影响新表创建）", exc_info=True)
