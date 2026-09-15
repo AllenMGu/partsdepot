@@ -276,8 +276,12 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
                 unit=it.unit,
                 quantity=it.quantity,
             ))
-    # 只删除本次实际归档的行（按 id 精确删除，避免误伤并发新写入）
-    db.query(Request).filter(Request.id.in_([r.id for r in rows])).delete(synchronize_session=False)
+    # 只删除本次实际归档的行（按 id 精确删除，避免误伤并发新写入）。
+    # 先删活跃明细再删主表（评审 P1）：明细已复制到 request_items_archive，
+    # 显式删除保证不留孤儿行，不依赖数据库级联（SQLite 默认不启用外键）
+    _ids = [r.id for r in rows]
+    db.query(RequestItem).filter(RequestItem.request_id.in_(_ids)).delete(synchronize_session=False)
+    db.query(Request).filter(Request.id.in_(_ids)).delete(synchronize_session=False)
     _set_archive_last_run(db)
     db.commit()
     logging.info("申请单归档完成：%d 条（阈值 %d 天，批次 %s）", len(rows), get_archive_days(db), batch)
@@ -427,7 +431,10 @@ def set_request_status(
     db.commit()
     db.refresh(req)
     logging.info("申请单 %s 处理为 %s（处理人：%s）", req.id, payload.status, current_user.username)
-    return req
+    # 评审一致性项：返回完整载荷（含真实货物明细），与列表接口契约一致，
+    # 不能直接 return req（那样 items 会退化成空数组）
+    grouped = _group_items(db, [req.id])
+    return _request_payload(req, grouped.get(req.id, []))
 
 @router.get("/requests/archive/", response_model=List[RequestArchiveResponse], summary="归档申请单列表（管理员）")
 def list_archived_requests(
