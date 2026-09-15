@@ -32,7 +32,7 @@ def check(name, cond, detail=""):
     results.append((name, bool(cond), detail))
     print(f"{'PASS' if cond else 'FAIL'} | {name}" + (f" | {detail}" if detail else ""))
 
-def req(method, path, body=None, token=None, expect_error=False, form=False):
+def req(method, path, body=None, token=None, expect_error=False, form=False, headers=None):
     url = BASE + path
     if body is not None:
         data = (urllib.parse.urlencode(body) if form else json.dumps(body)).encode()
@@ -41,6 +41,7 @@ def req(method, path, body=None, token=None, expect_error=False, form=False):
     r = urllib.request.Request(url, data=data, method=method)
     r.add_header("Content-Type", "application/x-www-form-urlencoded" if form else "application/json")
     if token: r.add_header("Authorization", "Bearer " + token)
+    for _k, _v in (headers or {}).items(): r.add_header(_k, _v)
     try:
         with urllib.request.urlopen(r, timeout=15) as resp:
             raw = resp.read().decode()
@@ -389,6 +390,64 @@ all_none = all((cfg or {}).get(k) in (None, "") for k in
 check("三轮P1 撤销后配置接口全部为空/None", s == 200 and all_none, f"cfg={cfg}")
 s, b = req("POST", "/api/token", {"username": "ghost-3rdb", "password": "x"}, form=True)
 check("三轮P1 撤销后未知用户登录仍安全 401", s == 401, f"status={s} detail={b}")
+
+# ---------- 15. 货物联动（PR #6）：公开搜索 + 带货物提交 + 归档拷贝 ----------
+# 15a. 公开搜索端点（免登录，不得暴露单价）
+s, b = req("GET", "/api/public/goods-search?q=")
+check("货物搜索：空关键字 → 400", s == 400, f"status={s}")
+s, hits = req("GET", "/api/public/goods-search?q=G001")
+first = (hits or [None])[0] if isinstance(hits, list) else None
+check("货物搜索：条码模糊命中", s == 200 and isinstance(first, dict) and first.get("barcode") == "G001", f"status={s} hits={hits}")
+check("货物搜索：返回字段仅 barcode/name/spec/unit（无单价）",
+      isinstance(first, dict) and set(first.keys()) == {"barcode", "name", "spec", "unit"},
+      f"keys={list(first.keys()) if isinstance(first, dict) else first}")
+s, hits = req("GET", "/api/public/goods-search?q=" + urllib.parse.quote("测试物料"))
+check("货物搜索：名称搜索命中", s == 200 and isinstance(hits, list) and any(h.get("barcode") == "G001" for h in hits), f"status={s} hits={hits}")
+s, hits = req("GET", "/api/public/goods-search?q=does-not-exist-xyz")
+check("货物搜索：无匹配 → 空列表", s == 200 and hits == [], f"status={s} hits={hits}")
+# 15b. 搜索限流：独立 IP 桶（X-Real-IP 模拟另一客户端），10 分钟内 30 次/IP
+_rl_headers = {"X-Real-IP": "9.9.9.99"}
+_rl_codes = [req("GET", "/api/public/goods-search?q=G001", headers=_rl_headers)[0] for _ in range(31)]
+check("货物搜索限流：同一 IP 第 31 次 → 429", _rl_codes[:30] == [200] * 30 and _rl_codes[30] == 429, f"codes={_rl_codes}")
+# 15c. 带货物提交（免登录）+ 管理员可见 + 后端校验
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "货物测试", "contact": "13900001111", "category": "其他",
+    "description": "带货物申请", "goods_barcode": "G001", "goods_name": "测试物料",
+    "goods_spec": "规格-1", "goods_unit": "台", "goods_quantity": 2})
+check("带货物提交：有货物+数量 → 201", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
+rid = (b or {}).get("id")
+check("带货物提交：响应含 id/reference/message", isinstance(b, dict) and b.get("id") and b.get("reference") and b.get("message"), f"body={b}")
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "货物测试", "contact": "13900001111", "category": "其他",
+    "description": "x", "goods_barcode": "G001"})
+check("带货物提交：有条码无数量 → 422", s == 422, f"status={s} body={b}")
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "货物测试", "contact": "13900001111", "category": "其他",
+    "description": "x", "goods_barcode": "G001", "goods_quantity": 0})
+check("带货物提交：数量=0 → 422（gt=0）", s == 422, f"status={s} body={b}")
+s, rows = req("GET", "/api/requests/", token=admin)
+_r = next((r for r in (rows or []) if isinstance(r, dict) and r.get("id") == rid), None)
+check("管理员列表：货物快照字段可见",
+      isinstance(_r, dict) and _r.get("goods_barcode") == "G001" and _r.get("goods_name") == "测试物料"
+      and _r.get("goods_unit") == "台" and _r.get("goods_quantity") == 2, f"row={_r}")
+# 15d. 归档拷贝：回拨提交时间越过阈值(30天) → 通过 → 立即归档
+from datetime import datetime as _dt, timedelta as _td
+_old = (_dt.now() - _td(days=40)).strftime("%Y-%m-%d %H:%M:%S")
+db_execute("update requests set create_time = :ts where id = :i", {"ts": _old, "i": rid})
+s, b = req("POST", f"/api/requests/{rid}/status", {"status": "approved"}, admin)
+check("归档测试：通过带货物的申请单", s == 200, f"status={s} body={b}")
+s, b = req("POST", "/api/requests/archive-now", {}, admin)
+check("归档测试：立即归档 → archived ≥ 1", s == 200 and isinstance(b, dict) and (b.get("archived") or 0) >= 1, f"status={s} body={b}")
+s, arows = req("GET", "/api/requests/archive/?page=1&page_size=10", token=admin)
+_a = next((a for a in (arows or []) if isinstance(a, dict) and a.get("original_id") == rid), None)
+check("归档拷贝：货物快照字段完整",
+      isinstance(_a, dict) and _a.get("goods_barcode") == "G001" and _a.get("goods_name") == "测试物料"
+      and _a.get("goods_spec") == "规格-1" and _a.get("goods_unit") == "台" and _a.get("goods_quantity") == 2, f"row={_a}")
+s, rows = req("GET", "/api/requests/", token=admin)
+check("归档：该申请单已从近期列表移走", all(isinstance(r, dict) and r.get("id") != rid for r in (rows or [])), f"rows={[r.get('id') for r in (rows or [])]}")
+# 15e. 归档列表分页参数生效
+s, a1 = req("GET", "/api/requests/archive/?page=1&page_size=1", token=admin)
+check("归档分页：page_size=1 → 恰好 1 条", s == 200 and isinstance(a1, list) and len(a1) == 1, f"status={s} len={len(a1) if isinstance(a1, list) else a1}")
 
 # ---------- 汇总 ----------
 fails = [r for r in results if not r[1]]
