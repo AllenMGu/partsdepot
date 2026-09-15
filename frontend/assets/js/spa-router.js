@@ -14,7 +14,8 @@
         'inbound.html',
         'outbound.html',
         'check.html',
-        'user.html'
+        'user.html',
+        'request-admin.html'
     ]);
 
     const frame = document.getElementById('spaViewFrame');
