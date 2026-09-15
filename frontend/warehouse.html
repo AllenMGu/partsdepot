@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-OmNOdXpg1klpctH3WZJJVRiDDtfF68xzoQFbyl2aZJE='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-zGW6pSeVIkPIsu4mWFDtIYJKKSVFdYjYLQ93i9/oaRI='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>仓库管理 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -206,36 +206,17 @@
                 </div>
                 
                 <!-- 分页 -->
-                <div class="bg-white px-4 py-3 flex items-center justify-between border-t border-gray-200 sm:px-6">
-                    <div class="flex-1 flex justify-between sm:hidden">
-                        <a href="#" class="relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                            上一页
-                        </a>
-                        <a href="#" class="ml-3 relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50">
-                            下一页
-                        </a>
-                    </div>
-                    <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
-                        <div>
-                            <p class="text-sm text-gray-700">
-                                显示 <span id="startRange" class="font-medium">1</span> 到 <span id="endRange" class="font-medium">10</span> 条，共 <span id="totalCount" class="font-medium">0</span> 条记录
-                            </p>
-                        </div>
-                        <div>
-                            <nav class="relative z-0 inline-flex rounded-md shadow-sm -space-x-px pagination" aria-label="Pagination">
-                                <a href="#" class="prev relative inline-flex items-center px-2 py-2 rounded-l-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
-                                    <span class="sr-only">上一页</span>
-                                    <i class="fa fa-chevron-left"></i>
-                                </a>
-                                <div class="page-numbers">
-                                    <!-- 页码按钮将通过JavaScript动态生成 -->
-                                </div>
-                                <a href="#" class="next relative inline-flex items-center px-2 py-2 rounded-r-md border border-gray-300 bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
-                                    <span class="sr-only">下一页</span>
-                                    <i class="fa fa-chevron-right"></i>
-                                </a>
-                            </nav>
-                        </div>
+                <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <span class="text-sm text-gray-600">共 <span id="totalCount" class="font-medium">0</span> 条</span>
+                    <div class="flex items-center space-x-2">
+                        <select id="pageSizeSelect" class="px-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                            <option value="10">10条/页</option>
+                            <option value="20">20条/页</option>
+                            <option value="50">50条/页</option>
+                        </select>
+                        <button id="prevPageBtn" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">上一页</button>
+                        <span class="text-sm text-gray-700">第 <span id="pageInfo">1/1</span> 页</span>
+                        <button id="nextPageBtn" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">下一页</button>
                     </div>
                 </div>
             </div>
@@ -314,7 +295,8 @@
         let currentEditId = null;
         let currentDeleteId = null;
         let currentPage = 1;
-        const pageSize = 10;
+        let pageSize = 10;
+        let warehouseData = [];
 
         function escapeHTML(value) {
             return String(value ?? '')
@@ -469,6 +451,7 @@
                 }
 
                 const data = await response.json();
+                warehouseData = data;
 
                 // 更新表格
                 renderWarehouseTable(data);
@@ -480,117 +463,21 @@
         
         
         // 更新分页信息
-        function updatePagination(dataLength) {
-            const totalPages = Math.ceil(dataLength / pageSize);
-            const startRange = dataLength > 0 ? (currentPage - 1) * pageSize + 1 : 0;
-            const endRange = Math.min(currentPage * pageSize, dataLength);
-
-            document.getElementById('startRange').textContent = startRange;
-            document.getElementById('endRange').textContent = endRange;
-            document.getElementById('totalCount').textContent = dataLength;
-
-            // 生成页码按钮
-            const paginationContainer = document.querySelector('.pagination');
-            if (paginationContainer) {
-                const pageNumbers = generatePageNumbers(totalPages);
-                renderPageNumbers(paginationContainer, pageNumbers, totalPages);
-            }
-        }
-
-        // 生成页码数组
-        function generatePageNumbers(totalPages) {
-            const maxVisiblePages = 5;
-            const pageNumbers = [];
-
-            if (totalPages <= maxVisiblePages) {
-                // 总页数小于等于最大可见页数，显示所有页码
-                for (let i = 1; i <= totalPages; i++) {
-                    pageNumbers.push(i);
-                }
-            } else {
-                // 总页数大于最大可见页数，显示当前页附近的页码
-                let startPage = Math.max(1, currentPage - 2);
-                let endPage = Math.min(totalPages, currentPage + 2);
-
-                if (currentPage <= 3) {
-                    endPage = 5;
-                } else if (currentPage >= totalPages - 2) {
-                    startPage = totalPages - 4;
-                }
-
-                for (let i = startPage; i <= endPage; i++) {
-                    pageNumbers.push(i);
-                }
-
-                // 添加省略号
-                if (startPage > 1) {
-                    pageNumbers.unshift('ellipsis');
-                    pageNumbers.unshift(1);
-                }
-
-                if (endPage < totalPages) {
-                    pageNumbers.push('ellipsis');
-                    pageNumbers.push(totalPages);
-                }
+        function updatePagination(total) {
+            const totalPages = Math.max(1, Math.ceil(total / pageSize));
+            if (currentPage > totalPages) {
+                currentPage = totalPages;
             }
 
-            return pageNumbers;
-        }
+            const prevPageBtn = document.getElementById('prevPageBtn');
+            const nextPageBtn = document.getElementById('nextPageBtn');
+            const pageInfo = document.getElementById('pageInfo');
+            const totalCountEl = document.getElementById('totalCount');
 
-        // 渲染页码按钮
-        function renderPageNumbers(container, pageNumbers, totalPages) {
-            // 找到页码按钮容器
-            let pageNumberContainer = container.querySelector('.page-numbers');
-            if (!pageNumberContainer) {
-                // 如果没有页码按钮容器，创建一个
-                const prevBtn = container.querySelector('.prev');
-                const nextBtn = container.querySelector('.next');
-                pageNumberContainer = document.createElement('div');
-                pageNumberContainer.className = 'page-numbers';
-                pageNumberContainer.style.display = 'flex';
-                pageNumberContainer.style.alignItems = 'center';
-                container.insertBefore(pageNumberContainer, nextBtn);
-            }
-
-            // 清空现有页码按钮
-            pageNumberContainer.innerHTML = '';
-
-            // 渲染页码按钮
-            pageNumbers.forEach(page => {
-                if (page === 'ellipsis') {
-                    // 渲染省略号
-                    const ellipsis = document.createElement('span');
-                    ellipsis.className = 'relative inline-flex items-center px-4 py-2 border border-gray-300 bg-white text-sm font-medium text-gray-700';
-                    ellipsis.textContent = '...';
-                    pageNumberContainer.appendChild(ellipsis);
-                } else {
-                    // 渲染页码按钮
-                    const pageBtn = document.createElement('a');
-                    pageBtn.href = '#';
-                    pageBtn.className = `relative inline-flex items-center px-4 py-2 border border-gray-300 text-sm font-medium hover:bg-gray-50 ${page === currentPage ? 'bg-primary text-white' : 'bg-white text-gray-700'}`;
-                    pageBtn.textContent = page;
-                    pageBtn.addEventListener('click', function(e) {
-                        e.preventDefault();
-                        currentPage = page;
-                        loadWarehouseData();
-                    });
-                    pageNumberContainer.appendChild(pageBtn);
-                }
-            });
-
-            // 禁用/启用上一页和下一页按钮
-            const prevBtn = container.querySelector('.prev');
-            const nextBtn = container.querySelector('.next');
-
-            if (prevBtn) {
-                prevBtn.classList.toggle('opacity-50', currentPage === 1);
-                prevBtn.classList.toggle('pointer-events-none', currentPage === 1);
-            }
-
-            if (nextBtn) {
-                nextBtn.classList.toggle('opacity-50', currentPage === totalPages);
-                nextBtn.classList.toggle('pointer-events-none', currentPage === totalPages);
-            }
+            if (prevPageBtn) prevPageBtn.disabled = currentPage <= 1;
+            if (nextPageBtn) nextPageBtn.disabled = currentPage >= totalPages;
+            if (pageInfo) pageInfo.textContent = currentPage + '/' + totalPages;
+            if (totalCountEl) totalCountEl.textContent = total;
         }
 
         // 渲染仓库表格
@@ -904,25 +791,34 @@
             refreshBtn.addEventListener('click', loadWarehouseData);
             
             // 分页按钮事件监听器
-            const prevPageBtn = document.querySelector('.pagination .prev');
-            const nextPageBtn = document.querySelector('.pagination .next');
+            const prevPageBtn = document.getElementById('prevPageBtn');
+            const nextPageBtn = document.getElementById('nextPageBtn');
+            const pageSizeSelect = document.getElementById('pageSizeSelect');
 
             if (prevPageBtn) {
-                prevPageBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
+                prevPageBtn.addEventListener('click', function() {
                     if (currentPage > 1) {
                         currentPage--;
-                        loadWarehouseData();
+                        renderWarehouseTable(warehouseData);
                     }
                 });
             }
 
             if (nextPageBtn) {
-                nextPageBtn.addEventListener('click', function(e) {
-                    e.preventDefault();
-                    // 在加载数据后会更新分页信息，所以这里可以直接增加页码
-                    currentPage++;
-                    loadWarehouseData();
+                nextPageBtn.addEventListener('click', function() {
+                    const totalPages = Math.max(1, Math.ceil(warehouseData.length / pageSize));
+                    if (currentPage < totalPages) {
+                        currentPage++;
+                        renderWarehouseTable(warehouseData);
+                    }
+                });
+            }
+
+            if (pageSizeSelect) {
+                pageSizeSelect.addEventListener('change', function() {
+                    pageSize = parseInt(this.value, 10);
+                    currentPage = 1;
+                    renderWarehouseTable(warehouseData);
                 });
             }
 
