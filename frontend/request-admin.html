@@ -427,7 +427,9 @@
             el('archivePrevBtn').addEventListener('click', function () {
                 if (archivePage > 1) { archivePage -= 1; loadArchive(); }
             });
-            el('archiveNextBtn').addEventListener('click', function () { loadArchive(); });
+            el('archiveNextBtn').addEventListener('click', function () {
+                if (!el('archiveNextBtn').disabled) { archivePage += 1; loadArchive(); }
+            });
 
             function updateArchivePager() {
                 const totalPages = Math.max(1, Math.ceil(archiveTotal / ARCHIVE_PAGE_SIZE));
