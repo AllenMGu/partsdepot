@@ -7,10 +7,13 @@
   以"附件说明"文本字段代替（写清文件名与交付方式）。
 
 归档说明：
-- 超过阈值天数（config 表 request_archive_days，默认 30 天）的申请单移入
-  requests_archive 表（保留全部字段 + 归档批次），原表删除对应行；
+- 超过阈值天数（config 表 request_archive_days，默认 30 天）且已处理
+  （approved/rejected）的申请单移入 requests_archive 表（保留全部字段 + 归档批次），
+  原表删除对应行；未处理（pending）的申请保留在"近期申请"，由管理员处理后再归档；
 - 触发方式：应用内后台任务定期自检（见 main.py），也可由管理员手动触发
   POST /api/requests/archive-now；
+- 并发安全：PostgreSQL 事务级咨询锁串行化并发归档；requests_archive.original_id
+  唯一约束兜底（唯一冲突 → 回滚重试，幂等）；
 - 上次归档时间记录在 config 表 request_archive_last_run，重启不丢失。
 """
 
@@ -21,6 +24,8 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request as FastAPIRequest
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from core.models import Config, Request, RequestArchive, RequestStatus, User, UserRole
@@ -90,11 +95,19 @@ def submit_request(
     # 内网公共提交：限流 + 字段校验（Pydantic），不要求登录
     _check_rate_limit(_client_ip(request))
 
+    # 类别后端强校验：免登录接口不依赖前端下拉，直接调 API 的任意类别一律拒绝
+    category = payload.category.strip()
+    if category not in REQUEST_CATEGORIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"无效的申请类别：{category}（可选：{'、'.join(REQUEST_CATEGORIES)}）"
+        )
+
     new_request = Request(
         applicant_name=payload.applicant_name.strip(),
         department=(payload.department or "").strip() or None,
         contact=payload.contact.strip(),
-        category=payload.category.strip(),
+        category=category,
         description=payload.description.strip(),
         attachment_note=(payload.attachment_note or "").strip() or None,
         status=RequestStatus.PENDING.value,
@@ -108,7 +121,7 @@ def submit_request(
     return {
         "id": new_request.id,
         "reference": reference,
-        "message": "申请已提交，请保存申请编号以便后续查询",
+        "message": "申请已提交。请保存申请编号，处理进展请联系受理管理员跟进（当前系统暂不提供免登录查询）",
     }
 
 # ------------------- 归档逻辑（手动/自动共用） -------------------
@@ -147,17 +160,22 @@ def get_archive_last_run(db: Session) -> Optional[datetime]:
             return None
     return None
 
-def archive_old_requests(db: Session) -> int:
-    """把超过阈值天数的申请单移入归档表；返回归档条数。单事务，失败整体回滚。
+def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> int:
+    """单次归档尝试（单事务）。
 
-    注意：0 条可归档时不写任何数据（包括 last_run 标记），
-    保持"空库/无变化"语义，避免在测试库留下状态行。
+    归档策略：仅归档已处理（approved/rejected）的申请单；
+    pending 保留在"近期申请"，由管理员处理后再归档，避免漏处理申请从待办消失。
+    0 条可归档时不写任何数据（包括 last_run 标记），保持"空库/无变化"语义。
     """
-    cutoff = datetime.now() - timedelta(days=get_archive_days(db))
-    batch = datetime.now().strftime("%Y-%m")
-    now = datetime.now()
-
-    rows = db.query(Request).filter(Request.create_time < cutoff).order_by(Request.id).all()
+    rows = (
+        db.query(Request)
+        .filter(
+            Request.create_time < cutoff,
+            Request.status.in_([RequestStatus.APPROVED.value, RequestStatus.REJECTED.value]),
+        )
+        .order_by(Request.id)
+        .all()
+    )
     if not rows:
         return 0
     for r in rows:
@@ -177,11 +195,42 @@ def archive_old_requests(db: Session) -> int:
             archived_at=now,
             archive_batch=batch,
         ))
-    db.query(Request).filter(Request.create_time < cutoff).delete(synchronize_session=False)
+    # 只删除本次实际归档的行（按 id 精确删除，避免误伤并发新写入）
+    db.query(Request).filter(Request.id.in_([r.id for r in rows])).delete(synchronize_session=False)
     _set_archive_last_run(db)
     db.commit()
     logging.info("申请单归档完成：%d 条（阈值 %d 天，批次 %s）", len(rows), get_archive_days(db), batch)
     return len(rows)
+
+def archive_old_requests(db: Session) -> int:
+    """把超过阈值天数且已处理的申请单移入归档表；返回归档条数。
+
+    并发安全（评审 P1）：
+    - PostgreSQL：事务级咨询锁 pg_advisory_xact_lock 串行化并发归档
+      （后台任务 vs 手动触发、多 worker 互斥），随事务提交/回滚自动释放；
+    - requests_archive.original_id 唯一约束兜底：并发事务若抢先提交，
+      本事务提交时唯一冲突 → 回滚并重试（幂等收敛，不产生重复归档）；
+    - SQLite（测试/单连接）天然串行，唯一约束同样生效。
+    """
+    cutoff = datetime.now() - timedelta(days=get_archive_days(db))
+    batch = datetime.now().strftime("%Y-%m")
+    now = datetime.now()
+
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(20260915)"))
+
+    for _attempt in range(3):
+        try:
+            return _archive_once(db, cutoff, batch, now)
+        except IntegrityError:
+            # 并发事务抢先归档了同一批申请单（original_id 唯一约束冲突）：
+            # 回滚后重查——对方已删原表行，重试将 0 条或仅归档剩余行
+            db.rollback()
+            logging.warning("申请单归档遇到并发冲突，回滚重试")
+    # 理论上 3 次内必收敛（对方事务提交后行已不可见）；兜底返回 0，原表数据不丢失，
+    # 由下一次自检/手动触发再归档
+    logging.error("申请单归档重试 3 次仍冲突，本次放弃（原表数据未动）")
+    return 0
 
 def archive_due(db: Session) -> int:
     """判断是否到了归档期（从未归档过，或距上次归档已超过阈值天数），到点则执行。"""
