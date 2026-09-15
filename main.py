@@ -42,6 +42,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
 from core import auth as auth_routes
 from core import ldap as ldap_routes
 from api import users, warehouses, locations, goods, stock, check, inbound, outbound
+from api import requests as requests_routes
 
 api_router = APIRouter()
 api_router.include_router(auth_routes.router)        # /token /logout
@@ -59,6 +60,7 @@ api_router.include_router(check.router_report)       # 盘点记录/统计/差�
 api_router.include_router(check.router_orders)       # 盘点单管理
 api_router.include_router(inbound.router)
 api_router.include_router(outbound.router)
+api_router.include_router(requests_routes.router)  # 申请单：公共提交（免登录）/管理/归档
 
 # 初始管理员自举（见 README）：
 # 设置 ADMIN_USERNAME/ADMIN_PASSWORD 且数据库尚无任何用户时，
@@ -96,6 +98,29 @@ with SessionLocal() as _bootstrap_db:
     except Exception:
         _bootstrap_db.rollback()
         logging.exception("初始管理员自举失败")
+
+# ------------------- 申请单定期归档（后台任务，无新增依赖） -------------------
+# 每 6 小时自检一次：从未归档过、或距上次归档已超过阈值天数（默认 30 天，
+# config 表 request_archive_days 可调）时，自动把超期申请单移入 requests_archive。
+# 上次归档时间持久化在 config 表，重启后仍生效；详见 api/requests.py 模块说明。
+import asyncio
+from datetime import datetime, timedelta
+
+async def _request_archive_loop():
+    while True:
+        try:
+            from core.database import SessionLocal
+            with SessionLocal() as db:
+                count = requests_routes.archive_due(db)
+                if count:
+                    logging.info("申请单自动归档完成：%d 条", count)
+        except Exception:
+            logging.exception("申请单自动归档任务执行失败（不影响主服务）")
+        await asyncio.sleep(6 * 3600)
+
+@app.on_event("startup")
+async def _start_request_archive_loop():
+    asyncio.create_task(_request_archive_loop())
 
 # 包含路由到app
 app.include_router(api_router, prefix="/api")
