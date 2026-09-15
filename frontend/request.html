@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-PxIG4KLTb9V+iAKxDmt40WMC8hpI5A9uFuCravycNX8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-9RxWUfPpirA4mlTLEspAFhQpqMNUh/2lofoGyr6r4Fc='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -51,31 +51,32 @@
 
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
                             <div>
-                                <label for="contact" class="block text-sm font-medium text-gray-700 mb-1">联系方式 <span class="text-red-500">*</span></label>
-                                <input type="text" id="contact" name="contact" maxlength="200"
+                                <label for="contact" class="block text-sm font-medium text-gray-700 mb-1">邮箱 <span class="text-red-500">*</span></label>
+                                <input type="email" id="contact" name="contact" maxlength="200"
                                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
-                                       placeholder="电话或邮箱" required>
-                            </div>
-                            <div>
-                                <label for="category" class="block text-sm font-medium text-gray-700 mb-1">申请类别 <span class="text-red-500">*</span></label>
-                                <select id="category" name="category"
-                                        class="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
-                                        required>
-                                    <option value="出入库申请">出入库申请</option>
-                                    <option value="设备/工具">设备/工具</option>
-                                    <option value="账号权限">账号权限</option>
-                                    <option value="场地/空间">场地/空间</option>
-                                    <option value="其他">其他</option>
-                                </select>
+                                       placeholder="您的邮箱" required>
                             </div>
                         </div>
 
                         <div id="goodsSection">
-                            <label class="block text-sm font-medium text-gray-700 mb-1">相关货物 <span class="text-xs text-gray-400">选填</span></label>
-                            <div class="flex gap-2">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">相关货物 <span class="text-xs text-gray-400">选填，可添加多行</span></label>
+                            <div class="border border-gray-200 rounded-md overflow-hidden">
+                                <table class="w-full text-sm">
+                                    <thead class="bg-gray-50">
+                                        <tr>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">货物</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 w-28">数量 <span class="text-red-500">*</span></th>
+                                            <th class="px-2 py-2 w-10"></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="goodsTableBody" class="divide-y divide-gray-100"></tbody>
+                                </table>
+                                <p id="goodsEmptyHint" class="px-3 py-3 text-xs text-gray-400 text-center">尚未添加货物，可在下方搜索后点击加入</p>
+                            </div>
+                            <div class="flex gap-2 mt-2">
                                 <input type="text" id="goodsSearchInput" maxlength="100"
                                        class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
-                                       placeholder="输入货物条码或名称搜索（选填）">
+                                       placeholder="输入货物条码或名称搜索">
                                 <button type="button" id="goodsSearchBtn"
                                         class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-all-300">
                                     <i class="fa fa-search mr-1"></i>搜索
@@ -83,22 +84,6 @@
                             </div>
                             <div id="goodsSearchStatus" class="hidden text-xs text-gray-400 mt-1"></div>
                             <ul id="goodsSearchResults" class="hidden mt-1 border border-gray-200 rounded-md divide-y divide-gray-100 bg-white max-h-56 overflow-y-auto"></ul>
-                            <div id="goodsSelected" class="hidden mt-2 p-3 bg-gray-50 border border-gray-200 rounded-md">
-                                <div class="flex items-start justify-between">
-                                    <div>
-                                        <p class="text-sm font-medium text-gray-800" id="goodsSelectedName"></p>
-                                        <p class="text-xs text-gray-500 mt-0.5" id="goodsSelectedMeta"></p>
-                                    </div>
-                                    <button type="button" id="goodsClearBtn" class="text-xs text-gray-400 hover:text-gray-600">
-                                        <i class="fa fa-times mr-1"></i>清除
-                                    </button>
-                                </div>
-                                <div class="mt-2 flex items-center gap-2">
-                                    <label for="goodsQuantity" class="text-sm text-gray-700">数量 <span class="text-red-500">*</span></label>
-                                    <input type="number" id="goodsQuantity" min="0.01" step="any" placeholder="0"
-                                           class="w-32 px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
-                                </div>
-                            </div>
                         </div>
 
                         <div>
@@ -110,7 +95,7 @@
                         </div>
 
                         <div>
-                            <label for="attachmentNote" class="block text-sm font-medium text-gray-700 mb-1">附件说明</label>
+                            <label for="attachmentNote" class="block text-sm font-medium text-gray-700 mb-1">备注</label>
                             <input type="text" id="attachmentNote" name="attachment_note" maxlength="500"
                                    class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
                                    placeholder="选填。如需提供附件，请写明文件名与获取方式（如：共享盘 CUWX/申请 目录）">
@@ -168,14 +153,14 @@
                 errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
 
-            // ---------- 相关货物（选填，与系统内货物联动） ----------
-            let selectedGoods = null;   // {barcode, name, spec, unit}
+            // ---------- 相关货物（选填，多行，与系统内货物联动） ----------
+            const goodsItems = [];   // 每行：{barcode, name, spec, unit, qty}
+            const goodsTableBody = document.getElementById('goodsTableBody');
+            const goodsEmptyHint = document.getElementById('goodsEmptyHint');
             const goodsSearchInput = document.getElementById('goodsSearchInput');
             const goodsSearchBtn = document.getElementById('goodsSearchBtn');
             const goodsResults = document.getElementById('goodsSearchResults');
             const goodsStatus = document.getElementById('goodsSearchStatus');
-            const goodsSelectedBox = document.getElementById('goodsSelected');
-            const goodsQuantityInput = document.getElementById('goodsQuantity');
 
             function showGoodsStatus(message, isError) {
                 goodsStatus.textContent = message;
@@ -183,10 +168,68 @@
                 goodsStatus.classList.remove('hidden');
             }
 
-            function clearSelectedGoods() {
-                selectedGoods = null;
-                goodsSelectedBox.classList.add('hidden');
-                goodsQuantityInput.value = '';
+            function renderGoodsTable() {
+                goodsEmptyHint.classList.toggle('hidden', goodsItems.length > 0);
+                goodsTableBody.innerHTML = '';
+                goodsItems.forEach(function (g, i) {
+                    const tr = document.createElement('tr');
+                    const tdName = document.createElement('td');
+                    tdName.className = 'px-3 py-2';
+                    const nameP = document.createElement('p');
+                    nameP.className = 'text-sm text-gray-800 font-medium';
+                    nameP.textContent = g.name;
+                    const metaP = document.createElement('p');
+                    metaP.className = 'text-xs text-gray-400';
+                    metaP.textContent = g.barcode + (g.spec ? ' · ' + g.spec : '') + (g.unit ? ' · ' + g.unit : '');
+                    tdName.appendChild(nameP);
+                    tdName.appendChild(metaP);
+                    const tdQty = document.createElement('td');
+                    tdQty.className = 'px-3 py-2';
+                    const qtyInput = document.createElement('input');
+                    qtyInput.type = 'number';
+                    qtyInput.min = '0.01';
+                    qtyInput.step = 'any';
+                    qtyInput.placeholder = '0';
+                    qtyInput.className = 'w-full px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent';
+                    qtyInput.value = g.qty;
+                    qtyInput.addEventListener('input', function () { g.qty = qtyInput.value; });
+                    tdQty.appendChild(qtyInput);
+                    const tdDel = document.createElement('td');
+                    tdDel.className = 'px-2 py-2 text-center';
+                    const delBtn = document.createElement('button');
+                    delBtn.type = 'button';
+                    delBtn.className = 'text-gray-400 hover:text-red-500';
+                    delBtn.title = '移除该行';
+                    const icon = document.createElement('i');
+                    icon.className = 'fa fa-trash';
+                    delBtn.appendChild(icon);
+                    delBtn.addEventListener('click', function () {
+                        goodsItems.splice(i, 1);
+                        renderGoodsTable();
+                    });
+                    tdDel.appendChild(delBtn);
+                    tr.appendChild(tdName);
+                    tr.appendChild(tdQty);
+                    tr.appendChild(tdDel);
+                    goodsTableBody.appendChild(tr);
+                });
+            }
+
+            function addGoods(g) {
+                const exists = goodsItems.some(function (x) { return x.barcode === g.barcode; });
+                if (exists) {
+                    showGoodsStatus('该货物已在列表中，请在上方表格填写数量', true);
+                    return false;
+                }
+                goodsItems.push({ barcode: g.barcode, name: g.name, spec: g.spec, unit: g.unit, qty: '' });
+                renderGoodsTable();
+                goodsResults.classList.add('hidden');
+                goodsResults.innerHTML = '';
+                goodsStatus.classList.add('hidden');
+                goodsSearchInput.value = '';
+                const inputs = goodsTableBody.querySelectorAll('input');
+                if (inputs.length) { inputs[inputs.length - 1].focus(); }
+                return true;
             }
 
             async function searchGoods() {
@@ -223,15 +266,7 @@
                         metaSpan.textContent = g.barcode + (g.spec ? ' · ' + g.spec : '') + (g.unit ? ' · ' + g.unit : '');
                         btn.appendChild(metaSpan);
                         btn.addEventListener('click', function () {
-                            selectedGoods = { barcode: g.barcode, name: g.name, spec: g.spec, unit: g.unit };
-                            document.getElementById('goodsSelectedName').textContent = g.name;
-                            document.getElementById('goodsSelectedMeta').textContent =
-                                g.barcode + (g.spec ? ' | ' + g.spec : '') + (g.unit ? ' | ' + g.unit : '');
-                            goodsSelectedBox.classList.remove('hidden');
-                            goodsResults.classList.add('hidden');
-                            goodsResults.innerHTML = '';
-                            goodsStatus.classList.add('hidden');
-                            goodsQuantityInput.focus();
+                            addGoods(g);
                         });
                         li.appendChild(btn);
                         goodsResults.appendChild(li);
@@ -250,7 +285,6 @@
                     searchGoods();
                 }
             });
-            document.getElementById('goodsClearBtn').addEventListener('click', clearSelectedGoods);
 
             form.addEventListener('submit', async function (event) {
                 event.preventDefault();
@@ -260,32 +294,32 @@
                     applicant_name: document.getElementById('applicantName').value.trim(),
                     department: document.getElementById('department').value.trim(),
                     contact: document.getElementById('contact').value.trim(),
-                    category: document.getElementById('category').value,
                     description: document.getElementById('description').value.trim(),
                     attachment_note: document.getElementById('attachmentNote').value.trim()
                 };
 
-                if (!payload.applicant_name || !payload.contact || !payload.category || !payload.description) {
+                if (!payload.applicant_name || !payload.contact || !payload.description) {
                     showError('请填写带 * 的必填项');
                     return;
                 }
                 if (payload.contact.length < 3) {
-                    showError('联系方式至少 3 个字符');
+                    showError('邮箱至少 3 个字符');
                     return;
                 }
 
-                // 相关货物（选填）：已选择货物时必须填数量
+                // 相关货物（选填，可多行）：已添加的行必须填数量
                 // 安全约定：只提交 条码+数量；名称/规格/单位由后端按条码查库填充，不传客户端快照
-                if (selectedGoods) {
-                    const qty = parseFloat(goodsQuantityInput.value);
+                const items = [];
+                for (let i = 0; i < goodsItems.length; i++) {
+                    const g = goodsItems[i];
+                    const qty = parseFloat(g.qty);
                     if (!isFinite(qty) || qty <= 0) {
-                        showError('已选择相关货物，请填写大于 0 的数量');
-                        goodsQuantityInput.focus();
+                        showError('请填写第 ' + (i + 1) + ' 行货物（' + g.name + '）的数量（大于 0）');
                         return;
                     }
-                    payload.goods_barcode = selectedGoods.barcode;
-                    payload.goods_quantity = qty;
+                    items.push({ barcode: g.barcode, quantity: qty });
                 }
+                payload.items = items;
 
                 submitBtn.disabled = true;
                 label.textContent = '提交中...';
@@ -313,7 +347,8 @@
 
             document.getElementById('resetBtn').addEventListener('click', function () {
                 form.reset();
-                clearSelectedGoods();
+                goodsItems.length = 0;
+                renderGoodsTable();
                 goodsResults.classList.add('hidden');
                 goodsResults.innerHTML = '';
                 goodsStatus.classList.add('hidden');

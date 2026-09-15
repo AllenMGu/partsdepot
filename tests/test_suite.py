@@ -409,60 +409,91 @@ check("货物搜索：无匹配 → 空列表", s == 200 and hits == [], f"statu
 _rl_headers = {"X-Real-IP": "9.9.9.99"}
 _rl_codes = [req("GET", "/api/public/goods-search?q=G001", headers=_rl_headers)[0] for _ in range(31)]
 check("货物搜索限流：同一 IP 第 31 次 → 429", _rl_codes[:30] == [200] * 30 and _rl_codes[30] == 429, f"codes={_rl_codes}")
-# 15c. 带货物提交（免登录）+ 管理员可见 + 后端校验
-# 契约：客户端只传 条码+数量；名称/规格/单位由后端查库填充
+# 15c. 带货物提交（免登录，多行明细）+ 管理员可见 + 后端校验
+# 契约：每行只传 条码+数量；名称/规格/单位由后端按条码查库填充（防伪造）
+def _first_item(r):
+    items = (r or {}).get("items")
+    return items[0] if isinstance(items, list) and items else {}
+
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111", "category": "其他",
-    "description": "带货物申请", "goods_barcode": "G001", "goods_quantity": 2})
-check("带货物提交：有货物+数量 → 201", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
+    "applicant_name": "货物测试", "contact": "user@example.com",
+    "description": "带货物申请", "items": [{"barcode": "G001", "quantity": 2}]})
+check("带货物提交：明细行 条码+数量 → 201", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
 rid = (b or {}).get("id")
 check("带货物提交：响应含 id/reference/message", isinstance(b, dict) and b.get("id") and b.get("reference") and b.get("message"), f"body={b}")
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111", "category": "其他",
-    "description": "x", "goods_barcode": "G001"})
+    "applicant_name": "货物测试", "contact": "user@example.com",
+    "description": "多行申请", "items": [{"barcode": "G001", "quantity": 1}, {"barcode": "G001", "quantity": 3}]})
+check("带货物提交：2 个明细行 → 201（多行）", s == 201, f"status={s} body={b}")
+_multi_id = (b or {}).get("id")
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "货物测试", "contact": "user@example.com",
+    "description": "x", "items": [{"barcode": "G001"}]})
 check("带货物提交：有条码无数量 → 422", s == 422, f"status={s} body={b}")
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111", "category": "其他",
-    "description": "x", "goods_barcode": "G001", "goods_quantity": 0})
+    "applicant_name": "货物测试", "contact": "user@example.com",
+    "description": "x", "items": [{"barcode": "G001", "quantity": 0}]})
 check("带货物提交：数量=0 → 422（gt=0）", s == 422, f"status={s} body={b}")
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111", "category": "其他",
-    "description": "x", "goods_quantity": 3})
+    "applicant_name": "货物测试", "contact": "user@example.com",
+    "description": "x", "items": [{"quantity": 3}]})
 check("带货物提交：有数量无条码 → 422（防脏数据）", s == 422, f"status={s} body={b}")
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111", "category": "其他",
-    "description": "x", "goods_barcode": "ZZ-NO-SUCH-BARCODE", "goods_quantity": 1})
+    "applicant_name": "货物测试", "contact": "13900001111",
+    "description": "邮箱校验"})
+check("邮箱校验：手机号 → 422", s == 422, f"status={s} body={b}")
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "货物测试", "contact": "abc",
+    "description": "邮箱校验"})
+check("邮箱校验：任意文本 → 422", s == 422, f"status={s} body={b}")
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "货物测试", "contact": "user@example.com",
+    "description": "x", "items": [{"barcode": "ZZ-NO-SUCH-BARCODE", "quantity": 1}]})
 check("带货物提交：不存在的条码 → 422（防假条码）", s == 422, f"status={s} body={b}")
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "13900001111", "category": "其他",
-    "description": "防伪造", "goods_barcode": "G001", "goods_quantity": 1,
-    "goods_name": "伪造名称", "goods_spec": "伪造规格", "goods_unit": "伪造单位"})
+    "applicant_name": "货物测试", "contact": "user@example.com",
+    "description": "防伪造", "items": [{"barcode": "G001", "quantity": 1,
+    "name": "伪造名称", "spec": "伪造规格", "unit": "伪造单位"}]})
 check("防伪造：真实条码+客户端假名称 → 仍 201（多余字段被忽略）", s == 201, f"status={s} body={b}")
 _spoof_id = (b or {}).get("id")
 s, rows = req("GET", "/api/requests/", token=admin)
 _r = next((r for r in (rows or []) if isinstance(r, dict) and r.get("id") == rid), None)
-check("管理员列表：货物快照字段可见（后端按条码查库填充）",
-      isinstance(_r, dict) and _r.get("goods_barcode") == "G001" and _r.get("goods_name") == "测试物料"
-      and _r.get("goods_unit") == "台" and _r.get("goods_quantity") == 2, f"row={_r}")
+check("管理员列表：货物明细可见（后端按条码查库填充）",
+      isinstance(_r, dict) and isinstance(_r.get("items"), list) and len(_r["items"]) == 1
+      and _first_item(_r).get("barcode") == "G001" and _first_item(_r).get("name") == "测试物料"
+      and _first_item(_r).get("unit") == "台" and _first_item(_r).get("quantity") == 2, f"row={_r}")
+_rmulti = next((r for r in (rows or []) if isinstance(r, dict) and r.get("id") == _multi_id), None)
+check("管理员列表：多行明细 2 条且数量正确",
+      isinstance(_rmulti, dict) and isinstance(_rmulti.get("items"), list) and len(_rmulti["items"]) == 2
+      and [i.get("quantity") for i in _rmulti["items"]] == [1, 3], f"row={_rmulti}")
 _r2 = next((r for r in (rows or []) if isinstance(r, dict) and r.get("id") == _spoof_id), None)
 check("防伪造：落库名称=数据库真实名称，客户端伪造字段被忽略",
-      isinstance(_r2, dict) and _r2.get("goods_name") == "测试物料" and _r2.get("goods_spec") == "规格-1"
-      and _r2.get("goods_unit") == "台", f"row={_r2}")
+      isinstance(_r2, dict) and isinstance(_r2.get("items"), list)
+      and _first_item(_r2).get("name") == "测试物料" and _first_item(_r2).get("spec") == "规格-1"
+      and _first_item(_r2).get("unit") == "台", f"row={_r2}")
 # 15d. 归档拷贝：回拨提交时间越过阈值(30天) → 通过 → 立即归档
 from datetime import datetime as _dt, timedelta as _td
 _old = (_dt.now() - _td(days=40)).strftime("%Y-%m-%d %H:%M:%S")
 db_execute("update requests set create_time = :ts where id = :i", {"ts": _old, "i": rid})
 s, b = req("POST", f"/api/requests/{rid}/status", {"status": "approved"}, admin)
 check("归档测试：通过带货物的申请单", s == 200, f"status={s} body={b}")
+check("状态更新响应：items 为真实明细（契约一致，非空数组）",
+      s == 200 and isinstance(b, dict) and isinstance(b.get("items"), list) and len(b["items"]) == 1
+      and b["items"][0].get("barcode") == "G001" and b["items"][0].get("quantity") == 2, f"body={b}")
 s, b = req("POST", "/api/requests/archive-now", {}, admin)
 check("归档测试：立即归档 → archived ≥ 1", s == 200 and isinstance(b, dict) and (b.get("archived") or 0) >= 1, f"status={s} body={b}")
 s, arows = req("GET", "/api/requests/archive/?page=1&page_size=10", token=admin)
 _a = next((a for a in (arows or []) if isinstance(a, dict) and a.get("original_id") == rid), None)
-check("归档拷贝：货物快照字段完整",
-      isinstance(_a, dict) and _a.get("goods_barcode") == "G001" and _a.get("goods_name") == "测试物料"
-      and _a.get("goods_spec") == "规格-1" and _a.get("goods_unit") == "台" and _a.get("goods_quantity") == 2, f"row={_a}")
+check("归档拷贝：货物明细字段完整",
+      isinstance(_a, dict) and isinstance(_a.get("items"), list) and len(_a["items"]) == 1
+      and _first_item(_a).get("barcode") == "G001" and _first_item(_a).get("name") == "测试物料"
+      and _first_item(_a).get("spec") == "规格-1" and _first_item(_a).get("unit") == "台"
+      and _first_item(_a).get("quantity") == 2, f"row={_a}")
 s, rows = req("GET", "/api/requests/", token=admin)
 check("归档：该申请单已从近期列表移走", all(isinstance(r, dict) and r.get("id") != rid for r in (rows or [])), f"rows={[r.get('id') for r in (rows or [])]}")
+_orphan = db_execute("SELECT COUNT(*) FROM request_items WHERE request_id = :rid", {"rid": rid})
+check("P1 回归：归档后 request_items 无孤儿行（原单明细已删，归档表有拷贝）",
+      _orphan and _orphan[0][0] == 0, f"orphan_rows={_orphan}")
 # 15e. 归档列表分页参数生效
 s, a1 = req("GET", "/api/requests/archive/?page=1&page_size=1", token=admin)
 check("归档分页：page_size=1 → 恰好 1 条", s == 200 and isinstance(a1, list) and len(a1) == 1, f"status={s} len={len(a1) if isinstance(a1, list) else a1}")

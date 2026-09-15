@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-gUSfkU8cDZHqvJYaLFcDZdr37zW5Y+D/s1BwFd/hZGE='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-M+5MPLyOc9MtMQ2cdFMEt/ellgdVx05Wjhm8rawcjiU='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -138,14 +138,6 @@
 
                 <div id="panelRecent">
                     <div class="px-4 py-3 flex flex-wrap gap-3 border-b border-gray-100">
-                        <select id="filterCategory" class="px-3 py-2 border border-gray-300 rounded-md bg-white text-sm focus:outline-none focus:ring-primary focus:border-primary">
-                            <option value="">全部类别</option>
-                            <option value="出入库申请">出入库申请</option>
-                            <option value="设备/工具">设备/工具</option>
-                            <option value="账号权限">账号权限</option>
-                            <option value="场地/空间">场地/空间</option>
-                            <option value="其他">其他</option>
-                        </select>
                         <select id="filterStatus" class="px-3 py-2 border border-gray-300 rounded-md bg-white text-sm focus:outline-none focus:ring-primary focus:border-primary">
                             <option value="">全部状态</option>
                             <option value="pending">待处理</option>
@@ -160,8 +152,7 @@
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">编号</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">申请人</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">部门</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">类别</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">联系方式</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">邮箱</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">事由描述</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">相关货物</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">提交时间</th>
@@ -201,7 +192,7 @@
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">原编号</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">申请人</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">部门</th>
-                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">类别</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">邮箱</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">事由描述</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">相关货物</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">提交时间</th>
@@ -276,20 +267,23 @@
                 return '<span class="px-2 py-1 rounded text-xs font-medium whitespace-nowrap ' + cls + '">' + esc(STATUS_TEXT[status] || status) + '</span>';
             }
 
-            // 相关货物单元格（提交时快照；未选货物显示占位符）
+            // 相关货物单元格（多行明细；无货物显示占位符）
             function goodsCell(r) {
-                if (!r.goods_name && !r.goods_barcode) {
+                const items = Array.isArray(r.items) ? r.items : [];
+                if (items.length === 0) {
                     return '<td class="px-4 py-3 text-sm text-gray-400">—</td>';
                 }
-                let html = '<td class="px-4 py-3 text-sm whitespace-nowrap">';
-                html += '<span class="font-medium text-gray-800">' + esc(r.goods_name || r.goods_barcode) + '</span>';
-                if (r.goods_quantity != null) {
-                    html += ' × ' + esc(String(r.goods_quantity)) + (r.goods_unit ? esc(' ' + r.goods_unit) : '');
-                }
-                const sub = [r.goods_barcode, r.goods_spec].filter(Boolean).join(' · ');
-                if (sub) {
-                    html += '<span class="block text-xs text-gray-400 mt-0.5">' + esc(sub) + '</span>';
-                }
+                let html = '<td class="px-4 py-3 text-sm">';
+                items.forEach(function (it) {
+                    html += '<div class="py-0.5">';
+                    html += '<span class="font-medium text-gray-800">' + esc(it.name || it.barcode) + '</span>';
+                    html += ' × ' + esc(String(it.quantity)) + (it.unit ? esc(' ' + it.unit) : '');
+                    const sub = [it.barcode, it.spec].filter(Boolean).join(' · ');
+                    if (sub) {
+                        html += '<span class="block text-xs text-gray-400">' + esc(sub) + '</span>';
+                    }
+                    html += '</div>';
+                });
                 html += '</td>';
                 return html;
             }
@@ -328,9 +322,7 @@
                 try {
                     const params = new URLSearchParams();
                     const status = el('filterStatus').value;
-                    const category = el('filterCategory').value;
                     if (status) params.set('status', status);
-                    if (category) params.set('category', category);
                     const qs = params.toString();
                     recentAll = await apiFetch('api/requests/' + (qs ? '?' + qs : ''));
                     renderRecentPage();
@@ -351,7 +343,7 @@
                 const tbody = el('recentBody');
                 tbody.innerHTML = '';
                 if (!rows.length) {
-                    tbody.innerHTML = '<tr><td colspan="10" class="px-6 py-10 text-center text-gray-400 text-sm">暂无近期申请单</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-10 text-center text-gray-400 text-sm">暂无近期申请单</td></tr>';
                     return;
                 }
                 rows.forEach(function (r) {
@@ -370,10 +362,9 @@
                         '<td class="px-4 py-3 text-sm font-mono text-gray-600 whitespace-nowrap">' + esc(ref) + '</td>' +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(r.applicant_name) + '</td>' +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(r.department || '-') + '</td>' +
-                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(r.category) + '</td>' +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(r.contact) + '</td>' +
                         '<td class="px-4 py-3 text-sm max-w-xs"><span class="block truncate align-middle" title="' + esc(r.description) + '">' + esc(truncate(r.description, 40)) + '</span>'
-                        + (r.attachment_note ? '<span class="text-xs text-gray-400 block mt-0.5 truncate">附：' + esc(r.attachment_note) + '</span>' : '') + '</td>' +
+                        + (r.attachment_note ? '<span class="text-xs text-gray-400 block mt-0.5 truncate">备注：' + esc(r.attachment_note) + '</span>' : '') + '</td>' +
                         goodsCell(r) +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(r.create_time) + '</td>' +
                         '<td class="px-4 py-3">' + statusBadge(r.status) + '</td>' +
@@ -443,9 +434,9 @@
                         '<td class="px-4 py-3 text-sm font-mono text-gray-600 whitespace-nowrap">' + esc(ref) + '</td>' +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(a.applicant_name) + '</td>' +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(a.department || '-') + '</td>' +
-                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(a.category) + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(a.contact) + '</td>' +
                         '<td class="px-4 py-3 text-sm max-w-xs"><span class="block truncate align-middle" title="' + esc(a.description) + '">' + esc(truncate(a.description, 40)) + '</span>'
-                        + (a.attachment_note ? '<span class="text-xs text-gray-400 block mt-0.5 truncate">附：' + esc(a.attachment_note) + '</span>' : '') + '</td>' +
+                        + (a.attachment_note ? '<span class="text-xs text-gray-400 block mt-0.5 truncate">备注：' + esc(a.attachment_note) + '</span>' : '') + '</td>' +
                         goodsCell(a) +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(a.create_time) + '</td>' +
                         '<td class="px-4 py-3">' + statusBadge(a.status) + '</td>' +
@@ -514,7 +505,6 @@
 
                 el('tabRecent').addEventListener('click', function () { switchTab('recent'); });
                 el('tabArchived').addEventListener('click', function () { switchTab('archived'); });
-                el('filterCategory').addEventListener('change', function () { recentPage = 1; loadRecent(); });
                 el('filterStatus').addEventListener('change', function () { recentPage = 1; loadRecent(); });
                 el('archiveNowBtn').addEventListener('click', archiveNow);
                 el('recentPrevPageBtn').addEventListener('click', function () {
