@@ -1,7 +1,7 @@
 """数据库模型（ORM）与枚举定义。"""
 
 from fastapi import status
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, Enum, UniqueConstraint, CheckConstraint
+from sqlalchemy import Column, Integer, String, Float, Text, DateTime, ForeignKey, Boolean, Enum, UniqueConstraint, CheckConstraint
 from sqlalchemy.orm import relationship
 from datetime import datetime
 import enum
@@ -257,6 +257,47 @@ class OutboundOrderItem(Base):
     header = relationship("OutboundOrderHeader", back_populates="items")
     goods = relationship("Goods")
     location = relationship("Location")
+
+# 12. 申请单（免登录公共提交；详见 api/requests.py）
+class RequestStatus(str, enum.Enum):
+    PENDING = "pending"    # 待处理
+    APPROVED = "approved"  # 已通过
+    REJECTED = "rejected"  # 已驳回
+
+# 12.1 申请单（近期/活跃）
+class Request(Base):
+    __tablename__ = "requests"
+    id = Column(Integer, primary_key=True, index=True)
+    applicant_name = Column(String(100), nullable=False, comment="申请人")
+    department = Column(String(100), comment="部门")
+    contact = Column(String(200), nullable=False, comment="联系方式（电话/邮箱）")
+    category = Column(String(50), nullable=False, comment="申请类别")
+    description = Column(Text, nullable=False, comment="事由描述")
+    attachment_note = Column(String(500), comment="附件说明（v1 不支持二进制上传）")
+    status = Column(String(20), default=RequestStatus.PENDING.value, index=True, comment="状态: pending/approved/rejected")
+    handler_name = Column(String(100), comment="处理人")
+    handle_time = Column(DateTime, comment="处理时间")
+    create_time = Column(DateTime, default=datetime.now, index=True)
+    update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now)
+
+# 12.2 申请单归档表（由归档任务从 requests 移入，数据不丢失）
+class RequestArchive(Base):
+    __tablename__ = "requests_archive"
+    id = Column(Integer, primary_key=True, index=True)
+    original_id = Column(Integer, index=True, comment="原申请单ID（requests.id）")
+    applicant_name = Column(String(100), nullable=False, comment="申请人")
+    department = Column(String(100), comment="部门")
+    contact = Column(String(200), nullable=False, comment="联系方式（电话/邮箱）")
+    category = Column(String(50), nullable=False, comment="申请类别")
+    description = Column(Text, nullable=False, comment="事由描述")
+    attachment_note = Column(String(500), comment="附件说明")
+    status = Column(String(20), default=RequestStatus.PENDING.value, comment="归档时状态")
+    handler_name = Column(String(100), comment="处理人")
+    handle_time = Column(DateTime, comment="处理时间")
+    create_time = Column(DateTime, nullable=False, comment="原提交时间")
+    update_time = Column(DateTime, comment="原最后更新时间")
+    archived_at = Column(DateTime, default=datetime.now, comment="归档时间")
+    archive_batch = Column(String(20), index=True, comment="归档批次，如 2026-10")
 
 # 创建所有表
 Base.metadata.create_all(bind=engine)
