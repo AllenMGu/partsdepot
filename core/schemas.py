@@ -295,31 +295,41 @@ class CheckOrderItemCreate(BaseModel):
     check_quantity: float = Field(ge=0)
 
 # ------------------- 申请单（免登录公共提交 + 管理端） -------------------
+class RequestItemSubmit(BaseModel):
+    """申请单货物行：客户端只提交 条码+数量；名称/规格/单位由后端按条码查库填充，
+    不接收客户端快照字段（防伪造：真实条码配假名称、或提交不存在的条码）。"""
+    barcode: str = Field(..., min_length=1, max_length=100, description="货物条码（必须存在于货物表）")
+    quantity: float = Field(..., gt=0, description="数量（>0）")
+
 class RequestSubmit(BaseModel):
     applicant_name: str = Field(..., min_length=1, max_length=100, description="申请人")
     department: Optional[str] = Field(None, max_length=100, description="部门（可选）")
-    contact: str = Field(..., min_length=3, max_length=200, description="联系方式（电话/邮箱）")
-    category: str = Field(..., min_length=1, max_length=50, description="申请类别")
+    contact: str = Field(..., min_length=3, max_length=200, description="邮箱")
+    category: Optional[str] = Field(None, max_length=50, description="申请类别（已停用，可选，后端不再强校验）")
     description: str = Field(..., min_length=1, max_length=2000, description="事由描述")
-    attachment_note: Optional[str] = Field(None, max_length=500, description="附件说明（可选）")
-    # 相关货物（可选）：客户端只提交 条码+数量；名称/规格/单位由后端按条码查库填充，
-    # 不接收客户端快照字段（防伪造：真实条码配假名称、或提交不存在的条码）
-    goods_barcode: Optional[str] = Field(None, max_length=100, description="相关货物条码（可选，必须存在于货物表）")
-    goods_quantity: Optional[float] = Field(None, gt=0, description="相关货物数量（可选，选货物时必填且>0）")
+    attachment_note: Optional[str] = Field(None, max_length=500, description="备注（可选）")
+    # 相关货物（可选，可多行）：每行 条码+数量，名称/规格/单位由后端查库快照
+    items: List[RequestItemSubmit] = Field(default_factory=list, max_length=200, description="相关货物明细（可选，每行条码+数量）")
+
+class RequestItemResponse(BaseModel):
+    barcode: str
+    name: Optional[str] = None
+    spec: Optional[str] = None
+    unit: Optional[str] = None
+    quantity: float
+
+    class Config:
+        from_attributes = True
 
 class RequestResponse(BaseModel):
     id: int
     applicant_name: str
     department: Optional[str] = None
     contact: str
-    category: str
+    category: Optional[str] = None
     description: str
     attachment_note: Optional[str] = None
-    goods_barcode: Optional[str] = None
-    goods_name: Optional[str] = None
-    goods_spec: Optional[str] = None
-    goods_unit: Optional[str] = None
-    goods_quantity: Optional[float] = None
+    items: List[RequestItemResponse] = Field(default_factory=list)
     status: str
     handler_name: Optional[str] = None
     handle_time: Optional[datetime] = None
@@ -335,14 +345,10 @@ class RequestArchiveResponse(BaseModel):
     applicant_name: str
     department: Optional[str] = None
     contact: str
-    category: str
+    category: Optional[str] = None
     description: str
     attachment_note: Optional[str] = None
-    goods_barcode: Optional[str] = None
-    goods_name: Optional[str] = None
-    goods_spec: Optional[str] = None
-    goods_unit: Optional[str] = None
-    goods_quantity: Optional[float] = None
+    items: List[RequestItemResponse] = Field(default_factory=list)
     status: str
     handler_name: Optional[str] = None
     handle_time: Optional[datetime] = None
