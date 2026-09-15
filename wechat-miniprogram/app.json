@@ -1,7 +1,8 @@
 {
   "pages": [
-    "pages/login/index",
     "pages/home/index",
+    "pages/apply/index",
+    "pages/login/index",
     "pages/stock/index",
     "pages/scan/index",
     "pages/logs/index",
