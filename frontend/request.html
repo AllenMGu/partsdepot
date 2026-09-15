@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-A7pqvJIP0XZUzbi5pd/2VjNeCtJeq4NidWOCA89W/A0='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-PxIG4KLTb9V+iAKxDmt40WMC8hpI5A9uFuCravycNX8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -67,6 +67,37 @@
                                     <option value="场地/空间">场地/空间</option>
                                     <option value="其他">其他</option>
                                 </select>
+                            </div>
+                        </div>
+
+                        <div id="goodsSection">
+                            <label class="block text-sm font-medium text-gray-700 mb-1">相关货物 <span class="text-xs text-gray-400">选填</span></label>
+                            <div class="flex gap-2">
+                                <input type="text" id="goodsSearchInput" maxlength="100"
+                                       class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
+                                       placeholder="输入货物条码或名称搜索（选填）">
+                                <button type="button" id="goodsSearchBtn"
+                                        class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-all-300">
+                                    <i class="fa fa-search mr-1"></i>搜索
+                                </button>
+                            </div>
+                            <div id="goodsSearchStatus" class="hidden text-xs text-gray-400 mt-1"></div>
+                            <ul id="goodsSearchResults" class="hidden mt-1 border border-gray-200 rounded-md divide-y divide-gray-100 bg-white max-h-56 overflow-y-auto"></ul>
+                            <div id="goodsSelected" class="hidden mt-2 p-3 bg-gray-50 border border-gray-200 rounded-md">
+                                <div class="flex items-start justify-between">
+                                    <div>
+                                        <p class="text-sm font-medium text-gray-800" id="goodsSelectedName"></p>
+                                        <p class="text-xs text-gray-500 mt-0.5" id="goodsSelectedMeta"></p>
+                                    </div>
+                                    <button type="button" id="goodsClearBtn" class="text-xs text-gray-400 hover:text-gray-600">
+                                        <i class="fa fa-times mr-1"></i>清除
+                                    </button>
+                                </div>
+                                <div class="mt-2 flex items-center gap-2">
+                                    <label for="goodsQuantity" class="text-sm text-gray-700">数量 <span class="text-red-500">*</span></label>
+                                    <input type="number" id="goodsQuantity" min="0.01" step="any" placeholder="0"
+                                           class="w-32 px-3 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                </div>
                             </div>
                         </div>
 
@@ -137,6 +168,90 @@
                 errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
 
+            // ---------- 相关货物（选填，与系统内货物联动） ----------
+            let selectedGoods = null;   // {barcode, name, spec, unit}
+            const goodsSearchInput = document.getElementById('goodsSearchInput');
+            const goodsSearchBtn = document.getElementById('goodsSearchBtn');
+            const goodsResults = document.getElementById('goodsSearchResults');
+            const goodsStatus = document.getElementById('goodsSearchStatus');
+            const goodsSelectedBox = document.getElementById('goodsSelected');
+            const goodsQuantityInput = document.getElementById('goodsQuantity');
+
+            function showGoodsStatus(message, isError) {
+                goodsStatus.textContent = message;
+                goodsStatus.classList.toggle('text-red-500', !!isError);
+                goodsStatus.classList.remove('hidden');
+            }
+
+            function clearSelectedGoods() {
+                selectedGoods = null;
+                goodsSelectedBox.classList.add('hidden');
+                goodsQuantityInput.value = '';
+            }
+
+            async function searchGoods() {
+                const keyword = goodsSearchInput.value.trim();
+                if (!keyword) {
+                    showGoodsStatus('请先输入货物条码或名称', true);
+                    return;
+                }
+                showGoodsStatus('正在搜索...', false);
+                goodsResults.classList.add('hidden');
+                goodsResults.innerHTML = '';
+                try {
+                    const resp = await fetch('api/public/goods-search?q=' + encodeURIComponent(keyword));
+                    const data = await resp.json().catch(function () { return []; });
+                    if (!resp.ok) {
+                        throw new Error((data && data.detail) || ('搜索失败（HTTP ' + resp.status + '）'));
+                    }
+                    if (!Array.isArray(data) || data.length === 0) {
+                        goodsStatus.classList.remove('text-red-500');
+                        showGoodsStatus('未找到匹配的货物', false);
+                        return;
+                    }
+                    data.forEach(function (g) {
+                        const li = document.createElement('li');
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'w-full text-left px-3 py-2 hover:bg-gray-50 transition-all-300';
+                        const nameSpan = document.createElement('span');
+                        nameSpan.className = 'block text-sm text-gray-800 font-medium';
+                        nameSpan.textContent = g.name;
+                        btn.appendChild(nameSpan);
+                        const metaSpan = document.createElement('span');
+                        metaSpan.className = 'block text-xs text-gray-500';
+                        metaSpan.textContent = g.barcode + (g.spec ? ' · ' + g.spec : '') + (g.unit ? ' · ' + g.unit : '');
+                        btn.appendChild(metaSpan);
+                        btn.addEventListener('click', function () {
+                            selectedGoods = { barcode: g.barcode, name: g.name, spec: g.spec, unit: g.unit };
+                            document.getElementById('goodsSelectedName').textContent = g.name;
+                            document.getElementById('goodsSelectedMeta').textContent =
+                                g.barcode + (g.spec ? ' | ' + g.spec : '') + (g.unit ? ' | ' + g.unit : '');
+                            goodsSelectedBox.classList.remove('hidden');
+                            goodsResults.classList.add('hidden');
+                            goodsResults.innerHTML = '';
+                            goodsStatus.classList.add('hidden');
+                            goodsQuantityInput.focus();
+                        });
+                        li.appendChild(btn);
+                        goodsResults.appendChild(li);
+                    });
+                    goodsStatus.classList.add('hidden');
+                    goodsResults.classList.remove('hidden');
+                } catch (error) {
+                    showGoodsStatus(error.message || '网络错误，请稍后重试', true);
+                }
+            }
+
+            goodsSearchBtn.addEventListener('click', searchGoods);
+            goodsSearchInput.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') {
+                    e.preventDefault();
+                    searchGoods();
+                }
+            });
+            document.getElementById('goodsClearBtn').addEventListener('click', clearSelectedGoods);
+
             form.addEventListener('submit', async function (event) {
                 event.preventDefault();
                 hideError();
@@ -157,6 +272,19 @@
                 if (payload.contact.length < 3) {
                     showError('联系方式至少 3 个字符');
                     return;
+                }
+
+                // 相关货物（选填）：已选择货物时必须填数量
+                // 安全约定：只提交 条码+数量；名称/规格/单位由后端按条码查库填充，不传客户端快照
+                if (selectedGoods) {
+                    const qty = parseFloat(goodsQuantityInput.value);
+                    if (!isFinite(qty) || qty <= 0) {
+                        showError('已选择相关货物，请填写大于 0 的数量');
+                        goodsQuantityInput.focus();
+                        return;
+                    }
+                    payload.goods_barcode = selectedGoods.barcode;
+                    payload.goods_quantity = qty;
                 }
 
                 submitBtn.disabled = true;
@@ -185,6 +313,10 @@
 
             document.getElementById('resetBtn').addEventListener('click', function () {
                 form.reset();
+                clearSelectedGoods();
+                goodsResults.classList.add('hidden');
+                goodsResults.innerHTML = '';
+                goodsStatus.classList.add('hidden');
                 successPanel.classList.add('hidden');
                 form.classList.remove('hidden');
             });

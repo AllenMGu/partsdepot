@@ -302,6 +302,10 @@ class RequestSubmit(BaseModel):
     category: str = Field(..., min_length=1, max_length=50, description="申请类别")
     description: str = Field(..., min_length=1, max_length=2000, description="事由描述")
     attachment_note: Optional[str] = Field(None, max_length=500, description="附件说明（可选）")
+    # 相关货物（可选）：客户端只提交 条码+数量；名称/规格/单位由后端按条码查库填充，
+    # 不接收客户端快照字段（防伪造：真实条码配假名称、或提交不存在的条码）
+    goods_barcode: Optional[str] = Field(None, max_length=100, description="相关货物条码（可选，必须存在于货物表）")
+    goods_quantity: Optional[float] = Field(None, gt=0, description="相关货物数量（可选，选货物时必填且>0）")
 
 class RequestResponse(BaseModel):
     id: int
@@ -311,6 +315,11 @@ class RequestResponse(BaseModel):
     category: str
     description: str
     attachment_note: Optional[str] = None
+    goods_barcode: Optional[str] = None
+    goods_name: Optional[str] = None
+    goods_spec: Optional[str] = None
+    goods_unit: Optional[str] = None
+    goods_quantity: Optional[float] = None
     status: str
     handler_name: Optional[str] = None
     handle_time: Optional[datetime] = None
@@ -329,6 +338,11 @@ class RequestArchiveResponse(BaseModel):
     category: str
     description: str
     attachment_note: Optional[str] = None
+    goods_barcode: Optional[str] = None
+    goods_name: Optional[str] = None
+    goods_spec: Optional[str] = None
+    goods_unit: Optional[str] = None
+    goods_quantity: Optional[float] = None
     status: str
     handler_name: Optional[str] = None
     handle_time: Optional[datetime] = None
