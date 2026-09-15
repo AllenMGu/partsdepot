@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-1K7yB+05OI6hoeweIl72a7yYgogBeCDRmsv7uzeVogE='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-MnBNiW0vyLhE8+43JbhUQ6ugS69Iup6+sO4Fw2Mar5A='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>出库单管理 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -251,29 +251,17 @@
                     </div>
                     
                     <!-- 分页 -->
-                    <div class="flex items-center justify-between mt-4">
-                        <div class="flex items-center space-x-3 text-sm text-gray-700">
-                            <div>
-                                显示 <span id="startRange">1</span> 到 <span id="endRange">10</span> 条，共 <span id="totalCount">0</span> 条记录
-                            </div>
-                            <div class="flex items-center space-x-1">
-                                <span>每页</span>
-                                <select id="pageSizeSelect" class="px-2 py-1 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
-                                    <option value="10" selected>10</option>
-                                    <option value="20">20</option>
-                                    <option value="50">50</option>
-                                    <option value="100">100</option>
-                                </select>
-                                <span>条</span>
-                            </div>
-                        </div>
-                        <div class="flex space-x-1">
-                            <button id="prevPage" class="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50">
-                                上一页
-                            </button>
-                            <button id="nextPage" class="px-3 py-1 border border-gray-300 rounded-md text-sm disabled:opacity-50">
-                                下一页
-                            </button>
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span class="text-sm text-gray-600">共 <span id="totalCount" class="font-medium">0</span> 条</span>
+                        <div class="flex items-center space-x-2">
+                            <select id="pageSizeSelect" class="px-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                <option value="10">10条/页</option>
+                                <option value="20">20条/页</option>
+                                <option value="50">50条/页</option>
+                            </select>
+                            <button id="prevPageBtn" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">上一页</button>
+                            <span class="text-sm text-gray-700">第 <span id="pageInfo">1/1</span> 页</span>
+                            <button id="nextPageBtn" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">下一页</button>
                         </div>
                     </div>
                 </div>
@@ -459,7 +447,7 @@
                 updateOrderTable();
                 
                 // 更新分页信息
-                updatePagination();
+                updatePagination(filteredOrders.length);
             } catch (error) {
                 console.error('加载出库单列表失败:', error);
                 showToast('加载出库单列表失败', 'error');
@@ -557,17 +545,17 @@
         }
         
         // 更新分页信息
-        function updatePagination() {
-            const totalPages = Math.ceil(filteredOrders.length / pageSize);
-            const startRange = filteredOrders.length > 0 ? (currentPage - 1) * pageSize + 1 : 0;
-            const endRange = Math.min(currentPage * pageSize, filteredOrders.length);
+        function updatePagination(total) {
+            const totalPages = Math.max(1, Math.ceil(total / pageSize));
+            if (currentPage > totalPages) {
+                currentPage = totalPages;
+            }
             
-            document.getElementById('startRange').textContent = startRange;
-            document.getElementById('endRange').textContent = endRange;
-            document.getElementById('totalCount').textContent = filteredOrders.length;
+            document.getElementById('totalCount').textContent = total;
+            document.getElementById('pageInfo').textContent = currentPage + '/' + totalPages;
             
-            document.getElementById('prevPage').disabled = currentPage === 1;
-            document.getElementById('nextPage').disabled = currentPage === totalPages || totalPages === 0;
+            document.getElementById('prevPageBtn').disabled = currentPage <= 1;
+            document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
         }
         
         // 创建出库单
@@ -1471,7 +1459,7 @@
             document.getElementById('searchOrderBtn').addEventListener('click', function() {
                 applySearch();
                 updateOrderTable();
-                updatePagination();
+                updatePagination(filteredOrders.length);
             });
             
             // 搜索框回车
@@ -1479,7 +1467,7 @@
                 if (e.key === 'Enter') {
                     applySearch();
                     updateOrderTable();
-                    updatePagination();
+                    updatePagination(filteredOrders.length);
                 }
             });
 
@@ -1498,20 +1486,20 @@
             });
             
             // 分页按钮
-            document.getElementById('prevPage').addEventListener('click', function() {
+            document.getElementById('prevPageBtn').addEventListener('click', function() {
                 if (currentPage > 1) {
                     currentPage--;
                     updateOrderTable();
-                    updatePagination();
+                    updatePagination(filteredOrders.length);
                 }
             });
             
-            document.getElementById('nextPage').addEventListener('click', function() {
+            document.getElementById('nextPageBtn').addEventListener('click', function() {
                 const totalPages = Math.ceil(filteredOrders.length / pageSize);
                 if (currentPage < totalPages) {
                     currentPage++;
                     updateOrderTable();
-                    updatePagination();
+                    updatePagination(filteredOrders.length);
                 }
             });
 
@@ -1519,7 +1507,7 @@
                 pageSize = parseInt(this.value, 10) || 10;
                 currentPage = 1;
                 updateOrderTable();
-                updatePagination();
+                updatePagination(filteredOrders.length);
             });
             
             // 详情模态框
