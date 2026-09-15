@@ -24,11 +24,11 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request as FastAPIRequest
-from sqlalchemy import text
+from sqlalchemy import or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.models import Config, Request, RequestArchive, RequestStatus, User, UserRole
+from core.models import Config, Goods, Request, RequestArchive, RequestStatus, User, UserRole
 from core.schemas import (
     RequestArchiveResponse,
     RequestResponse,
@@ -86,6 +86,53 @@ REQUEST_CATEGORIES = ["出入库申请", "设备/工具", "账号权限", "场�
 def get_request_categories():
     return REQUEST_CATEGORIES
 
+# ------------------- 公开货物搜索限流（独立桶，比提交更宽松，但仍防枚举滥用） -------------------
+SEARCH_RATE_MAX_PER_IP = 30          # 单 IP 10 分钟内最多 30 次搜索
+SEARCH_RATE_MAX_GLOBAL = 120         # 全局 10 分钟内最多 120 次
+
+def _check_search_rate_limit(ip: str) -> None:
+    now = time.monotonic()
+    cutoff = now - RATE_WINDOW_SECONDS
+    with _rate_lock:
+        global_hits = [t for t in _rate_hits.get("search:__global__", []) if t > cutoff]
+        ip_hits = [t for t in _rate_hits.get("search:" + ip, []) if t > cutoff]
+        if len(ip_hits) >= SEARCH_RATE_MAX_PER_IP:
+            raise HTTPException(status_code=429, detail="搜索过于频繁，请稍后再试")
+        if len(global_hits) >= SEARCH_RATE_MAX_GLOBAL:
+            raise HTTPException(status_code=429, detail="当前搜索人数较多，请稍后再试")
+        global_hits.append(now)
+        ip_hits.append(now)
+        _rate_hits["search:__global__"] = global_hits
+        _rate_hits["search:" + ip] = ip_hits
+
+@router.get("/public/goods-search", summary="货物搜索（免登录，公开申请页联动用）")
+def search_goods_public(
+    q: str,
+    request: FastAPIRequest,
+    db: Session = Depends(get_db)
+):
+    """按条码/名称模糊搜索货物，供免登录申请页选择相关货物。
+
+    安全边界：仅返回 条码/名称/规格/单位 四个非敏感字段（不含单价等），
+    单次最多 20 条，独立限流桶防止被用来枚举全量货物目录。
+    """
+    keyword = (q or "").strip()
+    if not keyword:
+        raise HTTPException(status_code=400, detail="请输入货物条码或名称")
+    _check_search_rate_limit(_client_ip(request))
+    like = f"%{keyword}%"
+    rows = (
+        db.query(Goods.barcode, Goods.name, Goods.spec, Goods.unit)
+        .filter(or_(Goods.barcode.like(like), Goods.name.like(like)))
+        .order_by(Goods.id)
+        .limit(20)
+        .all()
+    )
+    return [
+        {"barcode": b, "name": n or "", "spec": s or "", "unit": u or ""}
+        for (b, n, s, u) in rows
+    ]
+
 @router.post("/requests/", status_code=201, summary="提交申请（免登录）")
 def submit_request(
     payload: RequestSubmit,
@@ -103,6 +150,11 @@ def submit_request(
             detail=f"无效的申请类别：{category}（可选：{'、'.join(REQUEST_CATEGORIES)}）"
         )
 
+    # 相关货物（可选，快照存储）：选了货物必须填数量；名称/规格/单位以提交时的货物数据为准
+    goods_barcode = (payload.goods_barcode or "").strip() or None
+    if goods_barcode and not payload.goods_quantity:
+        raise HTTPException(status_code=422, detail="选择相关货物时必须填写数量")
+
     new_request = Request(
         applicant_name=payload.applicant_name.strip(),
         department=(payload.department or "").strip() or None,
@@ -110,6 +162,11 @@ def submit_request(
         category=category,
         description=payload.description.strip(),
         attachment_note=(payload.attachment_note or "").strip() or None,
+        goods_barcode=goods_barcode,
+        goods_name=(payload.goods_name or "").strip() or None,
+        goods_spec=(payload.goods_spec or "").strip() or None,
+        goods_unit=(payload.goods_unit or "").strip() or None,
+        goods_quantity=payload.goods_quantity,
         status=RequestStatus.PENDING.value,
     )
     db.add(new_request)
@@ -187,6 +244,11 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
             category=r.category,
             description=r.description,
             attachment_note=r.attachment_note,
+            goods_barcode=r.goods_barcode,
+            goods_name=r.goods_name,
+            goods_spec=r.goods_spec,
+            goods_unit=r.goods_unit,
+            goods_quantity=r.goods_quantity,
             status=r.status,
             handler_name=r.handler_name,
             handle_time=r.handle_time,
