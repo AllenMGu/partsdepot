@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-1hLRwYmF8pL3cPfFFx1YfxJjW3c5rQf5zgZ5AUFsjyE='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-9rUYfsZtUZmg+6G7mdCOrxU1LqeD7dNM5lxCyR3idJc='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>盘点管理 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -261,25 +261,18 @@
 
                 <!-- 分页控件 -->
                 <div id="pagination" class="mt-4 flex items-center justify-between">
-                    <div class="text-sm text-gray-700">
-                        显示第 <span id="startItem">1</span> 到 <span id="endItem">0</span> 条，共 <span id="totalItems">0</span> 条记录
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <button id="firstPageBtn" class="px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50" disabled>
-                            <i class="fa fa-angle-double-left"></i> 第一页
-                        </button>
-                        <button id="prevPageBtn" class="px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50" disabled>
-                            <i class="fa fa-angle-left"></i> 上一页
-                        </button>
-                        <div class="flex items-center space-x-1">
-                            <span class="text-sm text-gray-700">第 <span id="currentPage">1</span> 页 / 共 <span id="totalPages">1</span> 页</span>
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span class="text-sm text-gray-600">共 <span id="totalCount" class="font-medium">0</span> 条</span>
+                        <div class="flex items-center space-x-2">
+                            <select id="pageSizeSelect" class="px-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                <option value="10">10条/页</option>
+                                <option value="20">20条/页</option>
+                                <option value="50">50条/页</option>
+                            </select>
+                            <button id="prevPageBtn" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">上一页</button>
+                            <span class="text-sm text-gray-700">第 <span id="pageInfo">1/1</span> 页</span>
+                            <button id="nextPageBtn" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">下一页</button>
                         </div>
-                        <button id="nextPageBtn" class="px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50" disabled>
-                            下一页 <i class="fa fa-angle-right"></i>
-                        </button>
-                        <button id="lastPageBtn" class="px-3 py-1 border border-gray-300 rounded-md hover:bg-gray-100 disabled:opacity-50" disabled>
-                            最后一页 <i class="fa fa-angle-double-right"></i>
-                        </button>
                     </div>
                 </div>
             </div>
@@ -610,7 +603,7 @@
                 totalPages = Math.ceil(totalCount / pageSize);
 
                 updateCheckOrdersTable();
-                updatePagination();
+                updatePagination(totalCount);
 
             } catch (error) {
                 console.error('加载盘点单列表失败:', error);
@@ -698,24 +691,18 @@
             }).join('');
         }
 
-        // 更新分页控件
-        function updatePagination() {
-            // 计算显示的项目范围
-            const startItem = (currentPage - 1) * pageSize + 1;
-            const endItem = Math.min(currentPage * pageSize, totalCount);
+        // 更新分页控件（标准翻页条）
+        function updatePagination(total) {
+            totalPages = Math.max(1, Math.ceil(total / pageSize));
+            if (currentPage > totalPages) {
+                currentPage = totalPages;
+            }
 
-            // 更新文本显示
-            document.getElementById('startItem').textContent = startItem;
-            document.getElementById('endItem').textContent = endItem;
-            document.getElementById('totalItems').textContent = totalCount;
-            document.getElementById('currentPage').textContent = currentPage;
-            document.getElementById('totalPages').textContent = totalPages;
-
-            // 更新按钮状态
-            document.getElementById('firstPageBtn').disabled = currentPage <= 1;
             document.getElementById('prevPageBtn').disabled = currentPage <= 1;
             document.getElementById('nextPageBtn').disabled = currentPage >= totalPages;
-            document.getElementById('lastPageBtn').disabled = currentPage >= totalPages;
+
+            document.getElementById('pageInfo').textContent = currentPage + '/' + totalPages;
+            document.getElementById('totalCount').textContent = total;
         }
 
         // 设置事件监听器
@@ -730,10 +717,13 @@
             document.getElementById('refreshOrders').addEventListener('click', () => loadCheckOrders(1));
 
             // 分页事件
-            document.getElementById('firstPageBtn').addEventListener('click', () => loadCheckOrders(1));
             document.getElementById('prevPageBtn').addEventListener('click', () => loadCheckOrders(currentPage - 1));
             document.getElementById('nextPageBtn').addEventListener('click', () => loadCheckOrders(currentPage + 1));
-            document.getElementById('lastPageBtn').addEventListener('click', () => loadCheckOrders(totalPages));
+            document.getElementById('pageSizeSelect').addEventListener('change', () => {
+                pageSize = parseInt(document.getElementById('pageSizeSelect').value, 10);
+                currentPage = 1;
+                loadCheckOrders(1);
+            });
 
             // 扫码按钮
             document.getElementById('scanGoodsBtn').addEventListener('click', function() {
