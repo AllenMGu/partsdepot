@@ -4,7 +4,9 @@
 - 提交接口不做登录校验（内网使用），按来源 IP 做滑动窗口限流（默认 10 次/10 分钟）；
 - 所有字段做长度校验与首尾去空白；前端渲染统一走 escapeHTML；
 - v1 不提供二进制附件上传（免登录上传端点存在被恶意占用磁盘/存储的风险），
-  以"附件说明"文本字段代替（写清文件名与交付方式）。
+  以"备注"文本字段代替（写清文件名与交付方式）。
+- 相关货物支持多行（request_items 表）：每行 条码+数量，名称/规格/单位由后端
+  按条码查库快照；申请类别已停用（列保留兼容，不再必填/校验）。
 
 归档说明：
 - 超过阈值天数（config 表 request_archive_days，默认 30 天）且已处理
@@ -28,9 +30,10 @@ from sqlalchemy import or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.models import Config, Goods, Request, RequestArchive, RequestStatus, User, UserRole
+from core.models import Config, Goods, Request, RequestArchive, RequestItem, RequestItemArchive, RequestStatus, User, UserRole
 from core.schemas import (
     RequestArchiveResponse,
+    RequestItemResponse,
     RequestResponse,
     RequestStatusUpdate,
     RequestSubmit,
@@ -78,13 +81,6 @@ def _check_rate_limit(ip: str) -> None:
         ip_hits.append(now)
         _rate_hits["__global__"] = global_hits
         _rate_hits[ip] = ip_hits
-
-# ------------------- 申请类别（前端下拉与后端一致，增改需同步） -------------------
-REQUEST_CATEGORIES = ["出入库申请", "设备/工具", "账号权限", "场地/空间", "其他"]
-
-@router.get("/requests/categories", summary="申请类别列表（免登录）")
-def get_request_categories():
-    return REQUEST_CATEGORIES
 
 # ------------------- 公开货物搜索限流（独立桶，比提交更宽松，但仍防枚举滥用） -------------------
 SEARCH_RATE_WINDOW_SECONDS = 60      # 搜索专用 1 分钟窗口（搜索是键入即查的交互，不宜用 10 分钟窗口）
@@ -143,51 +139,47 @@ def submit_request(
     # 内网公共提交：限流 + 字段校验（Pydantic），不要求登录
     _check_rate_limit(_client_ip(request))
 
-    # 类别后端强校验：免登录接口不依赖前端下拉，直接调 API 的任意类别一律拒绝
-    category = payload.category.strip()
-    if category not in REQUEST_CATEGORIES:
-        raise HTTPException(
-            status_code=422,
-            detail=f"无效的申请类别：{category}（可选：{'、'.join(REQUEST_CATEGORIES)}）"
-        )
-
-    # 相关货物（可选，快照存储）：匿名端只接受 条码+数量；名称/规格/单位一律由后端
-    # 按条码精确查库填充（不信任客户端快照字段）；条码必须真实存在
-    goods_barcode = (payload.goods_barcode or "").strip() or None
-    goods_quantity = payload.goods_quantity
-    if goods_barcode and goods_quantity is None:
-        raise HTTPException(status_code=422, detail="选择相关货物时必须填写数量")
-    if not goods_barcode and goods_quantity is not None:
-        raise HTTPException(status_code=422, detail="填写数量时必须选择相关货物（条码）")
-    goods_name = goods_spec = goods_unit = None
-    if goods_barcode:
-        goods_row = db.query(Goods).filter(Goods.barcode == goods_barcode).order_by(Goods.id).first()
-        if not goods_row:
-            raise HTTPException(status_code=422, detail=f"货物不存在：{goods_barcode}（请确认条码有效）")
-        goods_name = goods_row.name or None
-        goods_spec = goods_row.spec or None
-        goods_unit = goods_row.unit or None
+    # 相关货物（可选，可多行，快照存储）：每行只接受 条码+数量；名称/规格/单位一律由
+    # 后端按条码精确查库填充（不信任客户端快照字段）；条码必须真实存在
+    items_in = payload.items or []
+    if len(items_in) > 200:
+        raise HTTPException(status_code=422, detail="相关货物最多 200 行")
+    resolved_items = []
+    for idx, it in enumerate(items_in, start=1):
+        barcode = (it.barcode or "").strip()
+        if not barcode:
+            raise HTTPException(status_code=422, detail=f"第 {idx} 行货物缺少条码")
+        row = db.query(Goods).filter(Goods.barcode == barcode).order_by(Goods.id).first()
+        if not row:
+            raise HTTPException(status_code=422, detail=f"第 {idx} 行货物不存在：{barcode}（请确认条码有效）")
+        resolved_items.append((barcode, row.name, row.spec, row.unit, it.quantity))
 
     new_request = Request(
         applicant_name=payload.applicant_name.strip(),
         department=(payload.department or "").strip() or None,
         contact=payload.contact.strip(),
-        category=category,
+        category=(payload.category or "").strip() or None,
         description=payload.description.strip(),
         attachment_note=(payload.attachment_note or "").strip() or None,
-        goods_barcode=goods_barcode,
-        goods_name=goods_name,
-        goods_spec=goods_spec,
-        goods_unit=goods_unit,
-        goods_quantity=goods_quantity,
         status=RequestStatus.PENDING.value,
     )
     db.add(new_request)
+    db.flush()  # 取得 id 后挂明细
+    for sort, (barcode, name, spec, unit, quantity) in enumerate(resolved_items):
+        db.add(RequestItem(
+            request_id=new_request.id,
+            sort=sort,
+            barcode=barcode,
+            name=name or None,
+            spec=spec or None,
+            unit=unit or None,
+            quantity=quantity,
+        ))
     db.commit()
     db.refresh(new_request)
 
     reference = f"APP-{new_request.create_time:%Y%m%d}-{new_request.id:04d}"
-    logging.info("收到公共申请 %s（申请人：%s，类别：%s）", reference, new_request.applicant_name, new_request.category)
+    logging.info("收到公共申请 %s（申请人：%s，货物 %d 行）", reference, new_request.applicant_name, len(resolved_items))
     return {
         "id": new_request.id,
         "reference": reference,
@@ -249,7 +241,7 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
     if not rows:
         return 0
     for r in rows:
-        db.add(RequestArchive(
+        arc = RequestArchive(
             original_id=r.id,
             applicant_name=r.applicant_name,
             department=r.department,
@@ -257,11 +249,6 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
             category=r.category,
             description=r.description,
             attachment_note=r.attachment_note,
-            goods_barcode=r.goods_barcode,
-            goods_name=r.goods_name,
-            goods_spec=r.goods_spec,
-            goods_unit=r.goods_unit,
-            goods_quantity=r.goods_quantity,
             status=r.status,
             handler_name=r.handler_name,
             handle_time=r.handle_time,
@@ -269,7 +256,26 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
             update_time=r.update_time,
             archived_at=now,
             archive_batch=batch,
-        ))
+        )
+        db.add(arc)
+        db.flush()  # 取归档单 id，挂货物明细
+        items = (
+            db.query(RequestItem)
+            .filter(RequestItem.request_id == r.id)
+            .order_by(RequestItem.sort, RequestItem.id)
+            .all()
+        )
+        for it in items:
+            db.add(RequestItemArchive(
+                archive_id=arc.id,
+                original_request_id=r.id,
+                sort=it.sort,
+                barcode=it.barcode,
+                name=it.name,
+                spec=it.spec,
+                unit=it.unit,
+                quantity=it.quantity,
+            ))
     # 只删除本次实际归档的行（按 id 精确删除，避免误伤并发新写入）
     db.query(Request).filter(Request.id.in_([r.id for r in rows])).delete(synchronize_session=False)
     _set_archive_last_run(db)
@@ -320,10 +326,75 @@ def _require_admin(current_user: User) -> None:
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="申请单管理仅限管理员操作")
 
+def _request_payload(r: Request, items: list) -> dict:
+    return {
+        "id": r.id,
+        "applicant_name": r.applicant_name,
+        "department": r.department,
+        "contact": r.contact,
+        "category": r.category,
+        "description": r.description,
+        "attachment_note": r.attachment_note,
+        "items": items,
+        "status": r.status,
+        "handler_name": r.handler_name,
+        "handle_time": r.handle_time,
+        "create_time": r.create_time,
+        "update_time": r.update_time,
+    }
+
+def _request_payload_archive(a: RequestArchive, items: list) -> dict:
+    return {
+        "id": a.id,
+        "original_id": a.original_id,
+        "applicant_name": a.applicant_name,
+        "department": a.department,
+        "contact": a.contact,
+        "category": a.category,
+        "description": a.description,
+        "attachment_note": a.attachment_note,
+        "items": items,
+        "status": a.status,
+        "handler_name": a.handler_name,
+        "handle_time": a.handle_time,
+        "create_time": a.create_time,
+        "update_time": a.update_time,
+        "archived_at": a.archived_at,
+        "archive_batch": a.archive_batch,
+    }
+
+def _group_items(db: Session, ids: list) -> dict:
+    """按父单 id 归组货物明细（保持行序）。"""
+    if not ids:
+        return {}
+    rows = (
+        db.query(RequestItem)
+        .filter(RequestItem.request_id.in_(ids))
+        .order_by(RequestItem.sort, RequestItem.id)
+        .all()
+    )
+    grouped = {}
+    for it in rows:
+        grouped.setdefault(it.request_id, []).append(it)
+    return grouped
+
+def _group_archive_items(db: Session, archive_ids: list) -> dict:
+    if not archive_ids:
+        return {}
+    rows = (
+        db.query(RequestItemArchive)
+        .filter(RequestItemArchive.archive_id.in_(archive_ids))
+        .order_by(RequestItemArchive.sort, RequestItemArchive.id)
+        .all()
+    )
+    grouped = {}
+    for it in rows:
+        grouped.setdefault(it.archive_id, []).append(it)
+    return grouped
+
 @router.get("/requests/", response_model=List[RequestResponse], summary="近期申请单列表（管理员）")
 def list_requests(
     status: Optional[str] = None,
-    category: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -331,9 +402,9 @@ def list_requests(
     query = db.query(Request).order_by(Request.create_time.desc(), Request.id.desc())
     if status:
         query = query.filter(Request.status == status)
-    if category:
-        query = query.filter(Request.category == category)
-    return query.all()
+    reqs = query.all()
+    grouped = _group_items(db, [r.id for r in reqs])
+    return [_request_payload(r, grouped.get(r.id, [])) for r in reqs]
 
 @router.post("/requests/{id}/status", response_model=RequestResponse, summary="通过/驳回申请单（管理员）")
 def set_request_status(
@@ -372,7 +443,9 @@ def list_archived_requests(
     query = db.query(RequestArchive).order_by(RequestArchive.id.desc())
     if batch:
         query = query.filter(RequestArchive.archive_batch == batch)
-    return query.offset((page - 1) * page_size).limit(page_size).all()
+    rows = query.offset((page - 1) * page_size).limit(page_size).all()
+    grouped = _group_archive_items(db, [a.id for a in rows])
+    return [_request_payload_archive(a, grouped.get(a.id, [])) for a in rows]
 
 @router.get("/requests/archive/meta", summary="归档元信息（管理员）")
 def archive_meta(
