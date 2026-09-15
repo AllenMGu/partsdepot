@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-qGkJ/jgW0PaC9FMrpnZEXmrH5MFRFkFRUu5RTu3eJ18='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-gUSfkU8cDZHqvJYaLFcDZdr37zW5Y+D/s1BwFd/hZGE='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -163,6 +163,7 @@
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">类别</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">联系方式</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">事由描述</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">相关货物</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">提交时间</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
@@ -171,16 +172,26 @@
                             <tbody id="recentBody" class="bg-white divide-y divide-gray-200"></tbody>
                         </table>
                     </div>
+                    <div class="px-4 py-3 border-t border-gray-100">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <span class="text-sm text-gray-600">共 <span id="recentTotalCount" class="font-medium">0</span> 条</span>
+                            <div class="flex items-center space-x-2">
+                                <select id="recentPageSizeSelect" class="px-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                    <option value="10">10条/页</option>
+                                    <option value="20">20条/页</option>
+                                    <option value="50">50条/页</option>
+                                </select>
+                                <button type="button" id="recentPrevPageBtn" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">上一页</button>
+                                <span class="text-sm text-gray-700">第 <span id="recentPageInfo">1/1</span> 页</span>
+                                <button type="button" id="recentNextPageBtn" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">下一页</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div id="panelArchived" class="hidden">
-                    <div class="px-4 py-3 flex items-center justify-between border-b border-gray-100">
+                    <div class="px-4 py-3 border-b border-gray-100">
                         <span class="text-sm text-gray-500">归档记录按批次保留，数据不丢失</span>
-                        <div class="flex items-center gap-2">
-                            <button id="archivePrevBtn" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40" type="button" disabled>上一页</button>
-                            <span id="archivePageInfo" class="text-sm text-gray-600">1 / 1</span>
-                            <button id="archiveNextBtn" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40" type="button" disabled>下一页</button>
-                        </div>
                     </div>
                     <div class="overflow-x-auto">
                         <table class="min-w-full divide-y divide-gray-200">
@@ -192,6 +203,7 @@
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">部门</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">类别</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">事由描述</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">相关货物</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">提交时间</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">归档时状态</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">归档时间</th>
@@ -199,6 +211,21 @@
                             </thead>
                             <tbody id="archivedBody" class="bg-white divide-y divide-gray-200"></tbody>
                         </table>
+                    </div>
+                    <div class="px-4 py-3 border-t border-gray-100">
+                        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <span class="text-sm text-gray-600">共 <span id="archiveTotalCount" class="font-medium">0</span> 条</span>
+                            <div class="flex items-center space-x-2">
+                                <select id="archivePageSizeSelect" class="px-2 py-1 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
+                                    <option value="10">10条/页</option>
+                                    <option value="20">20条/页</option>
+                                    <option value="50">50条/页</option>
+                                </select>
+                                <button type="button" id="archivePrevPageBtn" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">上一页</button>
+                                <span class="text-sm text-gray-700">第 <span id="archivePageInfo">1/1</span> 页</span>
+                                <button type="button" id="archiveNextPageBtn" class="px-3 py-1 border border-gray-300 rounded-md text-sm hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed">下一页</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -215,9 +242,13 @@
             'use strict';
 
             const STATUS_TEXT = { pending: '待处理', approved: '已通过', rejected: '已驳回' };
-            const ARCHIVE_PAGE_SIZE = 50;
+            const DEFAULT_PAGE_SIZE = 10;
             let archivePage = 1;
+            let archivePageSize = DEFAULT_PAGE_SIZE;
             let archiveTotal = 0;
+            let recentPage = 1;
+            let recentPageSize = DEFAULT_PAGE_SIZE;
+            let recentAll = [];
             let loading = false;
 
             const el = function (id) { return document.getElementById(id); };
@@ -245,6 +276,35 @@
                 return '<span class="px-2 py-1 rounded text-xs font-medium whitespace-nowrap ' + cls + '">' + esc(STATUS_TEXT[status] || status) + '</span>';
             }
 
+            // 相关货物单元格（提交时快照；未选货物显示占位符）
+            function goodsCell(r) {
+                if (!r.goods_name && !r.goods_barcode) {
+                    return '<td class="px-4 py-3 text-sm text-gray-400">—</td>';
+                }
+                let html = '<td class="px-4 py-3 text-sm whitespace-nowrap">';
+                html += '<span class="font-medium text-gray-800">' + esc(r.goods_name || r.goods_barcode) + '</span>';
+                if (r.goods_quantity != null) {
+                    html += ' × ' + esc(String(r.goods_quantity)) + (r.goods_unit ? esc(' ' + r.goods_unit) : '');
+                }
+                const sub = [r.goods_barcode, r.goods_spec].filter(Boolean).join(' · ');
+                if (sub) {
+                    html += '<span class="block text-xs text-gray-400 mt-0.5">' + esc(sub) + '</span>';
+                }
+                html += '</td>';
+                return html;
+            }
+
+            // 通用标准翻页条更新（ids 为元素 id 前缀，如 recent/archive）
+            function updatePaginationBar(prefix, total, page, pageSize) {
+                const totalPages = Math.max(1, Math.ceil(total / pageSize));
+                const clamped = Math.min(Math.max(1, page), totalPages);
+                el(prefix + 'TotalCount').textContent = total;
+                el(prefix + 'PageInfo').textContent = clamped + '/' + totalPages;
+                el(prefix + 'PrevPageBtn').disabled = clamped <= 1;
+                el(prefix + 'NextPageBtn').disabled = clamped >= totalPages;
+                return clamped;
+            }
+
             async function apiFetch(url, options) {
                 const resp = await fetch(url, Object.assign({ credentials: 'same-origin' }, options || {}));
                 let data = null;
@@ -261,7 +321,7 @@
                 else window.alert(message);
             }
 
-            // ---------- 近期申请 ----------
+            // ---------- 近期申请（客户端分页：一次取全量、本地切片） ----------
             async function loadRecent() {
                 if (loading) return;
                 loading = true;
@@ -272,8 +332,8 @@
                     if (status) params.set('status', status);
                     if (category) params.set('category', category);
                     const qs = params.toString();
-                    const rows = await apiFetch('api/requests/' + (qs ? '?' + qs : ''));
-                    renderRecent(rows);
+                    recentAll = await apiFetch('api/requests/' + (qs ? '?' + qs : ''));
+                    renderRecentPage();
                 } catch (error) {
                     notify(error.message, 'error');
                 } finally {
@@ -281,11 +341,17 @@
                 }
             }
 
+            function renderRecentPage() {
+                recentPage = updatePaginationBar('recent', recentAll.length, recentPage, recentPageSize);
+                const start = (recentPage - 1) * recentPageSize;
+                renderRecent(recentAll.slice(start, start + recentPageSize));
+            }
+
             function renderRecent(rows) {
                 const tbody = el('recentBody');
                 tbody.innerHTML = '';
                 if (!rows.length) {
-                    tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-10 text-center text-gray-400 text-sm">暂无近期申请单</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="10" class="px-6 py-10 text-center text-gray-400 text-sm">暂无近期申请单</td></tr>';
                     return;
                 }
                 rows.forEach(function (r) {
@@ -308,6 +374,7 @@
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(r.contact) + '</td>' +
                         '<td class="px-4 py-3 text-sm max-w-xs"><span class="block truncate align-middle" title="' + esc(r.description) + '">' + esc(truncate(r.description, 40)) + '</span>'
                         + (r.attachment_note ? '<span class="text-xs text-gray-400 block mt-0.5 truncate">附：' + esc(r.attachment_note) + '</span>' : '') + '</td>' +
+                        goodsCell(r) +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(r.create_time) + '</td>' +
                         '<td class="px-4 py-3">' + statusBadge(r.status) + '</td>' +
                         '<td class="px-4 py-3 whitespace-nowrap">' + actions + '</td>';
@@ -344,18 +411,18 @@
             async function loadArchive() {
                 try {
                     const [rows, meta] = await Promise.all([
-                        apiFetch('api/requests/archive/?page=' + archivePage + '&page_size=' + ARCHIVE_PAGE_SIZE),
+                        apiFetch('api/requests/archive/?page=' + archivePage + '&page_size=' + archivePageSize),
                         apiFetch('api/requests/archive/meta').catch(function () { return null; })
                     ]);
                     renderArchive(rows);
                     if (meta) {
                         archiveTotal = meta.archived_total;
-                    } else if (rows.length < ARCHIVE_PAGE_SIZE) {
-                        archiveTotal = (archivePage - 1) * ARCHIVE_PAGE_SIZE + rows.length;
+                    } else if (rows.length < archivePageSize) {
+                        archiveTotal = (archivePage - 1) * archivePageSize + rows.length;
                     } else {
-                        archiveTotal = (archivePage + 1) * ARCHIVE_PAGE_SIZE;
+                        archiveTotal = (archivePage + 1) * archivePageSize;
                     }
-                    updateArchivePager();
+                    archivePage = updatePaginationBar('archive', archiveTotal, archivePage, archivePageSize);
                 } catch (error) {
                     notify(error.message, 'error');
                 }
@@ -365,7 +432,7 @@
                 const tbody = el('archivedBody');
                 tbody.innerHTML = '';
                 if (!rows.length) {
-                    tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-10 text-center text-gray-400 text-sm">该页暂无归档记录</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="10" class="px-6 py-10 text-center text-gray-400 text-sm">该页暂无归档记录</td></tr>';
                 }
                 rows.forEach(function (a) {
                     const ref = 'APP-' + fmtTime(a.create_time).slice(0, 10).replace(/-/g, '') + '-' + String(a.original_id).padStart(4, '0');
@@ -379,6 +446,7 @@
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(a.category) + '</td>' +
                         '<td class="px-4 py-3 text-sm max-w-xs"><span class="block truncate align-middle" title="' + esc(a.description) + '">' + esc(truncate(a.description, 40)) + '</span>'
                         + (a.attachment_note ? '<span class="text-xs text-gray-400 block mt-0.5 truncate">附：' + esc(a.attachment_note) + '</span>' : '') + '</td>' +
+                        goodsCell(a) +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(a.create_time) + '</td>' +
                         '<td class="px-4 py-3">' + statusBadge(a.status) + '</td>' +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(a.archived_at) + '</td>';
@@ -423,14 +491,6 @@
                 else loadArchive();
             }
 
-            function updateArchivePager() {
-                const totalPages = Math.max(1, Math.ceil(archiveTotal / ARCHIVE_PAGE_SIZE));
-                if (archivePage > totalPages) archivePage = totalPages;
-                el('archivePageInfo').textContent = archivePage + ' / ' + totalPages;
-                el('archivePrevBtn').disabled = archivePage <= 1;
-                el('archiveNextBtn').disabled = archivePage >= totalPages;
-            }
-
             // 初始化：common.js 在 checkLoginStatus() 成功解析用户后回调本函数（与 user.html 同模式）
             function pageInit() {
                 // 权限检查：只有管理员可以访问申请管理页面
@@ -454,14 +514,30 @@
 
                 el('tabRecent').addEventListener('click', function () { switchTab('recent'); });
                 el('tabArchived').addEventListener('click', function () { switchTab('archived'); });
-                el('filterCategory').addEventListener('change', loadRecent);
-                el('filterStatus').addEventListener('change', loadRecent);
+                el('filterCategory').addEventListener('change', function () { recentPage = 1; loadRecent(); });
+                el('filterStatus').addEventListener('change', function () { recentPage = 1; loadRecent(); });
                 el('archiveNowBtn').addEventListener('click', archiveNow);
-                el('archivePrevBtn').addEventListener('click', function () {
+                el('recentPrevPageBtn').addEventListener('click', function () {
+                    if (recentPage > 1) { recentPage -= 1; renderRecentPage(); }
+                });
+                el('recentNextPageBtn').addEventListener('click', function () {
+                    if (!el('recentNextPageBtn').disabled) { recentPage += 1; renderRecentPage(); }
+                });
+                el('recentPageSizeSelect').addEventListener('change', function () {
+                    recentPageSize = parseInt(el('recentPageSizeSelect').value, 10);
+                    recentPage = 1;
+                    renderRecentPage();
+                });
+                el('archivePrevPageBtn').addEventListener('click', function () {
                     if (archivePage > 1) { archivePage -= 1; loadArchive(); }
                 });
-                el('archiveNextBtn').addEventListener('click', function () {
-                    if (!el('archiveNextBtn').disabled) { archivePage += 1; loadArchive(); }
+                el('archiveNextPageBtn').addEventListener('click', function () {
+                    if (!el('archiveNextPageBtn').disabled) { archivePage += 1; loadArchive(); }
+                });
+                el('archivePageSizeSelect').addEventListener('change', function () {
+                    archivePageSize = parseInt(el('archivePageSizeSelect').value, 10);
+                    archivePage = 1;
+                    loadArchive();
                 });
 
                 // 初始加载
