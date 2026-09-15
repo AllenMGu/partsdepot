@@ -293,3 +293,52 @@ class CheckOrderItemCreate(BaseModel):
     goods_barcode: str
     location_code: str
     check_quantity: float = Field(ge=0)
+
+# ------------------- 申请单（免登录公共提交 + 管理端） -------------------
+class RequestSubmit(BaseModel):
+    applicant_name: str = Field(..., min_length=1, max_length=100, description="申请人")
+    department: Optional[str] = Field(None, max_length=100, description="部门（可选）")
+    contact: str = Field(..., min_length=3, max_length=200, description="联系方式（电话/邮箱）")
+    category: str = Field(..., min_length=1, max_length=50, description="申请类别")
+    description: str = Field(..., min_length=1, max_length=2000, description="事由描述")
+    attachment_note: Optional[str] = Field(None, max_length=500, description="附件说明（可选）")
+
+class RequestResponse(BaseModel):
+    id: int
+    applicant_name: str
+    department: Optional[str] = None
+    contact: str
+    category: str
+    description: str
+    attachment_note: Optional[str] = None
+    status: str
+    handler_name: Optional[str] = None
+    handle_time: Optional[datetime] = None
+    create_time: datetime
+    update_time: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class RequestArchiveResponse(BaseModel):
+    id: int
+    original_id: int
+    applicant_name: str
+    department: Optional[str] = None
+    contact: str
+    category: str
+    description: str
+    attachment_note: Optional[str] = None
+    status: str
+    handler_name: Optional[str] = None
+    handle_time: Optional[datetime] = None
+    create_time: datetime
+    update_time: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
+    archive_batch: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class RequestStatusUpdate(BaseModel):
+    status: str = Field(..., description="approved 或 rejected")

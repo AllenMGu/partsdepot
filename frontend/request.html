@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-A7pqvJIP0XZUzbi5pd/2VjNeCtJeq4NidWOCA89W/A0='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <title>申请提交 - 备件管理系统</title>
+    <link href="assets/css/tailwind.css" rel="stylesheet">
+    <link href="assets/css/font-awesome.min.css" rel="stylesheet">
+    <link href="assets/css/polish.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col polish">
+    <header class="bg-white shadow-sm z-10">
+        <div class="flex items-center justify-between px-4 py-3">
+            <div class="flex items-center">
+                <img src="assets/images/logo.png" alt="Logo" class="h-8 w-8">
+                <span class="ml-2 text-lg font-semibold text-gray-800">备件管理系统</span>
+            </div>
+            <a href="index.html" class="text-sm text-gray-600 hover:text-primary">
+                <i class="fa fa-sign-in mr-1"></i> 登录系统
+            </a>
+        </div>
+    </header>
+
+    <main class="flex-1 flex items-start justify-center p-4 md:p-8">
+        <div class="w-full max-w-2xl">
+            <div class="bg-white rounded-lg shadow overflow-hidden">
+                <div class="bg-gradient-blue p-6 text-center">
+                    <h1 class="text-2xl font-bold text-white text-shadow">申请提交</h1>
+                    <p class="text-blue-100 mt-1">通用申请单 · 提交后请保存申请编号</p>
+                </div>
+
+                <div class="p-6 md:p-8">
+                    <div id="errorBox" class="hidden mb-4 px-4 py-3 rounded-md bg-red-50 border border-red-200 text-sm text-red-700"></div>
+
+                    <form id="requestForm" class="space-y-5" novalidate>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                            <div>
+                                <label for="applicantName" class="block text-sm font-medium text-gray-700 mb-1">申请人 <span class="text-red-500">*</span></label>
+                                <input type="text" id="applicantName" name="applicant_name" maxlength="100"
+                                       class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
+                                       placeholder="您的姓名" required>
+                            </div>
+                            <div>
+                                <label for="department" class="block text-sm font-medium text-gray-700 mb-1">部门</label>
+                                <input type="text" id="department" name="department" maxlength="100"
+                                       class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
+                                       placeholder="选填，如：装配部">
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+                            <div>
+                                <label for="contact" class="block text-sm font-medium text-gray-700 mb-1">联系方式 <span class="text-red-500">*</span></label>
+                                <input type="text" id="contact" name="contact" maxlength="200"
+                                       class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
+                                       placeholder="电话或邮箱" required>
+                            </div>
+                            <div>
+                                <label for="category" class="block text-sm font-medium text-gray-700 mb-1">申请类别 <span class="text-red-500">*</span></label>
+                                <select id="category" name="category"
+                                        class="w-full px-3 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
+                                        required>
+                                    <option value="出入库申请">出入库申请</option>
+                                    <option value="设备/工具">设备/工具</option>
+                                    <option value="账号权限">账号权限</option>
+                                    <option value="场地/空间">场地/空间</option>
+                                    <option value="其他">其他</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div>
+                            <label for="description" class="block text-sm font-medium text-gray-700 mb-1">事由描述 <span class="text-red-500">*</span></label>
+                            <textarea id="description" name="description" rows="5" maxlength="2000"
+                                      class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
+                                      placeholder="请描述申请的事由、数量、期望时间等" required></textarea>
+                            <p class="text-xs text-gray-400 mt-1">最多 2000 字</p>
+                        </div>
+
+                        <div>
+                            <label for="attachmentNote" class="block text-sm font-medium text-gray-700 mb-1">附件说明</label>
+                            <input type="text" id="attachmentNote" name="attachment_note" maxlength="500"
+                                   class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
+                                   placeholder="选填。如需提供附件，请写明文件名与获取方式（如：共享盘 CUWX/申请 目录）">
+                        </div>
+
+                        <div class="pt-2">
+                            <button type="submit" id="submitBtn"
+                                    class="w-full bg-primary text-white px-4 py-2.5 rounded-md hover:bg-secondary focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 transition-all-300">
+                                <i class="fa fa-paper-plane mr-2"></i>
+                                <span>提交申请</span>
+                            </button>
+                            <p class="text-xs text-gray-400 mt-3 text-center">仅限内网使用 · 提交频率受限制 · 无需登录</p>
+                        </div>
+                    </form>
+
+                    <div id="successPanel" class="hidden text-center py-6">
+                        <div class="w-16 h-16 mx-auto rounded-full bg-green-100 flex items-center justify-center mb-4">
+                            <i class="fa fa-check text-3xl text-green-600"></i>
+                        </div>
+                        <h2 class="text-xl font-semibold text-gray-800">申请已提交</h2>
+                        <p class="text-gray-600 mt-2">申请编号</p>
+                        <p id="refValue" class="text-lg font-mono font-semibold text-primary mt-1 select-all"></p>
+                        <p class="text-sm text-gray-400 mt-3">请保存该编号，处理进展请联系受理管理员跟进（当前系统暂不提供免登录查询）</p>
+                        <button id="resetBtn" class="mt-6 px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50 transition-all-300">
+                            <i class="fa fa-plus mr-1"></i> 再提交一份
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <footer class="text-center text-xs text-gray-400 py-4">
+        备件管理系统 · 申请提交
+    </footer>
+
+    <script>
+        // 申请单提交（免登录，内网使用）
+        (function () {
+            'use strict';
+            const form = document.getElementById('requestForm');
+            const successPanel = document.getElementById('successPanel');
+            const errorBox = document.getElementById('errorBox');
+            const submitBtn = document.getElementById('submitBtn');
+            const label = submitBtn.querySelector('span');
+
+            function hideError() {
+                errorBox.textContent = '';
+                errorBox.classList.add('hidden');
+            }
+
+            function showError(message) {
+                errorBox.textContent = message;
+                errorBox.classList.remove('hidden');
+                errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+
+            form.addEventListener('submit', async function (event) {
+                event.preventDefault();
+                hideError();
+
+                const payload = {
+                    applicant_name: document.getElementById('applicantName').value.trim(),
+                    department: document.getElementById('department').value.trim(),
+                    contact: document.getElementById('contact').value.trim(),
+                    category: document.getElementById('category').value,
+                    description: document.getElementById('description').value.trim(),
+                    attachment_note: document.getElementById('attachmentNote').value.trim()
+                };
+
+                if (!payload.applicant_name || !payload.contact || !payload.category || !payload.description) {
+                    showError('请填写带 * 的必填项');
+                    return;
+                }
+                if (payload.contact.length < 3) {
+                    showError('联系方式至少 3 个字符');
+                    return;
+                }
+
+                submitBtn.disabled = true;
+                label.textContent = '提交中...';
+                try {
+                    const resp = await fetch('api/requests/', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    const data = await resp.json().catch(function () { return {}; });
+                    if (!resp.ok) {
+                        throw new Error((data && data.detail) || ('提交失败（HTTP ' + resp.status + '）'));
+                    }
+                    document.getElementById('refValue').textContent = data.reference || ('#' + data.id);
+                    form.classList.add('hidden');
+                    successPanel.classList.remove('hidden');
+                    successPanel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                } catch (error) {
+                    showError(error.message || '网络错误，请稍后重试');
+                } finally {
+                    submitBtn.disabled = false;
+                    label.textContent = '提交申请';
+                }
+            });
+
+            document.getElementById('resetBtn').addEventListener('click', function () {
+                form.reset();
+                successPanel.classList.add('hidden');
+                form.classList.remove('hidden');
+            });
+        })();
+    </script>
+</body>
+</html>

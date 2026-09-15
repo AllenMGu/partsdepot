@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-+dNCyi3BsqaLmWZkfq0S/7fibzGWf+cGlJj8SITr9uU='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <title>申请管理 - 备件管理系统</title>
+    <link href="assets/css/tailwind.css" rel="stylesheet">
+    <link href="assets/css/font-awesome.min.css" rel="stylesheet">
+    <link href="assets/css/polish.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100 min-h-screen flex flex-col polish">
+    <header class="bg-white shadow-sm z-10">
+        <div class="flex items-center justify-between px-4 py-3">
+            <div class="flex items-center">
+                <button id="sidebarToggle" class="mr-4 text-gray-600 focus:outline-none lg:hidden">
+                    <i class="fa fa-bars text-xl"></i>
+                </button>
+                <div class="flex items-center">
+                    <img src="assets/images/logo.png" alt="Logo" class="h-8 w-8">
+                    <span class="ml-2 text-lg font-semibold text-gray-800 hidden sm:block">备件管理系统</span>
+                </div>
+            </div>
+            <div class="flex items-center space-x-4">
+                <div class="relative" id="warehouseSelector">
+                    <button class="flex items-center text-gray-700 hover:text-primary focus:outline-none">
+                        <i class="fa fa-building-o mr-2"></i>
+                        <span id="currentWarehouse">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs"></i>
+                    </button>
+                    <div id="warehouseDropdown" class="absolute right-0 mt-2 w-64 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <div class="px-4 py-2 text-sm text-gray-400">选择仓库</div>
+                            <div id="warehouseList" class="max-h-64 overflow-y-auto"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="relative">
+                    <button class="text-gray-600 hover:text-primary focus:outline-none">
+                        <i class="fa fa-bell-o text-xl"></i>
+                        <span class="absolute top-0 right-0 h-2 w-2 bg-red-500 rounded-full"></span>
+                    </button>
+                </div>
+                <div class="relative" id="userMenu">
+                    <button class="flex items-center focus:outline-none">
+                        <div class="w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center">
+                            <span id="userInitials">U</span>
+                        </div>
+                        <span class="ml-2 text-sm font-medium text-gray-700 hidden md:block" id="userName">加载中...</span>
+                        <i class="fa fa-chevron-down ml-1 text-xs text-gray-500 hidden md:block"></i>
+                    </button>
+                    <div id="userDropdown" class="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg hidden z-20">
+                        <div class="py-1">
+                            <a href="dashboard.html" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-dashboard mr-2"></i> 返回仪表盘
+                            </a>
+                            <hr class="my-1">
+                            <a href="#" id="logoutButton" class="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100">
+                                <i class="fa fa-sign-out mr-2"></i> 退出登录
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+        <aside id="sidebar" class="bg-white w-64 shadow-md hidden lg:block flex-shrink-0 transition-all-300">
+            <nav class="mt-5 px-2">
+                <a href="dashboard.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-dashboard sidebar-icon"></i>
+                    <span>仪表盘</span>
+                </a>
+                <a href="warehouse.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-building sidebar-icon"></i>
+                    <span>仓库管理</span>
+                </a>
+                <a href="location.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-map-marker sidebar-icon"></i>
+                    <span>库位管理</span>
+                </a>
+                <a href="goods.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-cubes sidebar-icon"></i>
+                    <span>货物管理</span>
+                </a>
+                <a href="stock.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-list sidebar-icon"></i>
+                    <span>库存查询</span>
+                </a>
+                <a href="scan.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-qrcode sidebar-icon"></i>
+                    <span>扫码出入库</span>
+                </a>
+                <a href="inbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-down sidebar-icon"></i>
+                    <span>入库单管理</span>
+                </a>
+                <a href="outbound.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-arrow-up sidebar-icon"></i>
+                    <span>出库单管理</span>
+                </a>
+                <a href="check.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-check-square-o sidebar-icon"></i>
+                    <span>盘点管理</span>
+                </a>
+                <a href="user.html" class="flex items-center px-4 py-3 text-gray-700 hover:bg-gray-100 rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-users sidebar-icon"></i>
+                    <span>用户管理</span>
+                </a>
+                <a href="request-admin.html" class="flex items-center px-4 py-3 sidebar-active rounded-md mb-1 transition-all-300">
+                    <i class="fa fa-inbox sidebar-icon"></i>
+                    <span>申请管理</span>
+                </a>
+            </nav>
+        </aside>
+
+        <main class="flex-1 overflow-y-auto p-6">
+            <div class="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">申请管理</h1>
+                    <p class="text-gray-600">处理免登录提交的申请单 · <a href="request.html" class="text-primary hover:underline">申请提交页</a></p>
+                </div>
+                <div class="mt-4 md:mt-0 flex items-center gap-3 flex-wrap">
+                    <span id="archiveMeta" class="text-xs text-gray-500"></span>
+                    <button id="archiveNowBtn" class="bg-amber-600 text-white px-4 py-2 rounded-md hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 transition-all-300 flex items-center">
+                        <i class="fa fa-archive mr-2"></i>
+                        <span>立即归档</span>
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-lg shadow">
+                <div class="flex border-b border-gray-200">
+                    <button id="tabRecent" class="px-6 py-3 text-sm font-medium border-b-2 border-primary text-primary" type="button">近期申请</button>
+                    <button id="tabArchived" class="px-6 py-3 text-sm font-medium border-b-2 border-transparent text-gray-500 hover:text-gray-700" type="button">已归档</button>
+                </div>
+
+                <div id="panelRecent">
+                    <div class="px-4 py-3 flex flex-wrap gap-3 border-b border-gray-100">
+                        <select id="filterCategory" class="px-3 py-2 border border-gray-300 rounded-md bg-white text-sm focus:outline-none focus:ring-primary focus:border-primary">
+                            <option value="">全部类别</option>
+                            <option value="出入库申请">出入库申请</option>
+                            <option value="设备/工具">设备/工具</option>
+                            <option value="账号权限">账号权限</option>
+                            <option value="场地/空间">场地/空间</option>
+                            <option value="其他">其他</option>
+                        </select>
+                        <select id="filterStatus" class="px-3 py-2 border border-gray-300 rounded-md bg-white text-sm focus:outline-none focus:ring-primary focus:border-primary">
+                            <option value="">全部状态</option>
+                            <option value="pending">待处理</option>
+                            <option value="approved">已通过</option>
+                            <option value="rejected">已驳回</option>
+                        </select>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">编号</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">申请人</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">部门</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">类别</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">联系方式</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">事由描述</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">提交时间</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody id="recentBody" class="bg-white divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div id="panelArchived" class="hidden">
+                    <div class="px-4 py-3 flex items-center justify-between border-b border-gray-100">
+                        <span class="text-sm text-gray-500">归档记录按批次保留，数据不丢失</span>
+                        <div class="flex items-center gap-2">
+                            <button id="archivePrevBtn" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40" type="button" disabled>上一页</button>
+                            <span id="archivePageInfo" class="text-sm text-gray-600">1 / 1</span>
+                            <button id="archiveNextBtn" class="px-3 py-1.5 text-sm border border-gray-300 rounded-md hover:bg-gray-50 disabled:opacity-40" type="button" disabled>下一页</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="min-w-full divide-y divide-gray-200">
+                            <thead class="bg-gray-50">
+                                <tr>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">批次</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">原编号</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">申请人</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">部门</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">类别</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">事由描述</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">提交时间</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">归档时状态</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">归档时间</th>
+                                </tr>
+                            </thead>
+                            <tbody id="archivedBody" class="bg-white divide-y divide-gray-200"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="assets/js/common.js"></script>
+    <script>
+        // 申请单管理（管理员）
+        (function () {
+            'use strict';
+            const STATUS_TEXT = { pending: '待处理', approved: '已通过', rejected: '已驳回' };
+            const ARCHIVE_PAGE_SIZE = 50;
+            let archivePage = 1;
+            let archiveTotal = 0;
+            let loading = false;
+
+            const el = function (id) { return document.getElementById(id); };
+            const esc = window.escapeHTML || function (v) { return String(v); };
+
+            function fmtTime(value) {
+                if (!value) return '-';
+                const d = new Date(value);
+                if (isNaN(d.getTime())) return esc(value);
+                const p = function (n) { return String(n).padStart(2, '0'); };
+                return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
+            }
+
+            function truncate(value, max) {
+                const s = String(value || '');
+                return s.length > max ? s.slice(0, max) + '…' : s;
+            }
+
+            function statusBadge(status) {
+                const cls = {
+                    pending: 'bg-yellow-100 text-yellow-800',
+                    approved: 'bg-green-100 text-green-800',
+                    rejected: 'bg-red-100 text-red-800'
+                }[status] || 'bg-gray-100 text-gray-700';
+                return '<span class="px-2 py-1 rounded text-xs font-medium whitespace-nowrap ' + cls + '">' + esc(STATUS_TEXT[status] || status) + '</span>';
+            }
+
+            async function apiFetch(url, options) {
+                const resp = await fetch(url, Object.assign({ credentials: 'same-origin' }, options || {}));
+                let data = null;
+                try { data = await resp.json(); } catch (e) { /* 非 JSON 响应 */ }
+                if (!resp.ok) {
+                    const detail = data && data.detail;
+                    throw new Error(typeof detail === 'string' ? detail : '请求失败（HTTP ' + resp.status + '）');
+                }
+                return data;
+            }
+
+            function notify(message, type) {
+                if (typeof window.showToast === 'function') window.showToast(message, type || 'info');
+                else window.alert(message);
+            }
+
+            // ---------- 近期申请 ----------
+            async function loadRecent() {
+                if (loading) return;
+                loading = true;
+                try {
+                    const params = new URLSearchParams();
+                    const status = el('filterStatus').value;
+                    const category = el('filterCategory').value;
+                    if (status) params.set('status', status);
+                    if (category) params.set('category', category);
+                    const qs = params.toString();
+                    const rows = await apiFetch('api/requests/' + (qs ? '?' + qs : ''));
+                    renderRecent(rows);
+                } catch (error) {
+                    notify(error.message, 'error');
+                } finally {
+                    loading = false;
+                }
+            }
+
+            function renderRecent(rows) {
+                const tbody = el('recentBody');
+                tbody.innerHTML = '';
+                if (!rows.length) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-10 text-center text-gray-400 text-sm">暂无近期申请单</td></tr>';
+                    return;
+                }
+                rows.forEach(function (r) {
+                    const ref = 'APP-' + fmtTime(r.create_time).slice(0, 10).replace(/-/g, '') + '-' + String(r.id).padStart(4, '0');
+                    let actions;
+                    if (r.status === 'pending') {
+                        actions = '<button data-act="approved" data-id="' + r.id + '" class="text-sm text-green-600 hover:text-green-800">通过</button>'
+                            + ' <button data-act="rejected" data-id="' + r.id + '" class="text-sm text-red-500 hover:text-red-700 ml-2">驳回</button>';
+                    } else {
+                        actions = '<span class="text-xs text-gray-400">' + esc(r.handler_name || '-')
+                            + (r.handle_time ? ' ' + fmtTime(r.handle_time) : '') + '</span>';
+                    }
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    tr.innerHTML =
+                        '<td class="px-4 py-3 text-sm font-mono text-gray-600 whitespace-nowrap">' + esc(ref) + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(r.applicant_name) + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(r.department || '-') + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(r.category) + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(r.contact) + '</td>' +
+                        '<td class="px-4 py-3 text-sm max-w-xs"><span class="block truncate align-middle" title="' + esc(r.description) + '">' + esc(truncate(r.description, 40)) + '</span>'
+                        + (r.attachment_note ? '<span class="text-xs text-gray-400 block mt-0.5 truncate">附：' + esc(r.attachment_note) + '</span>' : '') + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(r.create_time) + '</td>' +
+                        '<td class="px-4 py-3">' + statusBadge(r.status) + '</td>' +
+                        '<td class="px-4 py-3 whitespace-nowrap">' + actions + '</td>';
+                    tbody.appendChild(tr);
+                });
+
+                tbody.querySelectorAll('button[data-act]').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        const id = parseInt(btn.getAttribute('data-id'), 10);
+                        const target = btn.getAttribute('data-act');
+                        const actionText = target === 'approved' ? '通过' : '驳回';
+                        if (!window.confirm('确认' + actionText + '申请单 #' + id + ' 吗？')) return;
+                        handleStatus(id, target);
+                    });
+                });
+            }
+
+            async function handleStatus(id, target) {
+                try {
+                    await apiFetch('api/requests/' + id + '/status', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ status: target })
+                    });
+                    notify('申请单 #' + id + ' 已' + (target === 'approved' ? '通过' : '驳回'), 'success');
+                    loadRecent();
+                    loadMeta();
+                } catch (error) {
+                    notify(error.message, 'error');
+                }
+            }
+
+            // ---------- 已归档 ----------
+            async function loadArchive() {
+                try {
+                    const [rows, meta] = await Promise.all([
+                        apiFetch('api/requests/archive/?page=' + archivePage + '&page_size=' + ARCHIVE_PAGE_SIZE),
+                        apiFetch('api/requests/archive/meta').catch(function () { return null; })
+                    ]);
+                    renderArchive(rows);
+                    if (meta) {
+                        archiveTotal = meta.archived_total;
+                    } else if (rows.length < ARCHIVE_PAGE_SIZE) {
+                        archiveTotal = (archivePage - 1) * ARCHIVE_PAGE_SIZE + rows.length;
+                    } else {
+                        archiveTotal = (archivePage + 1) * ARCHIVE_PAGE_SIZE;
+                    }
+                    updateArchivePager();
+                } catch (error) {
+                    notify(error.message, 'error');
+                }
+            }
+
+            function renderArchive(rows) {
+                const tbody = el('archivedBody');
+                tbody.innerHTML = '';
+                if (!rows.length) {
+                    tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-10 text-center text-gray-400 text-sm">该页暂无归档记录</td></tr>';
+                }
+                rows.forEach(function (a) {
+                    const ref = 'APP-' + fmtTime(a.create_time).slice(0, 10).replace(/-/g, '') + '-' + String(a.original_id).padStart(4, '0');
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    tr.innerHTML =
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(a.archive_batch || '-') + '</td>' +
+                        '<td class="px-4 py-3 text-sm font-mono text-gray-600 whitespace-nowrap">' + esc(ref) + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(a.applicant_name) + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(a.department || '-') + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(a.category) + '</td>' +
+                        '<td class="px-4 py-3 text-sm max-w-xs"><span class="block truncate align-middle" title="' + esc(a.description) + '">' + esc(truncate(a.description, 40)) + '</span>'
+                        + (a.attachment_note ? '<span class="text-xs text-gray-400 block mt-0.5 truncate">附：' + esc(a.attachment_note) + '</span>' : '') + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(a.create_time) + '</td>' +
+                        '<td class="px-4 py-3">' + statusBadge(a.status) + '</td>' +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(a.archived_at) + '</td>';
+                    tbody.appendChild(tr);
+                });
+            }
+
+            async function loadMeta() {
+                try {
+                    const meta = await apiFetch('api/requests/archive/meta');
+                    el('archiveMeta').textContent =
+                        '归档阈值 ' + meta.archive_days + ' 天 · 已归档 ' + meta.archived_total + ' 条'
+                        + (meta.last_run ? ' · 上次归档 ' + fmtTime(meta.last_run) : ' · 尚未归档过');
+                } catch (error) {
+                    el('archiveMeta').textContent = '';
+                }
+            }
+
+            async function archiveNow() {
+                if (!window.confirm('确认立即执行归档？超过阈值天数的申请单将移入归档表。')) return;
+                try {
+                    const result = await apiFetch('api/requests/archive-now', { method: 'POST' });
+                    notify('归档完成，共 ' + result.archived + ' 条', 'success');
+                    loadMeta();
+                    loadRecent();
+                    if (!el('panelArchived').classList.contains('hidden')) loadArchive();
+                } catch (error) {
+                    notify(error.message, 'error');
+                }
+            }
+
+            // ---------- 标签页 ----------
+            function switchTab(tab) {
+                const isRecent = tab === 'recent';
+                el('panelRecent').classList.toggle('hidden', !isRecent);
+                el('panelArchived').classList.toggle('hidden', isRecent);
+                const recentBtn = el('tabRecent');
+                const archivedBtn = el('tabArchived');
+                recentBtn.className = 'px-6 py-3 text-sm font-medium border-b-2 ' + (isRecent ? 'border-primary text-primary' : 'border-transparent text-gray-500 hover:text-gray-700');
+                archivedBtn.className = 'px-6 py-3 text-sm font-medium border-b-2 ' + (isRecent ? 'border-transparent text-gray-500 hover:text-gray-700' : 'border-primary text-primary');
+                if (isRecent) loadRecent();
+                else loadArchive();
+            }
+
+            el('tabRecent').addEventListener('click', function () { switchTab('recent'); });
+            el('tabArchived').addEventListener('click', function () { switchTab('archived'); });
+            el('filterCategory').addEventListener('change', loadRecent);
+            el('filterStatus').addEventListener('change', loadRecent);
+            el('archiveNowBtn').addEventListener('click', archiveNow);
+            el('archivePrevBtn').addEventListener('click', function () {
+                if (archivePage > 1) { archivePage -= 1; loadArchive(); }
+            });
+            el('archiveNextBtn').addEventListener('click', function () {
+                if (!el('archiveNextBtn').disabled) { archivePage += 1; loadArchive(); }
+            });
+
+            function updateArchivePager() {
+                const totalPages = Math.max(1, Math.ceil(archiveTotal / ARCHIVE_PAGE_SIZE));
+                if (archivePage > totalPages) archivePage = totalPages;
+                el('archivePageInfo').textContent = archivePage + ' / ' + totalPages;
+                el('archivePrevBtn').disabled = archivePage <= 1;
+                el('archiveNextBtn').disabled = archivePage >= totalPages;
+            }
+
+            // 初始加载
+            loadMeta();
+            loadRecent();
+        })();
+    </script>
+</body>
+</html>
