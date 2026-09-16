@@ -26,11 +26,11 @@ from datetime import datetime, timedelta
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request as FastAPIRequest
-from sqlalchemy import or_, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.models import Config, Goods, Request, RequestArchive, RequestItem, RequestItemArchive, RequestStatus, User, UserRole
+from core.models import Config, Goods, Request, RequestArchive, RequestItem, RequestItemArchive, RequestStatus, Stock, User, UserRole
 from core.schemas import (
     RequestArchiveResponse,
     RequestItemResponse,
@@ -110,8 +110,9 @@ def search_goods_public(
 ):
     """按条码/名称模糊搜索货物，供免登录申请页选择相关货物。
 
-    安全边界：仅返回 条码/名称/规格/单位 四个非敏感字段（不含单价等），
-    单次最多 20 条，独立限流桶防止被用来枚举全量货物目录。
+    安全边界：仅返回 条码/名称/规格/单位 + 可用库存（全仓合计数量）等非敏感字段
+    （不含单价等）；可用库存为产品需求——申请人在申请页选备件时直接看到现有库存，
+    便于判断是否足够/是否需要走采购。单次最多 20 条，独立限流桶防止被用来枚举全量货物目录。
     """
     keyword = (q or "").strip()
     if not keyword:
@@ -119,15 +120,31 @@ def search_goods_public(
     _check_search_rate_limit(_client_ip(request))
     like = f"%{keyword}%"
     rows = (
-        db.query(Goods.barcode, Goods.name, Goods.spec, Goods.unit)
+        db.query(Goods.id, Goods.barcode, Goods.name, Goods.spec, Goods.unit)
         .filter(or_(Goods.barcode.like(like), Goods.name.like(like)))
         .order_by(Goods.id)
         .limit(20)
         .all()
     )
+    if not rows:
+        return []
+    # 可用库存 = 该货物在所有仓库/库位的库存数量合计（无库存行视为 0）
+    stock_map = dict(
+        db.query(Goods.id, func.coalesce(func.sum(Stock.quantity), 0))
+        .join(Stock, Stock.goods_id == Goods.id)
+        .filter(Goods.id.in_([r[0] for r in rows]))
+        .group_by(Goods.id)
+        .all()
+    )
     return [
-        {"barcode": b, "name": n or "", "spec": s or "", "unit": u or ""}
-        for (b, n, s, u) in rows
+        {
+            "barcode": b,
+            "name": n or "",
+            "spec": s or "",
+            "unit": u or "",
+            "available_stock": float(stock_map.get(gid) or 0),
+        }
+        for (gid, b, n, s, u) in rows
     ]
 
 @router.post("/requests/", status_code=201, summary="提交申请（免登录）")
