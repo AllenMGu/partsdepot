@@ -283,6 +283,7 @@ class Request(Base):
     status = Column(String(20), default=RequestStatus.PENDING.value, index=True, comment="状态: pending/approved/rejected")
     handler_name = Column(String(100), comment="处理人")
     handle_time = Column(DateTime, comment="处理时间")
+    outbound_order_no = Column(String(50), index=True, comment="出库单号（审批通过自动生成出库单时写入；无明细仅留痕的单为空）")
     create_time = Column(DateTime, default=datetime.now, index=True)
     update_time = Column(DateTime, default=datetime.now, onupdate=datetime.now)
     # ORM 级联（评审 P1 方案 A）：对象级删除 Request 时连同明细删除；
@@ -315,6 +316,7 @@ class RequestArchive(Base):
     update_time = Column(DateTime, comment="原最后更新时间")
     archived_at = Column(DateTime, default=datetime.now, comment="归档时间")
     archive_batch = Column(String(20), index=True, comment="归档批次，如 2026-10")
+    outbound_order_no = Column(String(50), comment="出库单号（归档时从原申请单保留）")
 
 # 12.3 申请单货物明细（一行一种货物，提交时按条码查库快照；替代 requests 单货物字段）
 class RequestItem(Base):
@@ -364,6 +366,9 @@ if engine.dialect.name == "postgresql":
             "ALTER TABLE requests ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id)"))
         _mig_conn.execute(text(
             "ALTER TABLE requests_archive ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id)"))
+        # 出库单号（审批通过自动生成出库单）：新增可空列，存量行保持 NULL（历史已审批单无出库单）。
+        _mig_conn.execute(text("ALTER TABLE requests ADD COLUMN IF NOT EXISTS outbound_order_no VARCHAR(50)"))
+        _mig_conn.execute(text("ALTER TABLE requests_archive ADD COLUMN IF NOT EXISTS outbound_order_no VARCHAR(50)"))
 else:
     # SQLite：ADD COLUMN 无 IF NOT EXISTS，先查 information_schema 等价物（PRAGMA）再补列，
     # 保证重复启动幂等。
@@ -378,3 +383,9 @@ else:
     if not _sqlite_has_col("requests_archive", "warehouse_id"):
         with engine.begin() as _mig_conn:
             _mig_conn.execute(text("ALTER TABLE requests_archive ADD COLUMN warehouse_id INTEGER"))
+    if not _sqlite_has_col("requests", "outbound_order_no"):
+        with engine.begin() as _mig_conn:
+            _mig_conn.execute(text("ALTER TABLE requests ADD COLUMN outbound_order_no VARCHAR(50)"))
+    if not _sqlite_has_col("requests_archive", "outbound_order_no"):
+        with engine.begin() as _mig_conn:
+            _mig_conn.execute(text("ALTER TABLE requests_archive ADD COLUMN outbound_order_no VARCHAR(50)"))

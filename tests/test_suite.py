@@ -744,6 +744,80 @@ _rl2_headers = {"X-Real-IP": "8.8.8.88"}
 _rl2_codes = [req("GET", "/api/public/stock-lookup?warehouse_id=" + str(W2) + "&barcodes=G003", headers=_rl2_headers)[0] for _ in range(31)]
 check("批量限流：同一 IP 第 31 次 → 429（与搜索同桶）", _rl2_codes[:30] == [200] * 30 and _rl2_codes[30] == 429, f"codes={_rl2_codes}")
 
+# 15k. 审批通过 → 自动生成出库单（产品需求：确认后出库必须有出库单）
+import re as _re
+_HK1 = {"X-Real-IP": "8.8.8.91"}
+_HK2 = {"X-Real-IP": "8.8.8.92"}
+
+def _outbound_count():
+    s_r, r_rows = req("GET", "/api/outbound-orders/", token=admin)
+    return len(r_rows) if isinstance(r_rows, list) else -1
+
+_before_cnt = _outbound_count()
+_w1_before_k = _w1_g001_total()
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "出库单测试", "contact": "out@test.com",
+    "description": "审批通过生成出库单", "warehouse_id": W1,
+    "items": [{"barcode": "G001", "quantity": 2}]}, headers=_HK1)
+check("出库单：带货物申请可提交（201）", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
+_kid = (b or {}).get("id")
+s, b = req("POST", f"/api/requests/{_kid}/status", {"status": "approved"}, admin)
+_k_no = (b or {}).get("outbound_order_no") if isinstance(b, dict) else None
+check("出库单：审批通过 → 200，响应含 outbound_order_no（OUT+日期+3位序号）",
+      s == 200 and bool(_re.fullmatch(r"OUT\d{11}", _k_no or "")), f"status={s} no={_k_no} body={b}")
+check("出库单：扣减照常（W1 G001 恰减 2）", abs((_w1_before_k - _w1_g001_total()) - 2) < 1e-6,
+      f"before={_w1_before_k} after={_w1_g001_total()}")
+s, b = req("GET", "/api/outbound-orders/", token=admin)
+_kord = next((o for o in (b or []) if isinstance(o, dict) and o.get("order_no") == _k_no), None)
+check("出库单：出库单列表可见（COMPLETED / 仓库=一号仓 / 客户=申请人）",
+      isinstance(_kord, dict) and _kord.get("status") == "COMPLETED"
+      and _kord.get("warehouse_id") == W1 and _kord.get("customer") == "出库单测试", f"order={_kord}")
+_koid = (_kord or {}).get("id")
+s, b = req("GET", f"/api/outbound-orders/{_koid}", token=admin)
+_kit = (b or {}).get("items") if isinstance(b, dict) else None
+check("出库单：明细与实际扣减一致（G001 x2、单价10、金额20）",
+      isinstance(_kit, list) and len(_kit) >= 1
+      and all(i.get("goods_barcode") == "G001" for i in _kit)
+      and any(abs(i.get("quantity", 0) - 2) < 1e-6 for i in _kit)
+      and abs(((b or {}).get("total_amount") or 0) - 20) < 1e-6, f"body={b}")
+_recs = db_execute("SELECT remark FROM inventory_records WHERE type='OUT' AND remark LIKE :pat", {"pat": f"%{_k_no}%"})
+check("出库单：出库流水备注含出库单号（申请单↔流水↔出库单可追溯）", bool(_recs), f"recs={_recs}")
+s, rows = req("GET", "/api/requests/", token=admin)
+_krow = next((r for r in (rows or []) if isinstance(r, dict) and r.get("id") == _kid), None)
+check("出库单：近期列表行含 outbound_order_no（管理页详情弹窗展示）",
+      isinstance(_krow, dict) and _krow.get("outbound_order_no") == _k_no, f"row={_krow}")
+# 无明细：通过仅留痕，不生成出库单
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "出库单测试", "contact": "out2@test.com",
+    "description": "无货物明细", "warehouse_id": W1}, headers=_HK2)
+_ni2 = (b or {}).get("id")
+s, b = req("POST", f"/api/requests/{_ni2}/status", {"status": "approved"}, admin)
+check("出库单：无明细通过仅留痕，不生成出库单（outbound_order_no 为空）",
+      s == 200 and ((b or {}).get("outbound_order_no") in (None, "")), f"status={s} body={b}")
+check("出库单：无明细审批未新增出库单", _outbound_count() == _before_cnt + 1,
+      f"before={_before_cnt} now={_outbound_count()}")
+# 库存不足：400 且同事务不留下半成品出库单
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "出库单测试", "contact": "out3@test.com",
+    "description": "超额", "warehouse_id": W1,
+    "items": [{"barcode": "G001", "quantity": 999999}]}, headers=_HK2)
+_ov2 = (b or {}).get("id")
+s, b = req("POST", f"/api/requests/{_ov2}/status", {"status": "approved"}, admin)
+check("出库单：库存不足 → 400 且未生成出库单（整体回滚）",
+      s == 400 and _outbound_count() == _before_cnt + 1, f"status={s} body={b} cnt={_outbound_count()}")
+# 重复审批：409，仍只有一张出库单（不重复生成）
+s, b = req("POST", f"/api/requests/{_kid}/status", {"status": "approved"}, admin)
+check("出库单：重复审批 → 409，出库单仍一张（不重单）",
+      s == 409 and _outbound_count() == _before_cnt + 1, f"status={s} body={b}")
+# 归档：归档行保留出库单号
+db_execute("update requests set create_time = :ts where id = :i", {"ts": _old, "i": _kid})
+s, b = req("POST", "/api/requests/archive-now", {}, admin)
+check("出库单：归档执行成功", s == 200 and (b or {}).get("archived", 0) >= 1, f"status={s} body={b}")
+s, arows = req("GET", "/api/requests/archive/?page=1&page_size=50", token=admin)
+_ka = next((a for a in (arows or []) if isinstance(a, dict) and a.get("original_id") == _kid), None)
+check("出库单：归档行保留 outbound_order_no（归档后详情仍可查）",
+      isinstance(_ka, dict) and _ka.get("outbound_order_no") == _k_no, f"row={_ka}")
+
 # ---------- 汇总 ----------
 fails = [r for r in results if not r[1]]
 print(f"\n===== 汇总：{len(results)-len(fails)}/{len(results)} 通过 =====")

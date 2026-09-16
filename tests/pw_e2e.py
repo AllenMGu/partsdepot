@@ -550,6 +550,39 @@ with sync_playwright() as p:
         _v = stock_of("8888001", whid)
         check("扣库存：重复通过失败后库存不变（一号仓轴承仍 9）", _v == 9.0, _v)
 
+    # ---------- 出库单（产品需求：申请确认后出库，必须有出库单） ----------
+    # -0001 通过（轴承 x3 + 垫片 x2 @一号仓）应生成一张 COMPLETED 出库单（出库单模块可见）
+    ob_list = api_call("GET", "api/outbound-orders/")
+    check("出库单：出库单列表可访问且非空",
+          ob_list["status"] == 200 and isinstance(ob_list["data"], list) and len(ob_list["data"]) >= 1,
+          ob_list["status"])
+    ob = next((o for o in (ob_list["data"] or [])
+               if isinstance(o, dict) and o.get("customer") == "浏览器测试" and o.get("status") == "COMPLETED"), None)
+    check("出库单：-0001 生成出库单（COMPLETED / 客户=浏览器测试 / 一号仓）",
+          ob is not None and ob.get("warehouse_name") == "一号仓", ob)
+    if ob is not None:
+        obd = api_call("GET", "api/outbound-orders/%s" % ob["id"])
+        ob_items = (obd["data"] or {}).get("items") or []
+        check("出库单：明细=轴承 3 + 垫片 2（与实际扣减一致）",
+              obd["status"] == 200 and len(ob_items) == 2
+              and any("轴承" in (i.get("goods_name") or "") and abs(i.get("quantity", 0) - 3) < 1e-6 for i in ob_items)
+              and any("垫片" in (i.get("goods_name") or "") and abs(i.get("quantity", 0) - 2) < 1e-6 for i in ob_items),
+              ob_items)
+        check("出库单：总金额 = 3x10 + 2x8 = 46",
+              abs(((obd["data"] or {}).get("total_amount") or 0) - 46) < 1e-6, obd["data"])
+        # 管理页详情弹窗：出库单号展示
+        for i in range(1, 12):
+            tr = page.locator("#recentBody tr:nth-child(%d)" % i)
+            if "-0001" in tr.inner_text():
+                tr.click()
+                break
+        page.wait_for_selector("#detailModal:not(.hidden)")
+        _info = page.locator("#detailInfo").inner_text()
+        check("出库单：详情弹窗显示出库单号", "出库单" in _info and ob["order_no"] in _info, _info)
+        check("出库单：弹窗提示出库单模块可查", "出库单模块可查" in _info, _info)
+        page.keyboard.press("Escape")
+        page.wait_for_selector("#detailModal", state="hidden")
+
     # ---------- 双仓审批（评审 P1：审批扣减仓库 = 申请仓库 = 页面展示仓库） ----------
     # 取 -0002 申请单 id（二号仓 密封圈 x50）
     r3_id = page.evaluate("""() => {

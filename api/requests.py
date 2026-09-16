@@ -33,7 +33,9 @@ from sqlalchemy.orm import Session
 from core.models import (
     Config, Goods, InventoryRecord, InventoryType, Request, RequestArchive,
     RequestItem, RequestItemArchive, RequestStatus, Stock, User, UserRole, Warehouse,
+    OutboundOrderHeader, OutboundOrderItem,
 )
+from core.order_utils import generate_order_no
 from core.schemas import (
     RequestArchiveResponse,
     RequestItemResponse,
@@ -370,6 +372,7 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
             status=r.status,
             handler_name=r.handler_name,
             handle_time=r.handle_time,
+            outbound_order_no=r.outbound_order_no,
             create_time=r.create_time,
             update_time=r.update_time,
             archived_at=now,
@@ -470,6 +473,7 @@ def _request_payload(r: Request, items: list, warehouse_name: Optional[str] = No
         "status": r.status,
         "handler_name": r.handler_name,
         "handle_time": r.handle_time,
+        "outbound_order_no": r.outbound_order_no,
         "create_time": r.create_time,
         "update_time": r.update_time,
     }
@@ -490,6 +494,7 @@ def _request_payload_archive(a: RequestArchive, items: list, warehouse_name: Opt
         "status": a.status,
         "handler_name": a.handler_name,
         "handle_time": a.handle_time,
+        "outbound_order_no": a.outbound_order_no,
         "create_time": a.create_time,
         "update_time": a.update_time,
         "archived_at": a.archived_at,
@@ -549,8 +554,13 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
       则默认该仓；多仓且未指定 → 拒绝（无法确定扣哪个仓，要求重新提交）；
     - 同一货物多行明细汇总为需求数量；
     - 库存行按行 id 顺序（库位先后）逐行扣减至需求满足；
-    - 库存不足 → 400，库存不变；
+    - 库存不足 → 400，库存不变（出库单同事务创建，失败一并回滚，不留半成品单据）；
     - 每条被扣减的库存行写一条出库流水（inventory_records），出入库记录可追溯；
+    - **出库单**（产品需求：确认后出库必须有出库单）：同事务生成一张 COMPLETED 状态
+      的出库单（outbound_order_header/item，出库单模块既有表结构与列表页直接可见），
+      单号走 generate_order_no("OUT") 既有号段（PG 咨询锁防并发撞号）；
+      明细按实际扣减的 (货物,库位) 行逐条落（数量=该行实扣，单价=货物档案价）；
+      申请单回填 outbound_order_no（归档时随原单保留），双向可查；
     - 并发安全：先锁申请单行（调用方），再按**货物 id 升序**（sorted）逐货 FOR UPDATE
       锁该 (仓库,货物) 全部库存行，同一货物内再按 Stock.id 顺序锁行——
       全局加锁顺序确定，两个多货明细单反序并发审批不会死锁（PostgreSQL；
@@ -569,12 +579,14 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
     # 需求数量（同一货物多行汇总；提交时条码已校验存在，此处按条码回查货物）
     required: dict = {}
     names: dict = {}
+    gprice: dict = {}
     for it in items:
         g = db.query(Goods).filter(Goods.barcode == it.barcode).order_by(Goods.id).first()
         if g is None:
             raise HTTPException(status_code=400, detail=f"货物 {it.barcode} 已不存在，无法扣减库存（请联系管理员处理）")
         required[g.id] = required.get(g.id, 0.0) + (it.quantity or 0)
         names[g.id] = g.name or it.name or it.barcode
+        gprice[g.id] = g.price
 
     # 仓库解析
     warehouse_id = req.warehouse_id
@@ -598,6 +610,10 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
         )
 
     reference = f"APP-{req.create_time:%Y%m%d}-{req.id:04d}"
+    # 出库单号先取号（号段内最大尾号+1，PG 咨询锁串行化）：审批任一步失败整体回滚，
+    # 单号随事务释放（未提交不占号），不会留下"有单号无单据"的孤儿
+    order_no = generate_order_no("OUT", db)
+    out_items: list = []  # [(goods_id, location_id, 实扣数量, 单价)]
     # 按货物 id 升序处理：全局加锁顺序确定，反序明细的并发审批不会死锁
     for goods_id, qty in sorted(required.items()):
         rows_q = db.query(Stock).filter(
@@ -627,6 +643,8 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
             r.quantity = (r.quantity or 0) - take
             r.update_time = now
             remaining -= take
+            price = gprice.get(goods_id) or 0.0
+            out_items.append((goods_id, r.location_id, take, price))
             db.add(InventoryRecord(
                 warehouse_id=warehouse_id,
                 goods_id=goods_id,
@@ -634,8 +652,39 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
                 type=InventoryType.OUT,
                 quantity=take,
                 operator_id=current_user.id,
-                remark=f"申请单 {reference} 通过扣减",
+                remark=f"申请单 {reference} 通过扣减（出库单 {order_no}）",
             ))
+
+    # 出库单（同事务）：表头 COMPLETED + 按实扣 (货物,库位) 落明细；申请单回填单号。
+    # 客户=申请人（出库对象），操作员=审批人（执行出库动作的人）。
+    now = datetime.now()
+    total_amount = sum(qty * (price or 0.0) for _, _, qty, price in out_items)
+    order = OutboundOrderHeader(
+        order_no=order_no,
+        warehouse_id=warehouse_id,
+        customer=req.applicant_name,
+        operator_id=current_user.id,
+        total_amount=total_amount,
+        remark=(f"申请单 {reference} 审批通过自动出库"
+                f"（申请人：{req.applicant_name}；邮箱：{req.contact}）")[:500],
+        status="COMPLETED",
+        create_time=now,
+        submit_time=now,
+        complete_time=now,
+    )
+    db.add(order)
+    db.flush()  # 取单据头 id 挂明细
+    for goods_id, location_id, take, price in out_items:
+        db.add(OutboundOrderItem(
+            header_id=order.id,
+            goods_id=goods_id,
+            location_id=location_id,
+            quantity=take,
+            unit_price=price,
+            total_price=take * (price or 0.0),
+            remark=f"申请单 {reference}",
+        ))
+    req.outbound_order_no = order_no
 
 @router.post("/requests/{id}/status", response_model=RequestResponse, summary="通过/驳回申请单（管理员）")
 def set_request_status(
