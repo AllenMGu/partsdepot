@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ySg3vmez06QOvqkN2US5UnWLwzMuBWisvUjahuWL+Lw='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-9Hlm1es+J0boUWP1VypCDgRgaeOl6HClv/a2EzUCP8I='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -55,6 +55,14 @@
                                 <input type="email" id="contact" name="contact" maxlength="200"
                                        class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
                                        placeholder="您的邮箱" required>
+                            </div>
+                            <div>
+                                <label for="warehouseId" class="block text-sm font-medium text-gray-700 mb-1">申请仓库 <span class="text-red-500">*</span></label>
+                                <select id="warehouseId" name="warehouse_id"
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300">
+                                    <option value="">仓库列表加载中…</option>
+                                </select>
+                                <p class="text-xs text-gray-400 mt-1">申请通过后，将从该仓库扣减所选货物的库存</p>
                             </div>
                         </div>
 
@@ -152,6 +160,38 @@
                 errorBox.classList.remove('hidden');
                 errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
+
+            // ---------- 申请仓库（必选：审批通过后从该仓库扣减库存） ----------
+            const warehouseSelect = document.getElementById('warehouseId');
+            let warehousesReady = false;
+            async function loadWarehouses() {
+                try {
+                    const resp = await fetch('api/public/warehouses');
+                    const data = await resp.json().catch(function () { return []; });
+                    if (!resp.ok || !Array.isArray(data)) {
+                        throw new Error((data && data.detail) || ('HTTP ' + resp.status));
+                    }
+                    if (!data.length) {
+                        warehouseSelect.innerHTML = '<option value="">系统暂无启用仓库，无法提交申请</option>';
+                        warehouseSelect.disabled = true;
+                        return;
+                    }
+                    warehouseSelect.innerHTML = '';
+                    data.forEach(function (w) {
+                        const opt = document.createElement('option');
+                        opt.value = String(w.id);
+                        opt.textContent = w.name ? (w.name + (w.code ? '（' + w.code + '）' : '')) : (w.code || ('仓库#' + w.id));
+                        warehouseSelect.appendChild(opt);
+                    });
+                    warehouseSelect.value = String(data[0].id);  // 默认选中第一个
+                    warehousesReady = true;
+                } catch (e) {
+                    warehouseSelect.innerHTML = '<option value="">仓库列表加载失败，请刷新页面重试</option>';
+                    warehouseSelect.disabled = true;
+                    showError('仓库列表加载失败：' + e.message);
+                }
+            }
+            loadWarehouses();
 
             // ---------- 相关货物（选填，多行：添加行 → 行内搜索选择备件 → 显示可用库存） ----------
             // 每行状态：{ rowId: 稳定id, picked: bool, g: {barcode,name,spec,unit,available_stock}|null, qty: '', keyword: '' }
@@ -444,6 +484,16 @@
                     showError('请填写带 * 的必填项');
                     return;
                 }
+                if (!warehousesReady) {
+                    showError('仓库列表尚未加载完成，请刷新页面重试');
+                    return;
+                }
+                const warehouseId = parseInt(warehouseSelect.value, 10);
+                if (!isFinite(warehouseId) || warehouseId <= 0) {
+                    showError('请选择申请仓库');
+                    return;
+                }
+                payload.warehouse_id = warehouseId;
                 if (payload.contact.length < 3) {
                     showError('邮箱至少 3 个字符');
                     return;

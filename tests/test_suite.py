@@ -423,7 +423,8 @@ def _first_item(r):
 
 s, b = req("POST", "/api/requests/", {
     "applicant_name": "货物测试", "contact": "user@example.com",
-    "description": "带货物申请", "items": [{"barcode": "G001", "quantity": 2}]})
+    "description": "带货物申请", "warehouse_id": W1,
+    "items": [{"barcode": "G001", "quantity": 2}]})
 check("带货物提交：明细行 条码+数量 → 201", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
 rid = (b or {}).get("id")
 check("带货物提交：响应含 id/reference/message", isinstance(b, dict) and b.get("id") and b.get("reference") and b.get("message"), f"body={b}")
@@ -477,15 +478,48 @@ check("防伪造：落库名称=数据库真实名称，客户端伪造字段被
       isinstance(_r2, dict) and isinstance(_r2.get("items"), list)
       and _first_item(_r2).get("name") == "测试物料" and _first_item(_r2).get("spec") == "规格-1"
       and _first_item(_r2).get("unit") == "台", f"row={_r2}")
+# v2 仓库字段：指定仓库的申请单在列表响应中带 warehouse_id + warehouse_name
+check("仓库字段：列表行含 warehouse_id/warehouse_name（一号仓）",
+      isinstance(_r, dict) and _r.get("warehouse_id") == W1 and _r.get("warehouse_name") == "一号仓",
+      f"row={ {k: _r.get(k) for k in ('id','warehouse_id','warehouse_name')} if isinstance(_r, dict) else _r }")
+# 公开仓库列表端点（申请页仓库下拉用）：仅 id/code/name 非敏感字段
+s, whs = req("GET", "/api/public/warehouses")
+check("仓库接口：public/warehouses 返回 W1/W2，字段仅 id/code/name",
+      s == 200 and isinstance(whs, list) and len(whs) == 2
+      and all(set(w.keys()) == {"id", "code", "name"} for w in whs)
+      and any(w.get("id") == W1 and w.get("name") == "一号仓" for w in whs), f"status={s} whs={whs}")
+s, whs = req("GET", "/api/public/warehouses", headers={"X-Real-IP": "9.9.9.98"})
+check("仓库接口：X-Real-IP 限流桶独立（另一 IP 不受影响）", s == 200 and isinstance(whs, list), f"status={s}")
 # 15d. 归档拷贝：回拨提交时间越过阈值(30天) → 通过 → 立即归档
+# v2：通过 = 从申请仓库（W1）扣减库存——审批前后 W1 的 G001 库存恰好减少 2
 from datetime import datetime as _dt, timedelta as _td
 _old = (_dt.now() - _td(days=40)).strftime("%Y-%m-%d %H:%M:%S")
+
+def _w1_g001_total():
+    s_r, r_rows = req("GET", "/api/stock/?goods_barcode=G001", token=admin)
+    return sum(r.get("quantity", 0) for r in (r_rows or [])
+               if isinstance(r, dict) and r.get("goods_barcode") == "G001" and r.get("warehouse_id") == W1)
+
+_w1_before = _w1_g001_total()
+check("扣库存前置：W1 现有 G001 库存 ≥ 2（该申请可通过）", _w1_before >= 2, f"w1_total={_w1_before}")
 db_execute("update requests set create_time = :ts where id = :i", {"ts": _old, "i": rid})
 s, b = req("POST", f"/api/requests/{rid}/status", {"status": "approved"}, admin)
-check("归档测试：通过带货物的申请单", s == 200, f"status={s} body={b}")
+check("归档测试：通过带货物的申请单（通过即扣库存）", s == 200, f"status={s} body={b}")
 check("状态更新响应：items 为真实明细（契约一致，非空数组）",
       s == 200 and isinstance(b, dict) and isinstance(b.get("items"), list) and len(b["items"]) == 1
       and b["items"][0].get("barcode") == "G001" and b["items"][0].get("quantity") == 2, f"body={b}")
+_w1_after = _w1_g001_total()
+check("扣库存：通过后 W1 G001 库存恰好减少 2", abs((_w1_before - _w1_after) - 2) < 1e-6,
+      f"before={_w1_before} after={_w1_after}")
+_recs = db_execute(
+    "SELECT quantity, remark FROM inventory_records WHERE type='OUT' AND remark LIKE '%通过扣减%'")
+check("扣库存：写出库流水（数量=2，备注含申请单号 APP-）",
+      bool(_recs) and any(abs(r[0] - 2) < 1e-6 and "APP-" in (r[1] or "") for r in _recs),
+      f"records={_recs}")
+# 状态机：重复通过被拦截（409），且库存不再变动
+s, b = req("POST", f"/api/requests/{rid}/status", {"status": "approved"}, admin)
+check("状态机：重复通过 → 409（已处理不可再处理）", s == 409 and "已处理" in str(b), f"status={s} body={b}")
+check("状态机：重复通过被拦截后库存不再变动", _w1_g001_total() == _w1_after, f"now={_w1_g001_total()} expect={_w1_after}")
 s, b = req("POST", "/api/requests/archive-now", {}, admin)
 check("归档测试：立即归档 → archived ≥ 1", s == 200 and isinstance(b, dict) and (b.get("archived") or 0) >= 1, f"status={s} body={b}")
 s, arows = req("GET", "/api/requests/archive/?page=1&page_size=10", token=admin)
@@ -495,6 +529,9 @@ check("归档拷贝：货物明细字段完整",
       and _first_item(_a).get("barcode") == "G001" and _first_item(_a).get("name") == "测试物料"
       and _first_item(_a).get("spec") == "规格-1" and _first_item(_a).get("unit") == "台"
       and _first_item(_a).get("quantity") == 2, f"row={_a}")
+check("归档拷贝：仓库字段保留（warehouse_id/warehouse_name）",
+      isinstance(_a, dict) and _a.get("warehouse_id") == W1 and _a.get("warehouse_name") == "一号仓",
+      f"row={ {k: _a.get(k) for k in ('original_id','warehouse_id','warehouse_name')} if isinstance(_a, dict) else _a }")
 s, rows = req("GET", "/api/requests/", token=admin)
 check("归档：该申请单已从近期列表移走", all(isinstance(r, dict) and r.get("id") != rid for r in (rows or [])), f"rows={[r.get('id') for r in (rows or [])]}")
 _orphan = db_execute("SELECT COUNT(*) FROM request_items WHERE request_id = :rid", {"rid": rid})
@@ -503,6 +540,65 @@ check("P1 回归：归档后 request_items 无孤儿行（原单明细已删，�
 # 15e. 归档列表分页参数生效
 s, a1 = req("GET", "/api/requests/archive/?page=1&page_size=1", token=admin)
 check("归档分页：page_size=1 → 恰好 1 条", s == 200 and isinstance(a1, list) and len(a1) == 1, f"status={s} len={len(a1) if isinstance(a1, list) else a1}")
+
+# 15f. v2 通过即扣库存：不足拦截 / 多仓未指定 / 驳回不动库存 / 无明细仅留痕
+# 注：15c 已用掉本 IP 提交限流额度（10 次/10 分钟），新增提交走不同 X-Real-IP 桶
+_H1 = {"X-Real-IP": "8.8.8.81"}
+_H2 = {"X-Real-IP": "8.8.8.82"}
+_H3 = {"X-Real-IP": "8.8.8.83"}
+_H4 = {"X-Real-IP": "8.8.8.84"}
+_w1_floor = _w1_g001_total()
+
+# 库存不足：申请量远超 W1 现有 → 通过被拒（400），库存不变，申请单仍待处理
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "库存测试", "contact": "stock@test.com",
+    "description": "超额申请", "warehouse_id": W1,
+    "items": [{"barcode": "G001", "quantity": 999999}]}, headers=_H1)
+check("不足拦截：超额申请可提交（201，待处理）", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
+_over_id = (b or {}).get("id")
+s, b = req("POST", f"/api/requests/{_over_id}/status", {"status": "approved"}, admin)
+check("不足拦截：通过被拒（400，信息含需要/现有）",
+      s == 400 and "库存不足" in str(b) and "需要" in str(b) and "现有" in str(b), f"status={s} body={b}")
+check("不足拦截：库存不变", _w1_g001_total() == _w1_floor, f"now={_w1_g001_total()} floor={_w1_floor}")
+s, rows = req("GET", "/api/requests/", token=admin)
+_over_row = next((r for r in (rows or []) if isinstance(r, dict) and r.get("id") == _over_id), None)
+check("不足拦截：申请单仍为待处理（可再处理）",
+      isinstance(_over_row, dict) and _over_row.get("status") == "pending", f"row={_over_row}")
+
+# 多仓（W1/W2 均启用）+ 申请单未指定仓库 → 无法确定扣哪个仓，通过被拒
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "仓库测试", "contact": "wh@test.com",
+    "description": "未指定仓库的申请",
+    "items": [{"barcode": "G001", "quantity": 1}]}, headers=_H2)
+check("多仓拦截：未指定仓库的申请可提交（201）", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
+_nowh_id = (b or {}).get("id")
+s, b = req("POST", f"/api/requests/{_nowh_id}/status", {"status": "approved"}, admin)
+check("多仓拦截：多启用仓且未指定仓库 → 通过被拒（400，提示重新提交）",
+      s == 400 and "仓库" in str(b) and "无法确定" in str(b), f"status={s} body={b}")
+check("多仓拦截：库存不变", _w1_g001_total() == _w1_floor, f"now={_w1_g001_total()}")
+
+# 驳回：不动库存；重复驳回被拦截（409）
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "驳回测试", "contact": "rej@test.com",
+    "description": "驳回流程", "warehouse_id": W1,
+    "items": [{"barcode": "G001", "quantity": 1}]}, headers=_H3)
+check("驳回：申请可提交（201）", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
+_rej_id = (b or {}).get("id")
+s, b = req("POST", f"/api/requests/{_rej_id}/status", {"status": "rejected"}, admin)
+check("驳回：驳回成功（200）且库存不变",
+      s == 200 and _w1_g001_total() == _w1_floor, f"status={s} body={b} stock={_w1_g001_total()}")
+s, b = req("POST", f"/api/requests/{_rej_id}/status", {"status": "rejected"}, admin)
+check("状态机：重复驳回 → 409", s == 409 and "已处理" in str(b), f"status={s} body={b}")
+
+# 无货物明细：通过仅留痕，不动库存、不写流水
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "无明细", "contact": "ni@test.com",
+    "description": "无货物明细", "warehouse_id": W1}, headers=_H4)
+check("无明细：申请可提交（201）", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
+_ni_id = (b or {}).get("id")
+s, b = req("POST", f"/api/requests/{_ni_id}/status", {"status": "approved"}, admin)
+check("无明细：通过成功（200，仅留痕不动库存）",
+      s == 200 and _w1_g001_total() == _w1_floor, f"status={s} body={b} stock={_w1_g001_total()}")
 
 # ---------- 汇总 ----------
 fails = [r for r in results if not r[1]]

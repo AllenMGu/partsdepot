@@ -30,7 +30,10 @@ from sqlalchemy import func, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from core.models import Config, Goods, Request, RequestArchive, RequestItem, RequestItemArchive, RequestStatus, Stock, User, UserRole
+from core.models import (
+    Config, Goods, InventoryRecord, InventoryType, Request, RequestArchive,
+    RequestItem, RequestItemArchive, RequestStatus, Stock, User, UserRole, Warehouse,
+)
 from core.schemas import (
     RequestArchiveResponse,
     RequestItemResponse,
@@ -147,6 +150,24 @@ def search_goods_public(
         for (gid, b, n, s, u) in rows
     ]
 
+@router.get("/public/warehouses", summary="启用仓库列表（免登录，公开申请页仓库选择用）")
+def list_warehouses_public(
+    request: FastAPIRequest,
+    db: Session = Depends(get_db)
+):
+    """返回启用仓库的 id/code/name，供免登录申请页选择"申请仓库"。
+
+    安全边界：仅暴露 id/code/name 非敏感字段；与货物搜索共用独立限流桶，防止枚举滥用。
+    """
+    _check_search_rate_limit(_client_ip(request))
+    rows = (
+        db.query(Warehouse.id, Warehouse.code, Warehouse.name)
+        .filter(Warehouse.is_active.is_(True))
+        .order_by(Warehouse.id)
+        .all()
+    )
+    return [{"id": wid, "code": code or "", "name": name or ""} for (wid, code, name) in rows]
+
 @router.post("/requests/", status_code=201, summary="提交申请（免登录）")
 def submit_request(
     payload: RequestSubmit,
@@ -155,6 +176,13 @@ def submit_request(
 ):
     # 内网公共提交：限流 + 字段校验（Pydantic），不要求登录
     _check_rate_limit(_client_ip(request))
+
+    # 申请仓库（可选）：指定时必须为启用中的仓库（防写入失效 ID）；
+    # 不指定时允许提交（审批时按"唯一启用仓库"兜底或拒绝，见 _apply_approval）
+    if payload.warehouse_id is not None:
+        wh = db.query(Warehouse).filter(Warehouse.id == payload.warehouse_id).first()
+        if not wh or not wh.is_active:
+            raise HTTPException(status_code=422, detail=f"申请仓库不存在或已停用：{payload.warehouse_id}")
 
     # 相关货物（可选，可多行，快照存储）：每行只接受 条码+数量；名称/规格/单位一律由
     # 后端按条码精确查库填充（不信任客户端快照字段）；条码必须真实存在
@@ -178,6 +206,7 @@ def submit_request(
         category=(payload.category or "").strip() or None,
         description=payload.description.strip(),
         attachment_note=(payload.attachment_note or "").strip() or None,
+        warehouse_id=payload.warehouse_id,
         status=RequestStatus.PENDING.value,
     )
     db.add(new_request)
@@ -266,6 +295,7 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
             category=r.category,
             description=r.description,
             attachment_note=r.attachment_note,
+            warehouse_id=r.warehouse_id,
             status=r.status,
             handler_name=r.handler_name,
             handle_time=r.handle_time,
@@ -347,7 +377,14 @@ def _require_admin(current_user: User) -> None:
     if current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="申请单管理仅限管理员操作")
 
-def _request_payload(r: Request, items: list) -> dict:
+def _warehouse_name_map(db: Session, warehouse_ids: list) -> dict:
+    """仓库 id → 名称 映射（仅查出现过的 id，避免无关查询）。"""
+    ids = {wid for wid in warehouse_ids if wid is not None}
+    if not ids:
+        return {}
+    return dict(db.query(Warehouse.id, Warehouse.name).filter(Warehouse.id.in_(ids)).all())
+
+def _request_payload(r: Request, items: list, warehouse_name: Optional[str] = None) -> dict:
     return {
         "id": r.id,
         "applicant_name": r.applicant_name,
@@ -356,6 +393,8 @@ def _request_payload(r: Request, items: list) -> dict:
         "category": r.category,
         "description": r.description,
         "attachment_note": r.attachment_note,
+        "warehouse_id": r.warehouse_id,
+        "warehouse_name": warehouse_name,
         "items": items,
         "status": r.status,
         "handler_name": r.handler_name,
@@ -364,7 +403,7 @@ def _request_payload(r: Request, items: list) -> dict:
         "update_time": r.update_time,
     }
 
-def _request_payload_archive(a: RequestArchive, items: list) -> dict:
+def _request_payload_archive(a: RequestArchive, items: list, warehouse_name: Optional[str] = None) -> dict:
     return {
         "id": a.id,
         "original_id": a.original_id,
@@ -374,6 +413,8 @@ def _request_payload_archive(a: RequestArchive, items: list) -> dict:
         "category": a.category,
         "description": a.description,
         "attachment_note": a.attachment_note,
+        "warehouse_id": a.warehouse_id,
+        "warehouse_name": warehouse_name,
         "items": items,
         "status": a.status,
         "handler_name": a.handler_name,
@@ -425,7 +466,97 @@ def list_requests(
         query = query.filter(Request.status == status)
     reqs = query.all()
     grouped = _group_items(db, [r.id for r in reqs])
-    return [_request_payload(r, grouped.get(r.id, [])) for r in reqs]
+    wmap = _warehouse_name_map(db, [r.warehouse_id for r in reqs])
+    return [_request_payload(r, grouped.get(r.id, []), wmap.get(r.warehouse_id)) for r in reqs]
+
+def _apply_approval(db: Session, req: Request, current_user: User) -> None:
+    """通过申请单 = 从申请仓库扣减库存（与状态变更同事务；任一步失败整体回滚）。
+
+    规则：
+    - 无货物明细的申请单：通过仅留痕，不动库存；
+    - 仓库解析：优先申请单指定的 warehouse_id；历史数据未指定时，系统恰好一个启用仓库
+      则默认该仓；多仓且未指定 → 拒绝（无法确定扣哪个仓，要求重新提交）；
+    - 同一货物多行明细汇总为需求数量；
+    - 库存行按行 id 顺序（库位先后）逐行扣减至需求满足；
+    - 库存不足 → 400，库存不变；
+    - 每条被扣减的库存行写一条出库流水（inventory_records），出入库记录可追溯；
+    - 并发安全：先锁申请单行（调用方），再 FOR UPDATE 锁该 (仓库,货物) 全部库存行
+      （PostgreSQL；SQLite 退化为普通查询，配合单 worker/写串行不超卖），
+      与并发出库/其他审批互斥。
+    """
+    items = (
+        db.query(RequestItem)
+        .filter(RequestItem.request_id == req.id)
+        .order_by(RequestItem.sort, RequestItem.id)
+        .all()
+    )
+    if not items:
+        return  # 无明细：通过仅留痕
+
+    # 需求数量（同一货物多行汇总；提交时条码已校验存在，此处按条码回查货物）
+    required: dict = {}
+    names: dict = {}
+    for it in items:
+        g = db.query(Goods).filter(Goods.barcode == it.barcode).order_by(Goods.id).first()
+        if g is None:
+            raise HTTPException(status_code=400, detail=f"货物 {it.barcode} 已不存在，无法扣减库存（请联系管理员处理）")
+        required[g.id] = required.get(g.id, 0.0) + (it.quantity or 0)
+        names[g.id] = g.name or it.name or it.barcode
+
+    # 仓库解析
+    warehouse_id = req.warehouse_id
+    if warehouse_id is None:
+        active = (
+            db.query(Warehouse).filter(Warehouse.is_active.is_(True)).order_by(Warehouse.id).all()
+        )
+        if len(active) == 1:
+            warehouse_id = active[0].id
+        elif not active:
+            raise HTTPException(status_code=400, detail="系统没有启用中的仓库，无法扣减库存（请联系管理员）")
+        else:
+            raise HTTPException(status_code=400, detail="该申请单未指定申请仓库，且系统存在多个启用仓库，无法确定扣减哪个仓库（请驳回后让申请人重新提交并选择仓库）")
+    wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    if wh is None:
+        raise HTTPException(status_code=400, detail="该申请单的仓库已不存在，无法扣减库存（请联系管理员处理）")
+
+    reference = f"APP-{req.create_time:%Y%m%d}-{req.id:04d}"
+    for goods_id, qty in required.items():
+        rows_q = db.query(Stock).filter(
+            Stock.warehouse_id == warehouse_id,
+            Stock.goods_id == goods_id,
+        ).order_by(Stock.id)
+        try:
+            rows_q = rows_q.with_for_update()  # PostgreSQL 行锁；SQLite 忽略
+        except Exception:
+            pass
+        rows = rows_q.all()
+        available = sum(r.quantity or 0 for r in rows)
+        if available < qty:
+            raise HTTPException(
+                status_code=400,
+                detail=f"库存不足：{names.get(goods_id, f'#{goods_id}')} 需要 {qty:g}，"
+                       f"仓库 {wh.name or wh.code} 现有 {available:g}（审批已回滚，库存未变动）"
+            )
+        remaining = qty
+        now = datetime.now()
+        for r in rows:
+            if remaining <= 0:
+                break
+            take = min(r.quantity or 0, remaining)
+            if take <= 0:
+                continue
+            r.quantity = (r.quantity or 0) - take
+            r.update_time = now
+            remaining -= take
+            db.add(InventoryRecord(
+                warehouse_id=warehouse_id,
+                goods_id=goods_id,
+                location_id=r.location_id,
+                type=InventoryType.OUT,
+                quantity=take,
+                operator_id=current_user.id,
+                remark=f"申请单 {reference} 通过扣减",
+            ))
 
 @router.post("/requests/{id}/status", response_model=RequestResponse, summary="通过/驳回申请单（管理员）")
 def set_request_status(
@@ -438,14 +569,34 @@ def set_request_status(
     if payload.status not in (RequestStatus.APPROVED.value, RequestStatus.REJECTED.value):
         raise HTTPException(status_code=400, detail="状态只能为 approved 或 rejected")
 
-    req = db.query(Request).filter(Request.id == id).first()
+    # 行级锁串行化同一申请单的并发处理（PostgreSQL FOR UPDATE；SQLite 忽略）
+    req_q = db.query(Request).filter(Request.id == id)
+    try:
+        req_q = req_q.with_for_update()
+    except Exception:
+        pass
+    req = req_q.first()
     if req is None:
         raise HTTPException(status_code=404, detail="申请单不存在（可能已归档，请到归档列表查看）")
+
+    # 状态机：仅 pending 可处理；通过/驳回均为终态，不可再次处理——
+    # 通过会扣库存，允许"通过→驳回→再通过"会造成重复扣减，v2 明确禁止
+    if req.status != RequestStatus.PENDING.value:
+        state_text = {"approved": "已通过", "rejected": "已驳回"}.get(req.status, req.status)
+        raise HTTPException(status_code=409, detail=f"该申请单已处理（{state_text}），不能再次处理")
+
+    # 通过 = 扣减申请仓库库存（同事务；失败则状态与库存都不变）。驳回不动库存。
+    if payload.status == RequestStatus.APPROVED.value:
+        _apply_approval(db, req, current_user)
 
     req.status = payload.status
     req.handler_name = current_user.username
     req.handle_time = datetime.now()
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     db.refresh(req)
     logging.info("申请单 %s 处理为 %s（处理人：%s）", req.id, payload.status, current_user.username)
     # 评审一致性项：返回完整载荷（含真实货物明细），与列表接口契约一致，
@@ -469,7 +620,8 @@ def list_archived_requests(
         query = query.filter(RequestArchive.archive_batch == batch)
     rows = query.offset((page - 1) * page_size).limit(page_size).all()
     grouped = _group_archive_items(db, [a.id for a in rows])
-    return [_request_payload_archive(a, grouped.get(a.id, [])) for a in rows]
+    wmap = _warehouse_name_map(db, [a.warehouse_id for a in rows])
+    return [_request_payload_archive(a, grouped.get(a.id, []), wmap.get(a.warehouse_id)) for a in rows]
 
 @router.get("/requests/archive/meta", summary="归档元信息（管理员）")
 def archive_meta(

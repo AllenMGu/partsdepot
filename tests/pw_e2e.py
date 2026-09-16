@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Playwright 端到端验证（Chromium）：
-1. request.html 申请提交：添加行 → 行内搜索备件 → 候选/选中行显示可用库存 → 超库存软提示 → 提交
+1. request.html 申请提交：仓库下拉（必选，v2）→ 添加行 → 行内搜索备件 → 候选/选中行显示可用库存 → 超库存软提示 → 提交
 1b. 多行异步搜索竞态（乱序响应不错行）/ 重渲染保留搜索词 / 精确聚焦到该行
 2. index.html 登录 → request-admin.html 申请管理：点击申请单 → 详情弹窗（表头信息 + 带表头的货物明细表）
-   → 弹窗内通过处理 → 归档 Tab 点击归档单 → 只读详情
+   → 弹窗内通过处理（v2 通过即扣库存，确认文案说明扣减与不可撤销）
+3b. v2 通过即扣库存：扣减金额核对 / 状态机（重复通过/驳回拦截）/ 库存不足拦截 / 驳回不动库存 / 无明细仅留痕
+4. 归档 Tab 点击归档单 → 只读详情（含申请仓库）
 """
 import os
 import sys
@@ -75,6 +77,12 @@ with sync_playwright() as p:
     page.wait_for_selector("#addGoodsRowBtn")
     check("提交页：可见『添加货物行』按钮", page.is_visible("#addGoodsRowBtn"))
     check("提交页：初始无货物行", page.query_selector_all("#goodsTableBody tr") == [])
+    # 申请仓库下拉（v2 通过即扣库存：提交时必选仓库）
+    page.wait_for_selector("#warehouseId option:not([value=''])", timeout=5000, state="attached")
+    check("提交页：申请仓库下拉已加载并默认选中",
+          page.locator("#warehouseId option").count() >= 1 and page.locator("#warehouseId").input_value() != "",
+          page.locator("#warehouseId").inner_text())
+    check("提交页：仓库选项为『一号仓』", "一号仓" in page.locator("#warehouseId option").first.inner_text())
 
     # 添加第一行
     page.click("#addGoodsRowBtn")
@@ -282,6 +290,7 @@ with sync_playwright() as p:
             break
     check("管理页：列表含第一张种子申请单（-0001）", target is not None)
     if target:
+        check("管理页：列表行显示申请仓库（一号仓）", "一号仓" in target.inner_text(), target.inner_text())
         refno = [t for t in target.inner_text().split() if t.startswith("APP-")][0]
         # 行内点击打开详情
         target.click()
@@ -293,6 +302,10 @@ with sync_playwright() as p:
               and "bw@test.com" in page.locator("#detailInfo").inner_text()
               and "待处理" in page.locator("#detailStatus").inner_text(),
               page.locator("#detailInfo").inner_text())
+        check("详情弹窗：显示申请仓库（一号仓）",
+              "申请仓库" in page.locator("#detailInfo").inner_text()
+              and "一号仓" in page.locator("#detailInfo").inner_text(),
+              page.locator("#detailInfo").inner_text())
         check("详情弹窗：事由描述完整显示", "Playwright 端到端验证" in page.locator("#detailDescription").inner_text(),
               page.locator("#detailDescription").inner_text())
         # 货物明细表：表头 + 两行
@@ -301,37 +314,135 @@ with sync_playwright() as p:
               thead == ["序号", "货物名称", "条码", "规格型号", "单位", "数量"], thead)
         items = page.locator("#detailItemsBody tr")
         check("详情弹窗：明细 2 行", items.count() == 2, items.count())
-        check("详情弹窗：明细含 测试轴承 x3 与 测试密封圈 x5",
+        check("详情弹窗：明细含 测试轴承 x3 与 测试垫片 x2",
               "测试轴承" in items.nth(0).inner_text() and "3 个" in items.nth(0).inner_text()
-              and "测试密封圈" in items.nth(1).inner_text() and "5 件" in items.nth(1).inner_text(),
+              and "测试垫片" in items.nth(1).inner_text() and "2 片" in items.nth(1).inner_text(),
               items.nth(0).inner_text() + " || " + items.nth(1).inner_text())
         check("详情弹窗：待处理单显示通过/驳回按钮",
               page.is_visible("#detailApproveBtn") and page.is_visible("#detailRejectBtn"))
 
-        # 弹窗内通过处理
+        # 弹窗内通过处理（v2：通过后扣减库存）
         page.click("#detailApproveBtn")
         page.wait_for_selector("#detailModal", state="hidden", timeout=5000)
         check("详情弹窗：处理后自动关闭", page.locator("#detailModal").evaluate("el => el.classList.contains('hidden')"))
-        check("详情弹窗：通过确认对话框出现", any("通过" in d for d in dialogs), dialogs)
+        check("详情弹窗：通过确认对话框说明将扣减库存且不可撤销",
+              len(dialogs) >= 1 and "扣减" in dialogs[-1] and "不可" in dialogs[-1], dialogs)
         # 列表状态更新
         page.wait_for_function(
             "Array.from(document.querySelectorAll('#recentBody tr')).some(tr => tr.innerText.includes('已通过'))",
             timeout=5000)
         check("管理页：处理后列表状态更新为『已通过』", True)
 
+    # ================= 3b. 通过即扣库存（v2）：扣减金额 / 状态机 / 不足拦截 / 驳回不动库存 =================
+    def api_call(method, path, body=None):
+        return page.evaluate("""async ([m, u, b]) => {
+            const resp = await fetch(u, {
+                method: m,
+                headers: b ? {'Content-Type': 'application/json'} : {},
+                body: b ? JSON.stringify(b) : undefined,
+                credentials: 'include'
+            });
+            let data = null;
+            try { data = await resp.json(); } catch (e) {}
+            return { status: resp.status, data: data };
+        }""", [method, path, body])
+
+    def stock_of(barcode):
+        return page.evaluate("""async (q) => {
+            const resp = await fetch('api/public/goods-search?q=' + q, { credentials: 'include' });
+            const data = await resp.json().catch(() => null);
+            return data && data.length ? data[0].available_stock : null;
+        }""", barcode)
+
+    whid = page.evaluate("""async () => {
+        const resp = await fetch('api/public/warehouses', { credentials: 'include' });
+        const d = await resp.json().catch(() => null);
+        return d && d.length ? d[0].id : null;
+    }""")
+    check("仓库接口：public/warehouses 返回一号仓", whid is not None, whid)
+
+    # 取 -0001 申请单 id（用于重复处理验证）
+    rid = page.evaluate("""() => {
+        const trs = Array.from(document.querySelectorAll('#recentBody tr'));
+        const t = trs.find(tr => tr.innerText.includes('-0001'));
+        if (!t) return null;
+        const btn = t.querySelector('button[data-act]');
+        return btn ? parseInt(btn.dataset.id, 10) : null;
+    }""")
+    check("扣库存：取到 -0001 申请单 id", rid is not None, rid)
+
+    # 通过后的库存变化：轴承 12→9（扣 3）；垫片 5→2（归档单已扣 1 + 本单扣 2）
+    check("扣库存：轴承 12→9（通过扣减 3）", stock_of("8888001") == 9.0, stock_of("8888001"))
+    check("扣库存：垫片 5→2（归档单扣 1 + 本单扣 2）", stock_of("8888003") == 2.0, stock_of("8888003"))
+
+    # 重复通过 → 状态机拦截（409），库存不变
+    if rid is not None:
+        ra = api_call("POST", "api/requests/%d/status" % rid, {"status": "approved"})
+        check("状态机：重复通过被拦截（409）", ra["status"] == 409, ra)
+        check("状态机：拦截信息说明已处理",
+              ra["data"] is not None and "已处理" in str(ra["data"].get("detail", "")), ra)
+        check("扣库存：重复通过失败后库存不变（轴承仍 9）", stock_of("8888001") == 9.0, stock_of("8888001"))
+
+    # 库存不足 → 通过被拦截（400），库存不变、申请单仍待处理
+    nr = api_call("POST", "api/requests/", {
+        "applicant_name": "API测试员", "contact": "api@test.com",
+        "description": "超额申请（轴承 99，库存只有 9）",
+        "warehouse_id": whid,
+        "items": [{"barcode": "8888001", "quantity": 99}]})
+    check("不足拦截：超额申请可提交（待处理）", nr["status"] == 201, nr)
+    if nr["status"] == 201:
+        over_id = nr["data"]["id"]
+        ro = api_call("POST", "api/requests/%d/status" % over_id, {"status": "approved"})
+        check("不足拦截：通过被拦截（400）", ro["status"] == 400, ro)
+        check("不足拦截：信息含需要/现有数量",
+              ro["data"] is not None and "库存不足" in str(ro["data"].get("detail", ""))
+              and "需要" in str(ro["data"].get("detail", "")), ro)
+        check("不足拦截：库存不变（轴承仍 9）", stock_of("8888001") == 9.0, stock_of("8888001"))
+        lst = api_call("GET", "api/requests/")
+        row = [x for x in (lst["data"] or []) if x["id"] == over_id]
+        check("不足拦截：申请单仍为待处理", bool(row) and row[0]["status"] == "pending", row)
+
+    # 驳回 → 不动库存；重复驳回被拦截
+    nr2 = api_call("POST", "api/requests/", {
+        "applicant_name": "API测试员", "contact": "api2@test.com",
+        "description": "驳回流程（垫片 1）",
+        "warehouse_id": whid,
+        "items": [{"barcode": "8888003", "quantity": 1}]})
+    if nr2["status"] == 201:
+        rej_id = nr2["data"]["id"]
+        before = stock_of("8888003")
+        rr = api_call("POST", "api/requests/%d/status" % rej_id, {"status": "rejected"})
+        check("驳回：驳回成功（200）", rr["status"] == 200, rr)
+        check("驳回：库存不变（垫片仍 %s）" % before, stock_of("8888003") == before, stock_of("8888003"))
+        rr2 = api_call("POST", "api/requests/%d/status" % rej_id, {"status": "rejected"})
+        check("状态机：重复驳回被拦截（409）", rr2["status"] == 409, rr2)
+
+    # 无货物明细的申请单 → 通过仅留痕，不动库存
+    nr3 = api_call("POST", "api/requests/", {
+        "applicant_name": "API测试员", "contact": "api3@test.com",
+        "description": "无货物明细的申请（通过仅留痕）",
+        "warehouse_id": whid})
+    if nr3["status"] == 201:
+        noitem_id = nr3["data"]["id"]
+        rn = api_call("POST", "api/requests/%d/status" % noitem_id, {"status": "approved"})
+        check("无明细：通过成功（200，仅留痕）", rn["status"] == 200, rn)
+
     # ================= 4. 归档 Tab：只读详情 =================
     page.click("#tabArchived")
     page.wait_for_selector("#archivedBody tr")
     arow = page.locator("#archivedBody tr").first
     check("归档 Tab：有归档记录行", "APP-" in arow.inner_text())
+    check("归档 Tab：归档行显示申请仓库（一号仓）", "一号仓" in arow.inner_text(), arow.inner_text())
     arow.click()
     page.wait_for_selector("#detailModal:not(.hidden)")
     check("归档详情：弹窗打开", page.is_visible("#detailModal"))
     info_txt = page.locator("#detailInfo").inner_text()
     check("归档详情：显示归档批次/归档时间", "归档批次" in info_txt and "归档时间" in info_txt, info_txt)
+    check("归档详情：显示申请仓库（一号仓）", "一号仓" in page.locator("#detailInfo").inner_text(),
+          page.locator("#detailInfo").inner_text())
     aitems = page.locator("#detailItemsBody tr")
-    check("归档详情：明细 1 行（测试轴承 x1）",
-          aitems.count() == 1 and "测试轴承" in aitems.nth(0).inner_text() and "1 个" in aitems.nth(0).inner_text(),
+    check("归档详情：明细 1 行（测试垫片 x1）",
+          aitems.count() == 1 and "测试垫片" in aitems.nth(0).inner_text() and "1 片" in aitems.nth(0).inner_text(),
           aitems.first.inner_text() if aitems.count() else "empty")
     check("归档详情：归档单无处理按钮（只读）",
           not page.is_visible("#detailApproveBtn") and not page.is_visible("#detailRejectBtn"))
