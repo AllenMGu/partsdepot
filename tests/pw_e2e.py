@@ -694,6 +694,63 @@ with sync_playwright() as p:
     page.wait_for_selector("#detailModal", state="hidden", timeout=3000)
     check("详情弹窗：Esc 可关闭", True)
 
+    # ================= 5. 查看按钮（CSP 禁止内联事件处理器，动态按钮须事件委托） =================
+    # 背景故障：出库单/入库单页 onclick= 内联处理器被 CSP 静默拦截，点"查看"无任何反应。
+    # 本段逐页真实点击"查看/打印"按钮，断言弹窗/面板出现，且全程无 CSP 违规。
+    _csp_errs = []
+    def _on_console(msg):
+        if msg.type in ("error", "warning") and "Content Security Policy" in msg.text:
+            _csp_errs.append(msg.text)
+    page.on("console", _on_console)
+    try:
+        # 出库单
+        page.goto(BASE + "/outbound.html")
+        page.wait_for_selector("#orderTableBody tr", timeout=15000)
+        page.locator("#orderTableBody button:has-text('查看')").first.click()
+        page.wait_for_selector("#orderDetailModal:not(.hidden)", timeout=5000)
+        _od = page.locator("#orderDetailContent").inner_text()
+        check("出库单页：点'查看'弹窗打开且含单号/明细", "单号" in _od and "明细" in _od, _od[:80])
+        page.locator("#closeDetailModal").click()
+        page.wait_for_selector("#orderDetailModal", state="hidden", timeout=5000)
+        # 入库单
+        page.goto(BASE + "/inbound.html")
+        page.wait_for_selector("#orderTableBody tr", timeout=15000)
+        page.locator("#orderTableBody button:has-text('查看')").first.click()
+        page.wait_for_selector("#orderDetailModal:not(.hidden)", timeout=5000)
+        _id = page.locator("#orderDetailContent").inner_text()
+        check("入库单页：点'查看'弹窗打开且含单号/明细", "单号" in _id and "明细" in _id, _id[:80])
+        page.locator("#closeDetailModal").click()
+        page.wait_for_selector("#orderDetailModal", state="hidden", timeout=5000)
+        # 库存页
+        page.goto(BASE + "/stock.html")
+        page.wait_for_selector("#stockTableBody tr", timeout=15000)
+        page.locator("#stockTableBody button:has-text('查看')").first.click()
+        page.wait_for_selector("#stockDetailModal:not(.hidden)", timeout=5000)
+        check("库存页：点'查看'弹窗打开", page.is_visible("#stockDetailModal"))
+        page.locator("#closeDetailModal").click()
+        page.wait_for_selector("#stockDetailModal", state="hidden", timeout=5000)
+        # 库位页
+        page.goto(BASE + "/location.html")
+        page.wait_for_selector("#locationTableBody tr", timeout=15000)
+        page.locator("#locationTableBody button:has-text('打印')").first.click()
+        page.wait_for_selector("#printModal:not(.hidden)", timeout=5000)
+        check("库位页：点'打印'弹窗打开", page.is_visible("#printModal"))
+        page.locator("#cancelPrintBtn").click()
+        page.wait_for_selector("#printModal", state="hidden", timeout=5000)
+        # 盘点页
+        ck = api_call("POST", "api/check-orders/", {"warehouse_id": whid})
+        check("盘点页：可创建盘点单（供查看按钮验证）", ck["status"] in (200, 201), ck)
+        page.goto(BASE + "/check.html")
+        page.wait_for_selector("#checkOrdersTableBody tr", timeout=15000)
+        page.locator("#checkOrdersTableBody button:has-text('查看')").first.click()
+        page.wait_for_timeout(800)
+        _ci = page.locator("#currentOrderInfo").inner_text()
+        check("盘点页：点'查看'载入单据信息（单号-仓库）", "-" in _ci and len(_ci) > 3, _ci)
+        # 全程无 CSP 违规（内联事件处理器被拦截的典型报错）
+        check("CSP：5 个页面点击操作全程无 CSP 违规", not _csp_errs, _csp_errs[:2])
+    finally:
+        page.remove_listener("console", _on_console)
+
     browser.close()
 
 fails = [n for n, ok in results if not ok]
