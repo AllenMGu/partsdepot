@@ -600,6 +600,107 @@ s, b = req("POST", f"/api/requests/{_ni_id}/status", {"status": "approved"}, adm
 check("无明细：通过成功（200，仅留痕不动库存）",
       s == 200 and _w1_g001_total() == _w1_floor, f"status={s} body={b} stock={_w1_g001_total()}")
 
+# 15g. 按仓库搜索一致性（评审 P1：申请页库存必须与审批扣减仓库一致）
+# 双仓场景：G003 仅在 W2 有库存（W2=5、W1=0）→ 选 W1 搜索必须显示 0，而非全仓合计
+s, g3 = req("POST", "/api/goods/", {"barcode": "G003", "name": "双仓测试物料", "price": 5}, admin)
+check("双仓：创建 G003", s == 200, f"status={s} body={g3}")
+s, b = req("POST", "/api/inventory/scan", {"goods_barcode": "G003", "location_code": "L2", "type": "入库", "quantity": 5}, admin)
+check("双仓：G003 入库 5 @W2/L2", s == 200, f"status={s} body={b}")
+def _search_stock(barcode, wid=None):
+    url = "/api/public/goods-search?q=" + urllib.parse.quote(barcode)
+    if wid is not None:
+        url += "&warehouse_id=" + str(wid)
+    s_r, rows = req("GET", url)
+    if s_r != 200 or not isinstance(rows, list):
+        return "ERR:" + str(s_r)
+    hit = next((r for r in rows if isinstance(r, dict) and r.get("barcode") == barcode), None)
+    return float(hit.get("available_stock") or 0) if hit else "MISS"
+check("双仓：G003 选 W2 → 可用 5", _search_stock("G003", W2) == 5, f"got={_search_stock('G003', W2)}")
+check("双仓：G003 选 W1 → 可用 0（不得显示全仓合计 5）", _search_stock("G003", W1) == 0, f"got={_search_stock('G003', W1)}")
+check("双仓：G003 不传仓库（兼容旧客户端）→ 全仓合计 5", _search_stock("G003") == 5, f"got={_search_stock('G003')}")
+check("双仓：G001 选 W2 → 可用 0（G001 仅在 W1）", _search_stock("G001", W2) == 0, f"got={_search_stock('G001', W2)}")
+s, b = req("GET", "/api/public/goods-search?q=G003&warehouse_id=99999")
+check("按仓搜索：不存在的仓库 → 400", s == 400, f"status={s} body={b}")
+
+# 15h. 反序明细双单并发审批（评审 P1/P2：统一锁顺序防死锁）
+# A=[G001,G002] B=[G002,G001] 同仓 W1、各 x1：未排序锁序时两单反序持锁可致 PG 死锁→500；
+# 修复为 sorted(货物id) 统一全局加锁顺序。PG 上真并发（双线程+屏障）；
+# SQLite 单共享连接（StaticPool）无行锁、无死锁形态，顺序执行并断言同一契约。
+s, b = req("POST", "/api/inventory/scan", {"goods_barcode": "G001", "location_code": "L1", "type": "入库", "quantity": 10}, admin)
+check("反序并发：前置补库 G001@W1 +10", s == 200, f"status={s} body={b}")
+def _w1_g002_total():
+    s_r, r_rows = req("GET", "/api/stock/?goods_barcode=G002", token=admin)
+    return sum(r.get("quantity", 0) for r in (r_rows or [])
+               if isinstance(r, dict) and r.get("goods_barcode") == "G002" and r.get("warehouse_id") == W1)
+_g1_before = _w1_g001_total()
+_g2_before = _w1_g002_total()
+check("反序并发：前置 W1 库存充足（G001≥2 且 G002≥2）", _g1_before >= 2 and _g2_before >= 2,
+      f"g1={_g1_before} g2={_g2_before}")
+_H5 = {"X-Real-IP": "8.8.8.85"}
+_H6 = {"X-Real-IP": "8.8.8.86"}
+s, bA = req("POST", "/api/requests/", {
+    "applicant_name": "并发甲", "contact": "ca@test.com", "description": "反序并发 A",
+    "warehouse_id": W1, "items": [{"barcode": "G001", "quantity": 1}, {"barcode": "G002", "quantity": 1}]}, headers=_H5)
+check("反序并发：A 单（明细 G001→G002）可提交", s == 201 and isinstance(bA, dict) and bA.get("id"), f"status={s} body={bA}")
+_cA = (bA or {}).get("id")
+s, bB = req("POST", "/api/requests/", {
+    "applicant_name": "并发乙", "contact": "cb@test.com", "description": "反序并发 B",
+    "warehouse_id": W1, "items": [{"barcode": "G002", "quantity": 1}, {"barcode": "G001", "quantity": 1}]}, headers=_H6)
+check("反序并发：B 单（明细 G002→G001，与 A 反序）可提交", s == 201 and isinstance(bB, dict) and bB.get("id"), f"status={s} body={bB}")
+_cB = (bB or {}).get("id")
+_is_pg = str(os.environ.get("WMS_DATABASE_URL", "")).startswith("postgres")
+def _do_approve(rid, out, key, barrier):
+    if barrier is not None:
+        barrier.wait()
+    out[key] = req("POST", f"/api/requests/{rid}/status", {"status": "approved"}, admin)
+if _is_pg:
+    _bar = threading.Barrier(2)
+    _out = {}
+    t1 = threading.Thread(target=_do_approve, args=(_cA, _out, "A", _bar))
+    t2 = threading.Thread(target=_do_approve, args=(_cB, _out, "B", _bar))
+    t1.start(); t2.start(); t1.join(30); t2.join(30)
+    resA = _out.get("A", (-1, {"detail": "线程超时未返回"}))
+    resB = _out.get("B", (-1, {"detail": "线程超时未返回"}))
+else:
+    resA = req("POST", f"/api/requests/{_cA}/status", {"status": "approved"}, admin)
+    resB = req("POST", f"/api/requests/{_cB}/status", {"status": "approved"}, admin)
+check("反序并发：两单均审批成功（无 500/死锁）",
+      resA[0] == 200 and resB[0] == 200, f"A={resA[0]} {resA[1]} B={resB[0]} {resB[1]}")
+check("反序并发：两单均为 approved 终态",
+      isinstance(resA[1], dict) and resA[1].get("status") == "approved"
+      and isinstance(resB[1], dict) and resB[1].get("status") == "approved",
+      f"A={resA[1] if isinstance(resA[1], dict) else resA[1]} B={resB[1] if isinstance(resB[1], dict) else resB[1]}")
+check("反序并发：G001 两单各扣 1、共扣 2（无丢失更新/超扣）", abs((_g1_before - _w1_g001_total()) - 2) < 1e-6,
+      f"before={_g1_before} after={_w1_g001_total()}")
+check("反序并发：G002 两单各扣 1、共扣 2（无丢失更新/超扣）", abs((_g2_before - _w1_g002_total()) - 2) < 1e-6,
+      f"before={_g2_before} after={_w1_g002_total()}")
+check("反序并发：审批响应含 warehouse_name（与列表契约一致）",
+      isinstance(resA[1], dict) and resA[1].get("warehouse_name") == "一号仓"
+      and isinstance(resB[1], dict) and resB[1].get("warehouse_name") == "一号仓",
+      f"A={resA[1].get('warehouse_name') if isinstance(resA[1], dict) else '-'} B={resB[1].get('warehouse_name') if isinstance(resB[1], dict) else '-'}")
+
+# 15i. 提交后仓库被停用 → 审批拒绝（评审 P2：审批时再次校验启用状态）
+_H7 = {"X-Real-IP": "8.8.8.87"}
+_floor_i = _w1_g001_total()
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "停用测试", "contact": "off@test.com", "description": "停用仓库审批",
+    "warehouse_id": W1, "items": [{"barcode": "G001", "quantity": 1}]}, headers=_H7)
+check("停用：启用时提交成功（201）", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
+_off_id = (b or {}).get("id")
+s, b = req("PUT", f"/api/warehouses/{W1}", {"is_active": False}, admin)
+check("停用：W1 停用成功", s == 200 and (b or {}).get("is_active") in (False, 0), f"status={s} body={b}")
+s, b = req("POST", f"/api/requests/{_off_id}/status", {"status": "approved"}, admin)
+check("停用：审批被拒（400，提示已停用）", s == 400 and "停用" in str(b), f"status={s} body={b}")
+check("停用：库存不变", _w1_g001_total() == _floor_i, f"now={_w1_g001_total()} floor={_floor_i}")
+s, b = req("GET", "/api/public/goods-search?q=G001&warehouse_id=" + str(W1))
+check("停用：按停用仓库搜索 → 400", s == 400, f"status={s} body={b}")
+s, rows = req("GET", "/api/requests/", token=admin)
+_off_row = next((r for r in (rows or []) if isinstance(r, dict) and r.get("id") == _off_id), None)
+check("停用：申请单仍为待处理（可改仓重提/再处理）",
+      isinstance(_off_row, dict) and _off_row.get("status") == "pending", f"row={_off_row}")
+s, b = req("PUT", f"/api/warehouses/{W1}", {"is_active": True}, admin)
+check("停用：恢复 W1 启用（环境复原）", s == 200 and (b or {}).get("is_active") in (True, 1), f"status={s} body={b}")
+
 # ---------- 汇总 ----------
 fails = [r for r in results if not r[1]]
 print(f"\n===== 汇总：{len(results)-len(fails)}/{len(results)} 通过 =====")

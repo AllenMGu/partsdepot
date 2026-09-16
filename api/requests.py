@@ -109,18 +109,30 @@ def _check_search_rate_limit(ip: str) -> None:
 def search_goods_public(
     q: str,
     request: FastAPIRequest,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    warehouse_id: Optional[int] = None,
 ):
     """按条码/名称模糊搜索货物，供免登录申请页选择相关货物。
 
-    安全边界：仅返回 条码/名称/规格/单位 + 可用库存（全仓合计数量）等非敏感字段
-    （不含单价等）；可用库存为产品需求——申请人在申请页选备件时直接看到现有库存，
-    便于判断是否足够/是否需要走采购。单次最多 20 条，独立限流桶防止被用来枚举全量货物目录。
+    安全边界：仅返回 条码/名称/规格/单位 + 可用库存等非敏感字段（不含单价等）；
+    可用库存为产品需求——申请人在申请页选备件时直接看到现有库存，便于判断是否足够。
+    单次最多 20 条，独立限流桶防止被用来枚举全量货物目录。
+
+    warehouse_id（可选）：指定时可用库存**仅按该仓库汇总**——必须与审批实际扣减的
+    仓库一致，否则多仓环境下页面会显示"其他仓库的库存"造成误导（例如所选仓 0 件、
+    他仓 100 件时显示 100，审批却必然库存不足）。仓库不存在或已停用 → 400。
+    不指定时返回全仓合计（兼容未升级的旧客户端）。
     """
     keyword = (q or "").strip()
     if not keyword:
         raise HTTPException(status_code=400, detail="请输入货物条码或名称")
     _check_search_rate_limit(_client_ip(request))
+    # 仓库过滤（v2）：申请页库存展示必须与审批扣减仓库一致
+    wh = None
+    if warehouse_id is not None:
+        wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+        if wh is None or not wh.is_active:
+            raise HTTPException(status_code=400, detail=f"仓库不存在或已停用：{warehouse_id}")
     like = f"%{keyword}%"
     rows = (
         db.query(Goods.id, Goods.barcode, Goods.name, Goods.spec, Goods.unit)
@@ -131,14 +143,15 @@ def search_goods_public(
     )
     if not rows:
         return []
-    # 可用库存 = 该货物在所有仓库/库位的库存数量合计（无库存行视为 0）
-    stock_map = dict(
+    # 可用库存 = 指定仓库时该仓库（全部库位）合计；未指定时为全仓合计（无库存行视为 0）
+    stock_q = (
         db.query(Goods.id, func.coalesce(func.sum(Stock.quantity), 0))
         .join(Stock, Stock.goods_id == Goods.id)
         .filter(Goods.id.in_([r[0] for r in rows]))
-        .group_by(Goods.id)
-        .all()
     )
+    if wh is not None:
+        stock_q = stock_q.filter(Stock.warehouse_id == wh.id)
+    stock_map = dict(stock_q.group_by(Goods.id).all())
     return [
         {
             "barcode": b,
@@ -480,9 +493,11 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
     - 库存行按行 id 顺序（库位先后）逐行扣减至需求满足；
     - 库存不足 → 400，库存不变；
     - 每条被扣减的库存行写一条出库流水（inventory_records），出入库记录可追溯；
-    - 并发安全：先锁申请单行（调用方），再 FOR UPDATE 锁该 (仓库,货物) 全部库存行
-      （PostgreSQL；SQLite 退化为普通查询，配合单 worker/写串行不超卖），
-      与并发出库/其他审批互斥。
+    - 并发安全：先锁申请单行（调用方），再按**货物 id 升序**（sorted）逐货 FOR UPDATE
+      锁该 (仓库,货物) 全部库存行，同一货物内再按 Stock.id 顺序锁行——
+      全局加锁顺序确定，两个多货明细单反序并发审批不会死锁（PostgreSQL；
+      SQLite 退化为普通查询，配合单 worker/写串行不超卖），与并发出库互斥；
+    - 审批时再次校验仓库启用状态：提交后仓库被停用 → 400 拒绝扣减。
     """
     items = (
         db.query(RequestItem)
@@ -518,9 +533,15 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
     wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
     if wh is None:
         raise HTTPException(status_code=400, detail="该申请单的仓库已不存在，无法扣减库存（请联系管理员处理）")
+    if not wh.is_active:
+        raise HTTPException(
+            status_code=400,
+            detail=f"申请仓库 {wh.name or wh.code} 已停用，无法扣减库存（请驳回后由申请人重新提交并选择有效仓库）"
+        )
 
     reference = f"APP-{req.create_time:%Y%m%d}-{req.id:04d}"
-    for goods_id, qty in required.items():
+    # 按货物 id 升序处理：全局加锁顺序确定，反序明细的并发审批不会死锁
+    for goods_id, qty in sorted(required.items()):
         rows_q = db.query(Stock).filter(
             Stock.warehouse_id == warehouse_id,
             Stock.goods_id == goods_id,
@@ -599,10 +620,11 @@ def set_request_status(
         raise
     db.refresh(req)
     logging.info("申请单 %s 处理为 %s（处理人：%s）", req.id, payload.status, current_user.username)
-    # 评审一致性项：返回完整载荷（含真实货物明细），与列表接口契约一致，
+    # 评审一致性项：返回完整载荷（含真实货物明细 + 申请仓库名称），与列表接口契约一致，
     # 不能直接 return req（那样 items 会退化成空数组）
     grouped = _group_items(db, [req.id])
-    return _request_payload(req, grouped.get(req.id, []))
+    wmap = _warehouse_name_map(db, [req.warehouse_id]) if req.warehouse_id else {}
+    return _request_payload(req, grouped.get(req.id, []), wmap.get(req.warehouse_id))
 
 @router.get("/requests/archive/", response_model=List[RequestArchiveResponse], summary="归档申请单列表（管理员）")
 def list_archived_requests(

@@ -10,6 +10,7 @@
 import os
 import sys
 import tempfile
+import time
 
 
 def _writable_dir(path):
@@ -64,9 +65,27 @@ def check(name, cond, detail=""):
     results.append((name, bool(cond)))
     print(("PASS" if cond else "FAIL") + " | " + name + ((" | " + str(detail)) if (detail and not cond) else ""))
 
+def wait_js(page, cond_arrow_js, timeout_ms=5000):
+    """CSP 安全等待（页面 script-src 无 'unsafe-eval'）：
+    Playwright wait_for_function 的轮询会落到页面 RAF/setTimeout 任务上下文，
+    其中 globalThis.eval 被 CSP 拦截（实测：同一 eval 在 CDP 同步上下文可用、
+    异步上下文被拒）。因此改用逐轮独立 evaluate（每轮都是 CDP 同步上下文）轮询。
+    cond_arrow_js 必须是箭头函数表达式字符串，返回 truthy 即视为满足。"""
+    deadline = time.time() + timeout_ms / 1000.0
+    while True:
+        if page.evaluate(cond_arrow_js):
+            return
+        if time.time() >= deadline:
+            raise TimeoutError("wait_js 超时: " + cond_arrow_js)
+        page.wait_for_timeout(100)
+
 with sync_playwright() as p:
     browser = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
-    ctx = browser.new_context(viewport={"width": 1280, "height": 900})
+    # 浏览器（申请人视角）使用独立 X-Real-IP 分桶（8.8.8.210），与种子脚本（127.0.0.1）、
+    # §3b API 侧（8.8.8.201/202）互不干扰——测试即模拟多个不同客户端 IP，
+    # 避免同一限流桶（搜索 30 次/分钟）被测试自身撞满导致假 429
+    ctx = browser.new_context(viewport={"width": 1280, "height": 900},
+                              extra_http_headers={"X-Real-IP": "8.8.8.210"})
     page = ctx.new_page()
     page.set_default_timeout(15000)
     dialogs = []
@@ -77,12 +96,72 @@ with sync_playwright() as p:
     page.wait_for_selector("#addGoodsRowBtn")
     check("提交页：可见『添加货物行』按钮", page.is_visible("#addGoodsRowBtn"))
     check("提交页：初始无货物行", page.query_selector_all("#goodsTableBody tr") == [])
-    # 申请仓库下拉（v2 通过即扣库存：提交时必选仓库）
+    # 申请仓库下拉（v2 通过即扣库存：提交时必选仓库）——双仓环境（评审 P1：展示仓库=扣减仓库）
     page.wait_for_selector("#warehouseId option:not([value=''])", timeout=5000, state="attached")
     check("提交页：申请仓库下拉已加载并默认选中",
           page.locator("#warehouseId option").count() >= 1 and page.locator("#warehouseId").input_value() != "",
           page.locator("#warehouseId").inner_text())
-    check("提交页：仓库选项为『一号仓』", "一号仓" in page.locator("#warehouseId option").first.inner_text())
+    check("提交页：仓库下拉含两个仓（一号仓/二号仓），默认一号仓",
+          page.locator("#warehouseId option").count() == 2
+          and "一号仓" in page.locator("#warehouseId option").nth(0).inner_text()
+          and "二号仓" in page.locator("#warehouseId option").nth(1).inner_text(),
+          page.locator("#warehouseId").inner_text())
+
+    # ---------- 仓库切换联动演练（评审 P1：库存展示必须与审批扣减仓库一致） ----------
+    # 密封圈：一号仓 0、二号仓 100 → 切换仓库后候选必须作废、按新仓库重搜，
+    # 已选行的库存快照必须按新仓库刷新并重算超库存软提示。
+    page.click("#addGoodsRowBtn")
+    page.wait_for_selector("#goodsTableBody tr")
+    d_in = page.locator("#goodsTableBody tr:nth-child(1) input[type=text]")
+    d_in.fill("密封圈")
+    page.locator("#goodsTableBody tr:nth-child(1) button[title=搜索备件]").click()
+    page.wait_for_selector("#goodsSearchResults:not(.hidden)")
+    d1 = page.locator("#goodsSearchResults li button").first
+    check("仓库联动：密封圈@一号仓候选显示『可用库存 0（无库存）』",
+          "可用库存 0" in d1.inner_text() and "无库存" in d1.inner_text(), d1.inner_text())
+    # 切到二号仓 → 在途/残留候选必须被清空（旧仓库数据不得残留）
+    page.locator("#warehouseId").select_option(index=1)
+    page.wait_for_timeout(300)
+    check("仓库联动：切换仓库后候选面板被清空（旧仓候选作废）",
+          page.locator("#goodsSearchResults").evaluate("el => el.classList.contains('hidden')"),
+          page.locator("#goodsSearchResults").inner_text())
+    # 按新仓库重新搜索 → 二号仓有 100
+    page.locator("#goodsTableBody tr:nth-child(1) button[title=搜索备件]").click()
+    page.wait_for_selector("#goodsSearchResults:not(.hidden)")
+    d2 = page.locator("#goodsSearchResults li button").first
+    check("仓库联动：密封圈@二号仓候选显示『可用库存 100 件』", "可用库存 100" in d2.inner_text(), d2.inner_text())
+    d2.click()
+    check("仓库联动：选中行库存列显示二号仓 100 件",
+          "100" in page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text(),
+          page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text())
+    page.locator("#goodsTableBody tr:nth-child(1) input[type=number]").fill("2")
+    page.wait_for_timeout(200)
+    check("仓库联动：数量 2 ≤ 二号仓库存 100 → 无超库存提示",
+          page.locator("#goodsTableBody .qty-warn:not(.hidden)").count() == 0)
+    # 切回一号仓 → 已选行库存快照必须按一号仓刷新为 0，且 2 > 0 触发软提示
+    page.locator("#warehouseId").select_option(index=0)
+    page.wait_for_selector("#goodsTableBody .qty-warn:not(.hidden)", timeout=3000)
+    check("仓库联动：切回一号仓后已选行库存列刷新为 0（无库存）",
+          "无库存" in page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text(),
+          page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text())
+    check("仓库联动：数量 2 超过一号仓库存 0 → 超库存软提示重新出现",
+          "超过可用库存" in page.locator("#goodsTableBody tr:nth-child(1)").inner_text())
+    # 再切回二号仓 → 库存恢复 100、软提示消除（证明快照随仓库双向刷新）
+    page.locator("#warehouseId").select_option(index=1)
+    wait_js(page,
+            "Array.from(document.querySelectorAll('#goodsTableBody tr')).some(tr => tr.innerText.includes('100') "
+            "&& !tr.querySelector('.qty-warn:not(.hidden)'))")
+    check("仓库联动：再切回二号仓 → 库存列恢复 100 件且软提示消除",
+          "100" in page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text()
+          and page.locator("#goodsTableBody .qty-warn:not(.hidden)").count() == 0,
+          page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text())
+    # 移除演练行，恢复干净状态后继续原流程
+    page.locator("#goodsTableBody tr:nth-child(1) button[title=移除该行]").click()
+    check("仓库联动：演练行已移除", page.query_selector_all("#goodsTableBody tr") == [])
+    # 演练结束于二号仓——把仓库选择器复位为默认一号仓，后续主流程按 W1 语义断言
+    # （此时无已选行，切换不触发库存刷新请求）
+    page.locator("#warehouseId").select_option(index=0)
+    page.wait_for_timeout(200)
 
     # 添加第一行
     page.click("#addGoodsRowBtn")
@@ -328,17 +407,20 @@ with sync_playwright() as p:
         check("详情弹窗：通过确认对话框说明将扣减库存且不可撤销",
               len(dialogs) >= 1 and "扣减" in dialogs[-1] and "不可" in dialogs[-1], dialogs)
         # 列表状态更新
-        page.wait_for_function(
-            "Array.from(document.querySelectorAll('#recentBody tr')).some(tr => tr.innerText.includes('已通过'))",
-            timeout=5000)
+        wait_js(page,
+                "Array.from(document.querySelectorAll('#recentBody tr')).some(tr => tr.innerText.includes('已通过'))")
         check("管理页：处理后列表状态更新为『已通过』", True)
 
     # ================= 3b. 通过即扣库存（v2）：扣减金额 / 状态机 / 不足拦截 / 驳回不动库存 =================
+    # Playwright 的上下文级 extra_http_headers 会覆盖 fetch 的逐请求头（实测），
+    # 故进入 API 侧断言前清空上下文头，让下方逐请求的 X-Real-IP 别名（.201/.202）真正生效
+    ctx.set_extra_http_headers({})
+    # X-Real-IP 别名：API 侧的搜索/提交与浏览器页面流（8.8.8.210）的限流分桶，避免 E2E 撞 429
     def api_call(method, path, body=None):
         return page.evaluate("""async ([m, u, b]) => {
             const resp = await fetch(u, {
                 method: m,
-                headers: b ? {'Content-Type': 'application/json'} : {},
+                headers: Object.assign({'X-Real-IP': '8.8.8.201'}, b ? {'Content-Type': 'application/json'} : {}),
                 body: b ? JSON.stringify(b) : undefined,
                 credentials: 'include'
             });
@@ -347,19 +429,28 @@ with sync_playwright() as p:
             return { status: resp.status, data: data };
         }""", [method, path, body])
 
-    def stock_of(barcode):
-        return page.evaluate("""async (q) => {
-            const resp = await fetch('api/public/goods-search?q=' + q, { credentials: 'include' });
+    def stock_of(barcode, wh=None):
+        return page.evaluate("""async ([q, wh]) => {
+            let url = 'api/public/goods-search?q=' + encodeURIComponent(q);
+            if (wh) url += '&warehouse_id=' + encodeURIComponent(wh);
+            const resp = await fetch(url, { credentials: 'include', headers: {'X-Real-IP': '8.8.8.202'} });
+            if (!resp.ok) throw new Error('stock 查询失败: HTTP_' + resp.status + '（' + url + '）');
             const data = await resp.json().catch(() => null);
-            return data && data.length ? data[0].available_stock : null;
-        }""", barcode)
+            if (!data) return null;
+            const hit = data.find(g => g.barcode === q);
+            return hit ? hit.available_stock : null;
+        }""", [barcode, wh])
 
-    whid = page.evaluate("""async () => {
-        const resp = await fetch('api/public/warehouses', { credentials: 'include' });
-        const d = await resp.json().catch(() => null);
-        return d && d.length ? d[0].id : null;
-    }""")
-    check("仓库接口：public/warehouses 返回一号仓", whid is not None, whid)
+    wh_list = page.evaluate("""async () => {
+        const resp = await fetch('api/public/warehouses', {
+            credentials: 'include', headers: {'X-Real-IP': '8.8.8.202'}
+        });
+        return await resp.json().catch(() => null);
+    }""") or []
+    whid = wh_list[0]["id"] if wh_list else None
+    whid2 = wh_list[1]["id"] if len(wh_list) > 1 else None
+    check("仓库接口：public/warehouses 返回两仓（一号仓+二号仓）",
+          whid is not None and whid2 is not None and len(wh_list) == 2, wh_list)
 
     # 取 -0001 申请单 id（用于重复处理验证）
     rid = page.evaluate("""() => {
@@ -371,9 +462,13 @@ with sync_playwright() as p:
     }""")
     check("扣库存：取到 -0001 申请单 id", rid is not None, rid)
 
-    # 通过后的库存变化：轴承 12→9（扣 3）；垫片 5→2（归档单已扣 1 + 本单扣 2）
-    check("扣库存：轴承 12→9（通过扣减 3）", stock_of("8888001") == 9.0, stock_of("8888001"))
-    check("扣库存：垫片 5→2（归档单扣 1 + 本单扣 2）", stock_of("8888003") == 2.0, stock_of("8888003"))
+    # 通过后的库存变化（按仓库断言，评审 P1）：一号仓 轴承 12→9（扣 3）、垫片 5→2（归档单已扣 1 + 本单扣 2）；二号仓不受影响
+    _v = stock_of("8888001", whid)
+    check("扣库存：一号仓 轴承 12→9（通过扣减 3）", _v == 9.0, _v)
+    _v = stock_of("8888003", whid)
+    check("扣库存：一号仓 垫片 5→2（归档单扣 1 + 本单扣 2）", _v == 2.0, _v)
+    _v = stock_of("8888002", whid2)
+    check("扣库存：二号仓 密封圈不受影响（仍 100）", _v == 100.0, _v)
 
     # 重复通过 → 状态机拦截（409），库存不变
     if rid is not None:
@@ -381,7 +476,51 @@ with sync_playwright() as p:
         check("状态机：重复通过被拦截（409）", ra["status"] == 409, ra)
         check("状态机：拦截信息说明已处理",
               ra["data"] is not None and "已处理" in str(ra["data"].get("detail", "")), ra)
-        check("扣库存：重复通过失败后库存不变（轴承仍 9）", stock_of("8888001") == 9.0, stock_of("8888001"))
+        _v = stock_of("8888001", whid)
+        check("扣库存：重复通过失败后库存不变（一号仓轴承仍 9）", _v == 9.0, _v)
+
+    # ---------- 双仓审批（评审 P1：审批扣减仓库 = 申请仓库 = 页面展示仓库） ----------
+    # 取 -0002 申请单 id（二号仓 密封圈 x50）
+    r3_id = page.evaluate("""() => {
+        const trs = Array.from(document.querySelectorAll('#recentBody tr'));
+        const t = trs.find(tr => tr.innerText.includes('-0002'));
+        if (!t) return null;
+        const btn = t.querySelector('button[data-act]');
+        return btn ? parseInt(btn.dataset.id, 10) : null;
+    }""")
+    check("双仓审批：取到二号仓申请单 id（-0002）", r3_id is not None, r3_id)
+    if r3_id is not None:
+        st_before = stock_of("8888002", whid2)
+        r3 = api_call("POST", "api/requests/%d/status" % r3_id, {"status": "approved"})
+        check("双仓审批：二号仓申请单通过（200）", r3["status"] == 200, r3)
+        check("双仓审批：响应含申请仓库名（二号仓）",
+              r3["data"] is not None and r3["data"].get("warehouse_name") == "二号仓", r3)
+        _v = stock_of("8888002", whid2)
+        check("双仓审批：二号仓 密封圈 100→50（扣 50）", _v == st_before - 50, _v)
+        check("双仓审批：一号仓库存完全不受影响（轴承 9 / 垫片 2）",
+              stock_of("8888001", whid) == 9.0 and stock_of("8888003", whid) == 2.0,
+              (stock_of("8888001", whid), stock_of("8888003", whid)))
+        r3b = api_call("POST", "api/requests/%d/status" % r3_id, {"status": "approved"})
+        check("双仓审批：重复通过被拦截（409），不二次扣减",
+              r3b["status"] == 409 and stock_of("8888002", whid2) == st_before - 50, (r3b, stock_of("8888002", whid2)))
+
+    # 多仓环境未指定仓库的申请单 → 审批必须 400（无法确定扣哪个仓），库存不动
+    r4_id = page.evaluate("""() => {
+        const trs = Array.from(document.querySelectorAll('#recentBody tr'));
+        const t = trs.find(tr => tr.innerText.includes('-0003'));
+        if (!t) return null;
+        const btn = t.querySelector('button[data-act]');
+        return btn ? parseInt(btn.dataset.id, 10) : null;
+    }""")
+    check("多仓拦截：取到未指定仓库申请单 id（-0003）", r4_id is not None, r4_id)
+    if r4_id is not None:
+        r4 = api_call("POST", "api/requests/%d/status" % r4_id, {"status": "approved"})
+        check("多仓拦截：未指定仓库审批被拒（400）", r4["status"] == 400, r4)
+        check("多仓拦截：信息提示无法确定扣减仓库",
+              r4["data"] is not None and "无法确定" in str(r4["data"].get("detail", "")), r4)
+        check("多仓拦截：两仓库存均不变（轴承 9 / 密封圈 50）",
+              stock_of("8888001", whid) == 9.0 and stock_of("8888002", whid2) == 50.0,
+              (stock_of("8888001", whid), stock_of("8888002", whid2)))
 
     # 库存不足 → 通过被拦截（400），库存不变、申请单仍待处理
     nr = api_call("POST", "api/requests/", {
@@ -397,7 +536,8 @@ with sync_playwright() as p:
         check("不足拦截：信息含需要/现有数量",
               ro["data"] is not None and "库存不足" in str(ro["data"].get("detail", ""))
               and "需要" in str(ro["data"].get("detail", "")), ro)
-        check("不足拦截：库存不变（轴承仍 9）", stock_of("8888001") == 9.0, stock_of("8888001"))
+        _v = stock_of("8888001", whid)
+        check("不足拦截：库存不变（一号仓轴承仍 9）", _v == 9.0, _v)
         lst = api_call("GET", "api/requests/")
         row = [x for x in (lst["data"] or []) if x["id"] == over_id]
         check("不足拦截：申请单仍为待处理", bool(row) and row[0]["status"] == "pending", row)
@@ -410,10 +550,10 @@ with sync_playwright() as p:
         "items": [{"barcode": "8888003", "quantity": 1}]})
     if nr2["status"] == 201:
         rej_id = nr2["data"]["id"]
-        before = stock_of("8888003")
+        before = stock_of("8888003", whid)
         rr = api_call("POST", "api/requests/%d/status" % rej_id, {"status": "rejected"})
         check("驳回：驳回成功（200）", rr["status"] == 200, rr)
-        check("驳回：库存不变（垫片仍 %s）" % before, stock_of("8888003") == before, stock_of("8888003"))
+        check("驳回：库存不变（一号仓垫片仍 %s）" % before, stock_of("8888003", whid) == before, stock_of("8888003", whid))
         rr2 = api_call("POST", "api/requests/%d/status" % rej_id, {"status": "rejected"})
         check("状态机：重复驳回被拦截（409）", rr2["status"] == 409, rr2)
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-9Hlm1es+J0boUWP1VypCDgRgaeOl6HClv/a2EzUCP8I='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Kk0d3L1WITfQeHI4RJP0MJ73gGahiGWoXrWrTA1XtvU='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -62,7 +62,7 @@
                                         class="w-full px-4 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300">
                                     <option value="">仓库列表加载中…</option>
                                 </select>
-                                <p class="text-xs text-gray-400 mt-1">申请通过后，将从该仓库扣减所选货物的库存</p>
+                                <p class="text-xs text-gray-400 mt-1">备件可用库存按该仓库显示；申请通过后，将从该仓库扣减所选货物的库存</p>
                             </div>
                         </div>
 
@@ -192,6 +192,55 @@
                 }
             }
             loadWarehouses();
+
+            // ---------- 仓库切换联动（评审 P1：库存展示必须与审批扣减仓库一致） ----------
+            // 切换仓库后：1) 在途搜索全部作废（epoch 递增，到达即丢弃）；
+            // 2) 清空候选面板（候选里的库存是旧仓库的数据）；
+            // 3) 已选备件按新仓库重新取可用库存并重算"超可用库存"软提示。
+            let whEpoch = 0; // 仓库变更代：已选备件库存快照的失效标记
+            function clearCandidates() {
+                panelOwner = null;
+                goodsResults.classList.add('hidden');
+                goodsResults.innerHTML = '';
+                goodsStatus.classList.add('hidden');
+            }
+            async function refreshPickedStock() {
+                const picked = goodsRows.filter(function (r) { return r.picked && r.g; });
+                if (!picked.length) return;
+                const myEpoch = whEpoch;
+                const wh = warehouseSelect.value;
+                if (!wh) return;
+                let allOk = true;
+                await Promise.all(picked.map(async function (row) {
+                    try {
+                        const resp = await fetch('api/public/goods-search?q=' + encodeURIComponent(row.g.barcode) +
+                                                 '&warehouse_id=' + encodeURIComponent(wh));
+                        const data = await resp.json().catch(function () { return []; });
+                        if (!resp.ok) { allOk = false; return; }
+                        if (myEpoch !== whEpoch) return; // 期间又切了仓库，本次结果作废
+                        const hit = Array.isArray(data)
+                            ? data.find(function (g) { return g && g.barcode === row.g.barcode; })
+                            : null;
+                        row.g.available_stock = hit ? (Number(hit.available_stock) || 0) : 0;
+                    } catch (e) {
+                        allOk = false;
+                    }
+                }));
+                if (myEpoch !== whEpoch) return;
+                renderGoodsTable(); // 重渲染库存列，并按新库存重算"超出可用库存"软提示
+                if (!allOk) {
+                    showGoodsStatus('部分备件库存刷新失败，请重新搜索确认', true);
+                } else {
+                    showGoodsStatus('仓库已切换，已选备件库存已按新仓库刷新', false);
+                }
+            }
+            warehouseSelect.addEventListener('change', function () {
+                if (!warehousesReady) return;
+                whEpoch++;
+                searchEpoch++;   // 在途搜索结果作废（到达时 epoch 不匹配即丢弃）
+                clearCandidates();
+                refreshPickedStock();
+            });
 
             // ---------- 相关货物（选填，多行：添加行 → 行内搜索选择备件 → 显示可用库存） ----------
             // 每行状态：{ rowId: 稳定id, picked: bool, g: {barcode,name,spec,unit,available_stock}|null, qty: '', keyword: '' }
@@ -389,7 +438,12 @@
                 goodsResults.classList.add('hidden');
                 goodsResults.innerHTML = '';
                 try {
-                    const resp = await fetch('api/public/goods-search?q=' + encodeURIComponent(keyword));
+                    // 评审 P1：搜索必须携带当前所选仓库，可用库存按该仓库汇总，
+                    // 与审批实际扣减仓库一致（否则多仓时页面显示的是别的仓库的库存）
+                    let searchUrl = 'api/public/goods-search?q=' + encodeURIComponent(keyword);
+                    const curWh = warehouseSelect.value;
+                    if (curWh) searchUrl += '&warehouse_id=' + encodeURIComponent(curWh);
+                    const resp = await fetch(searchUrl);
                     const data = await resp.json().catch(function () { return []; });
                     if (!resp.ok) {
                         throw new Error((data && data.detail) || ('搜索失败（HTTP ' + resp.status + '）'));
