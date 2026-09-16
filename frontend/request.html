@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-9RxWUfPpirA4mlTLEspAFhQpqMNUh/2lofoGyr6r4Fc='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ySg3vmez06QOvqkN2US5UnWLwzMuBWisvUjahuWL+Lw='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -59,30 +59,30 @@
                         </div>
 
                         <div id="goodsSection">
-                            <label class="block text-sm font-medium text-gray-700 mb-1">相关货物 <span class="text-xs text-gray-400">选填，可添加多行</span></label>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">相关货物 <span class="text-xs text-gray-400">选填 · 可添加多行 · 选择备件后显示可用库存</span></label>
                             <div class="border border-gray-200 rounded-md overflow-hidden">
                                 <table class="w-full text-sm">
                                     <thead class="bg-gray-50">
                                         <tr>
-                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">货物</th>
-                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 w-28">数量 <span class="text-red-500">*</span></th>
-                                            <th class="px-2 py-2 w-10"></th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 w-10">#</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500">备件</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 w-24">可用库存</th>
+                                            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 w-24">数量 <span class="text-red-500">*</span></th>
+                                            <th class="px-2 py-2 w-20"></th>
                                         </tr>
                                     </thead>
                                     <tbody id="goodsTableBody" class="divide-y divide-gray-100"></tbody>
                                 </table>
-                                <p id="goodsEmptyHint" class="px-3 py-3 text-xs text-gray-400 text-center">尚未添加货物，可在下方搜索后点击加入</p>
+                                <p id="goodsEmptyHint" class="px-3 py-3 text-xs text-gray-400 text-center">尚未添加货物：点击下方"添加货物行"，在该行内搜索并选择备件</p>
+                                <div class="px-3 py-2 border-t border-gray-100 flex items-center justify-between bg-gray-50">
+                                    <button type="button" id="addGoodsRowBtn"
+                                            class="px-3 py-1.5 text-sm font-medium text-primary rounded-md hover:bg-blue-50 transition-all-300">
+                                        <i class="fa fa-plus mr-1"></i>添加货物行
+                                    </button>
+                                    <span id="goodsRowCount" class="text-xs text-gray-400"></span>
+                                </div>
                             </div>
-                            <div class="flex gap-2 mt-2">
-                                <input type="text" id="goodsSearchInput" maxlength="100"
-                                       class="flex-1 px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
-                                       placeholder="输入货物条码或名称搜索">
-                                <button type="button" id="goodsSearchBtn"
-                                        class="px-4 py-2 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-all-300">
-                                    <i class="fa fa-search mr-1"></i>搜索
-                                </button>
-                            </div>
-                            <div id="goodsSearchStatus" class="hidden text-xs text-gray-400 mt-1"></div>
+                            <div id="goodsSearchStatus" class="hidden text-xs text-gray-400 mt-2"></div>
                             <ul id="goodsSearchResults" class="hidden mt-1 border border-gray-200 rounded-md divide-y divide-gray-100 bg-white max-h-56 overflow-y-auto"></ul>
                         </div>
 
@@ -153,14 +153,18 @@
                 errorBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
 
-            // ---------- 相关货物（选填，多行，与系统内货物联动） ----------
-            const goodsItems = [];   // 每行：{barcode, name, spec, unit, qty}
+            // ---------- 相关货物（选填，多行：添加行 → 行内搜索选择备件 → 显示可用库存） ----------
+            // 每行状态：{ rowId: 稳定id, picked: bool, g: {barcode,name,spec,unit,available_stock}|null, qty: '', keyword: '' }
+            const goodsRows = [];
             const goodsTableBody = document.getElementById('goodsTableBody');
             const goodsEmptyHint = document.getElementById('goodsEmptyHint');
-            const goodsSearchInput = document.getElementById('goodsSearchInput');
-            const goodsSearchBtn = document.getElementById('goodsSearchBtn');
+            const goodsRowCount = document.getElementById('goodsRowCount');
+            const addGoodsRowBtn = document.getElementById('addGoodsRowBtn');
             const goodsResults = document.getElementById('goodsSearchResults');
             const goodsStatus = document.getElementById('goodsSearchStatus');
+            let rowIdSeq = 0;      // 行稳定 ID（重渲染后不变，用于精确定位某行）
+            let searchEpoch = 0;   // 全局搜索序号：只有最新一次搜索的结果可接管候选面板（防交错竞态）
+            let panelOwner = null; // { row, epoch } — 当前候选面板归属的行
 
             function showGoodsStatus(message, isError) {
                 goodsStatus.textContent = message;
@@ -168,76 +172,179 @@
                 goodsStatus.classList.remove('hidden');
             }
 
+            function fmtNum(v) {
+                const n = Number(v);
+                if (!isFinite(n)) return '0';
+                return String(parseFloat(n.toFixed(4)));
+            }
+
+            function stockCellHTML(g) {
+                const n = Number(g.available_stock) || 0;
+                const unit = g.unit ? ' ' + g.unit : '';
+                if (n > 0) {
+                    return '<span class="font-medium text-green-700">' + fmtNum(n) + unit + '</span>';
+                }
+                return '<span class="font-medium text-red-500">0' + unit + '（无库存）</span>';
+            }
+
             function renderGoodsTable() {
-                goodsEmptyHint.classList.toggle('hidden', goodsItems.length > 0);
+                goodsEmptyHint.classList.toggle('hidden', goodsRows.length > 0);
+                const pickedCount = goodsRows.filter(function (r) { return r.picked; }).length;
+                goodsRowCount.textContent = goodsRows.length ? (goodsRows.length + ' 行 · 已选 ' + pickedCount + ' 种备件') : '';
                 goodsTableBody.innerHTML = '';
-                goodsItems.forEach(function (g, i) {
+                goodsRows.forEach(function (row, i) {
                     const tr = document.createElement('tr');
-                    const tdName = document.createElement('td');
-                    tdName.className = 'px-3 py-2';
-                    const nameP = document.createElement('p');
-                    nameP.className = 'text-sm text-gray-800 font-medium';
-                    nameP.textContent = g.name;
-                    const metaP = document.createElement('p');
-                    metaP.className = 'text-xs text-gray-400';
-                    metaP.textContent = g.barcode + (g.spec ? ' · ' + g.spec : '') + (g.unit ? ' · ' + g.unit : '');
-                    tdName.appendChild(nameP);
-                    tdName.appendChild(metaP);
+                    tr.dataset.rowId = row.rowId;
+
+                    const tdIdx = document.createElement('td');
+                    tdIdx.className = 'px-3 py-2 text-gray-400';
+                    tdIdx.textContent = String(i + 1);
+                    tr.appendChild(tdIdx);
+
+                    // 备件列：未选择 → 行内搜索；已选择 → 备件信息
+                    const tdPart = document.createElement('td');
+                    tdPart.className = 'px-3 py-2';
+                    if (row.picked) {
+                        const nameP = document.createElement('p');
+                        nameP.className = 'text-sm text-gray-800 font-medium';
+                        nameP.textContent = row.g.name;
+                        const metaP = document.createElement('p');
+                        metaP.className = 'text-xs text-gray-400';
+                        metaP.textContent = row.g.barcode + (row.g.spec ? ' · ' + row.g.spec : '');
+                        tdPart.appendChild(nameP);
+                        tdPart.appendChild(metaP);
+                    } else {
+                        const wrap = document.createElement('div');
+                        wrap.className = 'flex gap-2';
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.maxLength = 100;
+                        input.placeholder = '输入名称或条码搜索备件';
+                        input.className = 'flex-1 min-w-0 px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent';
+                        input.value = row.keyword || '';
+                        input.addEventListener('input', function () { row.keyword = input.value; });
+                        const btn = document.createElement('button');
+                        btn.type = 'button';
+                        btn.className = 'px-2.5 py-1.5 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-all-300';
+                        btn.title = '搜索备件';
+                        const icon = document.createElement('i');
+                        icon.className = 'fa fa-search';
+                        btn.appendChild(icon);
+                        const doSearch = function () { searchRowGoods(i, input); };
+                        btn.addEventListener('click', doSearch);
+                        input.addEventListener('keydown', function (e) {
+                            if (e.key === 'Enter') { e.preventDefault(); doSearch(); }
+                        });
+                        wrap.appendChild(input);
+                        wrap.appendChild(btn);
+                        tdPart.appendChild(wrap);
+                    }
+                    tr.appendChild(tdPart);
+
+                    // 可用库存列
+                    const tdStock = document.createElement('td');
+                    tdStock.className = 'px-3 py-2 text-sm';
+                    tdStock.innerHTML = row.picked ? stockCellHTML(row.g) : '<span class="text-gray-400">—</span>';
+                    tr.appendChild(tdStock);
+
+                    // 数量列（已选择备件后可填；超过可用库存给软提示，不阻断提交）
                     const tdQty = document.createElement('td');
                     tdQty.className = 'px-3 py-2';
-                    const qtyInput = document.createElement('input');
-                    qtyInput.type = 'number';
-                    qtyInput.min = '0.01';
-                    qtyInput.step = 'any';
-                    qtyInput.placeholder = '0';
-                    qtyInput.className = 'w-full px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent';
-                    qtyInput.value = g.qty;
-                    qtyInput.addEventListener('input', function () { g.qty = qtyInput.value; });
-                    tdQty.appendChild(qtyInput);
+                    if (row.picked) {
+                        const qtyInput = document.createElement('input');
+                        qtyInput.type = 'number';
+                        qtyInput.min = '0.01';
+                        qtyInput.step = 'any';
+                        qtyInput.placeholder = '0';
+                        qtyInput.className = 'w-full px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent';
+                        qtyInput.value = row.qty;
+                        const warn = document.createElement('p');
+                        warn.className = 'qty-warn hidden text-xs text-red-500 mt-0.5';
+                        warn.textContent = '超过可用库存';
+                        const refreshWarn = function () {
+                            const q = parseFloat(qtyInput.value);
+                            const over = isFinite(q) && q > 0 && q > (Number(row.g.available_stock) || 0);
+                            warn.classList.toggle('hidden', !over);
+                        };
+                        qtyInput.addEventListener('input', function () { row.qty = qtyInput.value; refreshWarn(); });
+                        tdQty.appendChild(qtyInput);
+                        tdQty.appendChild(warn);
+                        refreshWarn();
+                    } else {
+                        tdQty.innerHTML = '<span class="text-gray-400">—</span>';
+                    }
+                    tr.appendChild(tdQty);
+
+                    // 操作列：已选择 → 更换/移除；未选择 → 移除
                     const tdDel = document.createElement('td');
-                    tdDel.className = 'px-2 py-2 text-center';
+                    tdDel.className = 'px-2 py-2 text-right whitespace-nowrap';
+                    if (row.picked) {
+                        const changeBtn = document.createElement('button');
+                        changeBtn.type = 'button';
+                        changeBtn.className = 'text-xs text-primary hover:underline';
+                        changeBtn.textContent = '更换';
+                        changeBtn.addEventListener('click', function () {
+                            row.picked = false;
+                            row.g = null;
+                            row.qty = '';
+                            if (panelOwner && panelOwner.row === row) {
+                                panelOwner = null;
+                                goodsResults.classList.add('hidden');
+                                goodsResults.innerHTML = '';
+                                goodsStatus.classList.add('hidden');
+                            }
+                            renderGoodsTable();
+                            focusRowSearch(row);
+                        });
+                        tdDel.appendChild(changeBtn);
+                        tdDel.appendChild(document.createTextNode(' '));
+                    }
                     const delBtn = document.createElement('button');
                     delBtn.type = 'button';
-                    delBtn.className = 'text-gray-400 hover:text-red-500';
+                    delBtn.className = 'text-gray-400 hover:text-red-500 ml-1';
                     delBtn.title = '移除该行';
-                    const icon = document.createElement('i');
-                    icon.className = 'fa fa-trash';
-                    delBtn.appendChild(icon);
+                    const delIcon = document.createElement('i');
+                    delIcon.className = 'fa fa-trash';
+                    delBtn.appendChild(delIcon);
                     delBtn.addEventListener('click', function () {
-                        goodsItems.splice(i, 1);
+                        goodsRows.splice(goodsRows.indexOf(row), 1);
+                        if (panelOwner && panelOwner.row === row) {
+                            panelOwner = null;
+                            goodsResults.classList.add('hidden');
+                            goodsResults.innerHTML = '';
+                            goodsStatus.classList.add('hidden');
+                        }
                         renderGoodsTable();
                     });
                     tdDel.appendChild(delBtn);
-                    tr.appendChild(tdName);
-                    tr.appendChild(tdQty);
                     tr.appendChild(tdDel);
+
                     goodsTableBody.appendChild(tr);
                 });
             }
 
-            function addGoods(g) {
-                const exists = goodsItems.some(function (x) { return x.barcode === g.barcode; });
-                if (exists) {
-                    showGoodsStatus('该货物已在列表中，请在上方表格填写数量', true);
-                    return false;
-                }
-                goodsItems.push({ barcode: g.barcode, name: g.name, spec: g.spec, unit: g.unit, qty: '' });
-                renderGoodsTable();
-                goodsResults.classList.add('hidden');
-                goodsResults.innerHTML = '';
-                goodsStatus.classList.add('hidden');
-                goodsSearchInput.value = '';
-                const inputs = goodsTableBody.querySelectorAll('input');
-                if (inputs.length) { inputs[inputs.length - 1].focus(); }
-                return true;
+            function focusRowSearch(row) {
+                const tr = goodsTableBody.querySelector('tr[data-row-id="' + row.rowId + '"]');
+                const inp = tr ? tr.querySelector('input[type="text"]') : null;
+                if (inp) { inp.focus(); inp.select(); }
             }
 
-            async function searchGoods() {
-                const keyword = goodsSearchInput.value.trim();
+            addGoodsRowBtn.addEventListener('click', function () {
+                const row = { rowId: ++rowIdSeq, picked: false, g: null, qty: '', keyword: '' };
+                goodsRows.push(row);
+                renderGoodsTable();
+                focusRowSearch(row);
+            });
+
+            async function searchRowGoods(i, input) {
+                const row = goodsRows[i];
+                const keyword = (input ? input.value : '').trim();
+                if (input) row.keyword = input.value;
                 if (!keyword) {
-                    showGoodsStatus('请先输入货物条码或名称', true);
+                    showGoodsStatus('请先输入备件名称或条码', true);
                     return;
                 }
+                const epoch = ++searchEpoch;
                 showGoodsStatus('正在搜索...', false);
                 goodsResults.classList.add('hidden');
                 goodsResults.innerHTML = '';
@@ -247,9 +354,11 @@
                     if (!resp.ok) {
                         throw new Error((data && data.detail) || ('搜索失败（HTTP ' + resp.status + '）'));
                     }
+                    // 过期结果防护：已有更新的搜索、或本行已被移除/重新选择 → 丢弃本次响应（防交错竞态/错行）
+                    if (epoch !== searchEpoch || goodsRows.indexOf(row) === -1 || row.picked) return;
+                    panelOwner = { row: row, epoch: epoch };
                     if (!Array.isArray(data) || data.length === 0) {
-                        goodsStatus.classList.remove('text-red-500');
-                        showGoodsStatus('未找到匹配的货物', false);
+                        showGoodsStatus('未找到匹配的备件', false);
                         return;
                     }
                     data.forEach(function (g) {
@@ -265,26 +374,59 @@
                         metaSpan.className = 'block text-xs text-gray-500';
                         metaSpan.textContent = g.barcode + (g.spec ? ' · ' + g.spec : '') + (g.unit ? ' · ' + g.unit : '');
                         btn.appendChild(metaSpan);
-                        btn.addEventListener('click', function () {
-                            addGoods(g);
-                        });
+                        const stockSpan = document.createElement('span');
+                        stockSpan.className = 'block text-xs mt-0.5';
+                        const n = Number(g.available_stock) || 0;
+                        if (n > 0) {
+                            stockSpan.innerHTML =
+                                '<span class="text-green-700 font-medium">可用库存 ' + fmtNum(n) + (g.unit ? ' ' + g.unit : '') + '</span>';
+                        } else {
+                            stockSpan.innerHTML =
+                                '<span class="text-red-500 font-medium">可用库存 0' + (g.unit ? ' ' + g.unit : '') + '（无库存，可先申请）</span>';
+                        }
+                        btn.appendChild(stockSpan);
+                        btn.addEventListener('click', function () { selectRowGoods(row, g); });
                         li.appendChild(btn);
                         goodsResults.appendChild(li);
                     });
                     goodsStatus.classList.add('hidden');
                     goodsResults.classList.remove('hidden');
                 } catch (error) {
-                    showGoodsStatus(error.message || '网络错误，请稍后重试', true);
+                    if (epoch === searchEpoch) {
+                        showGoodsStatus(error.message || '网络错误，请稍后重试', true);
+                    }
                 }
             }
 
-            goodsSearchBtn.addEventListener('click', searchGoods);
-            goodsSearchInput.addEventListener('keydown', function (e) {
-                if (e.key === 'Enter') {
-                    e.preventDefault();
-                    searchGoods();
+            function selectRowGoods(row, g) {
+                if (!row || !panelOwner || panelOwner.row !== row) {
+                    showGoodsStatus('搜索结果已失效，请重新搜索后再选择', true);
+                    return;
                 }
-            });
+                let dupIndex = -1;
+                goodsRows.forEach(function (r, idx) {
+                    if (r !== row && r.picked && r.g && r.g.barcode === g.barcode) dupIndex = idx;
+                });
+                if (dupIndex >= 0) {
+                    showGoodsStatus('该备件已在第 ' + (dupIndex + 1) + ' 行，请直接修改该行数量', true);
+                    return;
+                }
+                row.picked = true;
+                row.g = {
+                    barcode: g.barcode, name: g.name, spec: g.spec, unit: g.unit,
+                    available_stock: Number(g.available_stock) || 0
+                };
+                row.qty = '';
+                row.keyword = '';
+                panelOwner = null;
+                renderGoodsTable();
+                goodsResults.classList.add('hidden');
+                goodsResults.innerHTML = '';
+                goodsStatus.classList.add('hidden');
+                const qtyTr = goodsTableBody.querySelector('tr[data-row-id="' + row.rowId + '"]');
+                const qtyInput = qtyTr ? qtyTr.querySelector('input[type="number"]') : null;
+                if (qtyInput) qtyInput.focus();
+            }
 
             form.addEventListener('submit', async function (event) {
                 event.preventDefault();
@@ -307,17 +449,19 @@
                     return;
                 }
 
-                // 相关货物（选填，可多行）：已添加的行必须填数量
+                // 相关货物（选填，可多行）：未选择备件的行不含数据、不参与提交；
+                // 已选择备件的行必须填写数量（大于 0）
                 // 安全约定：只提交 条码+数量；名称/规格/单位由后端按条码查库填充，不传客户端快照
                 const items = [];
-                for (let i = 0; i < goodsItems.length; i++) {
-                    const g = goodsItems[i];
-                    const qty = parseFloat(g.qty);
+                for (let i = 0; i < goodsRows.length; i++) {
+                    const row = goodsRows[i];
+                    if (!row.picked || !row.g) continue;
+                    const qty = parseFloat(row.qty);
                     if (!isFinite(qty) || qty <= 0) {
-                        showError('请填写第 ' + (i + 1) + ' 行货物（' + g.name + '）的数量（大于 0）');
+                        showError('请填写第 ' + (i + 1) + ' 行备件（' + row.g.name + '）的数量（大于 0）');
                         return;
                     }
-                    items.push({ barcode: g.barcode, quantity: qty });
+                    items.push({ barcode: row.g.barcode, quantity: qty });
                 }
                 payload.items = items;
 
@@ -347,7 +491,8 @@
 
             document.getElementById('resetBtn').addEventListener('click', function () {
                 form.reset();
-                goodsItems.length = 0;
+                goodsRows.length = 0;
+                panelOwner = null;
                 renderGoodsTable();
                 goodsResults.classList.add('hidden');
                 goodsResults.innerHTML = '';

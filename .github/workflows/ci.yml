@@ -42,3 +42,31 @@ jobs:
         env:
           WMS_DATABASE_URL: postgresql+psycopg2://wms:wms_test_ci@localhost:5432/wms_test
         run: bash tests/run_regression.sh
+
+  e2e:
+    name: 浏览器端到端（Playwright / SQLite）
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: |
+          pip install -r requirements.txt
+          pip install playwright
+
+      - name: 安装 Chromium（含系统库）
+        run: |
+          mkdir -p .pw_browsers
+          PLAYWRIGHT_BROWSERS_PATH="$PWD/.pw_browsers" playwright install --with-deps chromium
+
+      - name: 运行 Playwright E2E
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw_browsers
+          PW_E2E_HOME: ${{ github.workspace }}/.pw_home
+        run: bash tests/run_pw_e2e.sh

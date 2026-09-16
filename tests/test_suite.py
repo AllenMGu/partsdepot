@@ -398,9 +398,15 @@ check("货物搜索：空关键字 → 400", s == 400, f"status={s}")
 s, hits = req("GET", "/api/public/goods-search?q=G001")
 first = (hits or [None])[0] if isinstance(hits, list) else None
 check("货物搜索：条码模糊命中", s == 200 and isinstance(first, dict) and first.get("barcode") == "G001", f"status={s} hits={hits}")
-check("货物搜索：返回字段仅 barcode/name/spec/unit（无单价）",
-      isinstance(first, dict) and set(first.keys()) == {"barcode", "name", "spec", "unit"},
+check("货物搜索：返回字段仅 barcode/name/spec/unit/available_stock（无单价）",
+      isinstance(first, dict) and set(first.keys()) == {"barcode", "name", "spec", "unit", "available_stock"},
       f"keys={list(first.keys()) if isinstance(first, dict) else first}")
+# 可用库存（产品需求：申请页选备件时显示可用库存）= 该货物全仓库存合计
+s_stock, stock_rows = req("GET", "/api/stock/?goods_barcode=G001", token=admin)
+_total = sum(r.get("quantity", 0) for r in (stock_rows or []) if isinstance(r, dict) and r.get("goods_barcode") == "G001")
+check("货物搜索：available_stock = 当前全仓库存合计",
+      isinstance(first, dict) and abs(float(first.get("available_stock") or 0) - _total) < 1e-6,
+      f"search={first} stock_total={_total}")
 s, hits = req("GET", "/api/public/goods-search?q=" + urllib.parse.quote("测试物料"))
 check("货物搜索：名称搜索命中", s == 200 and isinstance(hits, list) and any(h.get("barcode") == "G001" for h in hits), f"status={s} hits={hits}")
 s, hits = req("GET", "/api/public/goods-search?q=does-not-exist-xyz")
