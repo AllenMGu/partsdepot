@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-LrsNeG4aIIUYECzXrOVka3ufhQEWg/UUc0FGPiojfp0='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-i9Cnhs5mcKfnc3F7R9q2xvOQ4sBjTTeZ1xmBY28bKho='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>盘点管理 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -671,16 +671,16 @@
                         </td>
                         <td class="px-6 py-4">
                             <div class="flex space-x-2">
-                                <button onclick="viewCheckOrder(${Number(order.id) || 0})" class="px-3 py-1 bg-info text-white text-sm rounded-md hover:bg-primary">
+                                <button data-act="view-check" data-id="${Number(order.id) || 0}" class="px-3 py-1 bg-info text-white text-sm rounded-md hover:bg-primary">
                                     <i class="fa fa-eye mr-1"></i> 查看
                                 </button>
                                 ${order.status !== 'COMPLETED' ? `
-                                    <button onclick="startCheckOrder(${Number(order.id) || 0})" class="px-3 py-1 bg-primary text-white text-sm rounded-md hover:bg-secondary">
+                                    <button data-act="start-check" data-id="${Number(order.id) || 0}" class="px-3 py-1 bg-primary text-white text-sm rounded-md hover:bg-secondary">
                                         <i class="fa fa-qrcode mr-1"></i> 扫码盘点
                                     </button>
                                 ` : ''}
                                 ${order.status === 'COMPLETED' ? `
-                                    <button onclick="exportCheckOrder(${Number(order.id) || 0})" class="px-3 py-1 bg-success text-white text-sm rounded-md hover:bg-green-700">
+                                    <button data-act="export-check" data-id="${Number(order.id) || 0}" class="px-3 py-1 bg-success text-white text-sm rounded-md hover:bg-green-700">
                                         <i class="fa fa-file-excel-o mr-1"></i> 导出
                                     </button>
                                 ` : ''}
@@ -707,6 +707,17 @@
 
         // 设置事件监听器
         function setupCheckEventListeners() {
+            // 动态按钮事件委托（CSP 禁止内联事件处理，改用 data-act 委托）
+            document.getElementById('checkOrdersTableBody').addEventListener('click', function(e) {
+                const btn = e.target.closest('button[data-act]');
+                if (!btn) return;
+                const id = parseInt(btn.getAttribute('data-id'), 10) || 0;
+                const act = btn.getAttribute('data-act');
+                if (act === 'view-check') viewCheckOrder(id);
+                else if (act === 'start-check') startCheckOrder(id);
+                else if (act === 'export-check') exportCheckOrder(id);
+            });
+
             // 创建盘点单按钮
             document.getElementById('createCheckOrderBtn').addEventListener('click', openCreateOrderModal);
 

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-1AL9J0Qkuq4PrdiTvbM82BPLpb7FpOoTivPhezLTAhs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-NdJGbHKIsgTxsvG7CpHpXxiO4ytENKzjIZadZnfVgoM='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>出库单管理 - 备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -527,14 +527,14 @@
                             <div class="text-sm text-gray-500">${new Date(order.create_time).toLocaleString()}</div>
                         </td>
                         <td class="px-6 py-4 whitespace-nowrap text-sm font-medium">
-                            <button onclick="viewOrderDetail(${Number(order.id) || 0})" class="text-primary hover:text-secondary mr-3">
+                            <button data-act="view" data-id="${Number(order.id) || 0}" class="text-primary hover:text-secondary mr-3">
                                 <i class="fa fa-eye"></i> 查看
                             </button>
                             ${order.status === 'DRAFT' ? `
-                                <button onclick="editOrder(${Number(order.id) || 0})" class="text-green-600 hover:text-green-700 mr-3">
+                                <button data-act="edit" data-id="${Number(order.id) || 0}" class="text-green-600 hover:text-green-700 mr-3">
                                     <i class="fa fa-edit"></i> 编辑
                                 </button>
-                                <button onclick="deleteOrder(${Number(order.id) || 0})" class="text-red-600 hover:text-red-700">
+                                <button data-act="delete" data-id="${Number(order.id) || 0}" class="text-red-600 hover:text-red-700">
                                     <i class="fa fa-trash"></i> 删除
                                 </button>
                             ` : ''}
@@ -746,10 +746,10 @@
                                         </td>
                                         ${order.status === 'DRAFT' ? `
                                             <td class="px-4 py-3 text-sm font-medium">
-                                                <button onclick="editOrderItem(${Number(item.id) || 0})" class="text-blue-600 hover:text-blue-700 mr-3">
+                                                <button data-act="edit-item" data-id="${Number(item.id) || 0}" class="text-blue-600 hover:text-blue-700 mr-3">
                                                     <i class="fa fa-edit"></i> 编辑
                                                 </button>
-                                                <button onclick="deleteOrderItem(${Number(item.id) || 0})" class="text-red-600 hover:text-red-700">
+                                                <button data-act="delete-item" data-id="${Number(item.id) || 0}" class="text-red-600 hover:text-red-700">
                                                     <i class="fa fa-trash"></i> 删除
                                                 </button>
                                             </td>
@@ -771,13 +771,13 @@
             // 构建操作按钮
             if (order.status === 'DRAFT') {
                 actions.innerHTML = `
-                    <button onclick="saveOrderHeader()" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 mr-3">
+                    <button data-act="save-header" class="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 mr-3">
                         <i class="fa fa-save mr-1"></i> 保存表头
                     </button>
-                    <button onclick="showAddItemModal()" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-secondary mr-3">
+                    <button data-act="add-item" class="px-4 py-2 bg-primary text-white rounded-md hover:bg-secondary mr-3">
                         <i class="fa fa-plus mr-1"></i> 添加明细
                     </button>
-                    <button onclick="submitOrder()" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
+                    <button data-act="submit" class="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700">
                         <i class="fa fa-check mr-1"></i> 提交出库
                     </button>
                 `;
@@ -1526,6 +1526,35 @@
             
             document.getElementById('cancelAddItem').addEventListener('click', function() {
                 document.getElementById('addItemModal').classList.add('hidden');
+            });
+
+            // 动态按钮事件委托（CSP 禁止内联事件处理，改用 data-act 委托）
+            document.getElementById('orderTableBody').addEventListener('click', function(e) {
+                const btn = e.target.closest('button[data-act]');
+                if (!btn) return;
+                const id = parseInt(btn.getAttribute('data-id'), 10) || 0;
+                const act = btn.getAttribute('data-act');
+                if (act === 'view') viewOrderDetail(id);
+                else if (act === 'edit') editOrder(id);
+                else if (act === 'delete') deleteOrder(id);
+            });
+
+            document.getElementById('orderDetailContent').addEventListener('click', function(e) {
+                const btn = e.target.closest('button[data-act]');
+                if (!btn) return;
+                const id = parseInt(btn.getAttribute('data-id'), 10) || 0;
+                const act = btn.getAttribute('data-act');
+                if (act === 'edit-item') editOrderItem(id);
+                else if (act === 'delete-item') deleteOrderItem(id);
+            });
+
+            document.getElementById('orderDetailActions').addEventListener('click', function(e) {
+                const btn = e.target.closest('button[data-act]');
+                if (!btn) return;
+                const act = btn.getAttribute('data-act');
+                if (act === 'save-header') saveOrderHeader();
+                else if (act === 'add-item') showAddItemModal();
+                else if (act === 'submit') submitOrder();
             });
             
             document.getElementById('itemForm').addEventListener('submit', function(e) {

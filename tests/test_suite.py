@@ -4,7 +4,7 @@
 #      P1-4 LDAP 未配置降级 | P1-5 零仓库新用户 | P1-6 库位管理员专属
 #      P1-7 入库编辑 500 | P1-8 单号撞号 | JWT 30min | 管理员自举 | 静态托管
 #      五轮：终态单据(已提交/已完成)拒绝一切明细写入(顺序不变量) | 测试库安全护栏
-import base64, json, os, sqlite3, sys, threading, time, urllib.parse, urllib.request, urllib.error
+import base64, json, os, re, sqlite3, sys, threading, time, urllib.parse, urllib.request, urllib.error
 
 BASE = os.environ.get("WMS_TEST_BASE", "http://127.0.0.1:8091")
 DB = os.environ.get("WMS_TEST_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "test.db"))
@@ -817,6 +817,21 @@ s, arows = req("GET", "/api/requests/archive/?page=1&page_size=50", token=admin)
 _ka = next((a for a in (arows or []) if isinstance(a, dict) and a.get("original_id") == _kid), None)
 check("出库单：归档行保留 outbound_order_no（归档后详情仍可查）",
       isinstance(_ka, dict) and _ka.get("outbound_order_no") == _k_no, f"row={_ka}")
+
+# 15l. 前端静态守卫：所有页面禁止内联事件处理器（onclick= 等）
+# 背景：页面 CSP 仅放行 self/CDN/内联脚本哈希，浏览器会直接拦截内联事件处理器
+# （点击无反应、无任何报错，见出库单/入库单"查看"失效故障）。动态按钮一律
+# data-act 属性 + 容器事件委托（addEventListener），此守卫防止回归。
+import glob as _glob
+_bad_inline = []
+for _pf in sorted(_glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "*.html"))):
+    _ptext = open(_pf, encoding="utf-8").read()
+    for _attr in ("onclick", "onsubmit", "onchange", "oninput", "onkeyup", "onkeydown", "onfocus", "onblur", "onload"):
+        # 排除 JS 属性赋值（如 window.onload = ...）：属性名前必须是空白/引号等，不能是 . 或标识符字符
+        if re.search(r'(?<![\w.-])%s\s*=' % _attr, _ptext, re.I):
+            _bad_inline.append(os.path.basename(_pf) + ":" + _attr)
+check("前端：所有页面零内联事件处理器（CSP 会静默拦截 onclick= 等，动态按钮须用事件委托）",
+      not _bad_inline, f"offenders={_bad_inline}")
 
 # ---------- 汇总 ----------
 fails = [r for r in results if not r[1]]
