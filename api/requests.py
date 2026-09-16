@@ -163,6 +163,64 @@ def search_goods_public(
         for (gid, b, n, s, u) in rows
     ]
 
+@router.get("/public/stock-lookup", summary="批量按仓可用库存查询（免登录，申请页切仓批量刷新用）")
+def stock_lookup_public(
+    warehouse_id: int,
+    barcodes: str,
+    request: FastAPIRequest,
+    db: Session = Depends(get_db)
+):
+    """一次调用批量返回多条码在指定仓库的可用库存（评审 P2 跟进）。
+
+    背景：申请页切换仓库时，旧实现按已选行数逐条调用 goods-search 刷新库存，
+    行数超过 30 时部分请求会撞搜索限流（30 次/分钟）返回 429，页面残留旧仓库存
+    误导申请人。前端改为一次批量查询，行再多也只占 1 次限流配额。
+
+    契约：
+    - warehouse_id 必填：仅按该仓库汇总（与审批实际扣减仓库一致）；仓库不存在或已停用 → 400。
+    - barcodes 逗号分隔：1~200 条、每条 ≤100 字符；为空 → 400。
+    - 响应按输入顺序去重返回；条码不存在或该仓无库存 → available_stock=0。
+    - 与 goods-search 共用搜索限流桶（同类查询，限流口径一致）。
+    - 安全边界：仅返回 条码 + 可用库存 非敏感字段（不含名称/单价等）。
+    """
+    codes = [c.strip() for c in (barcodes or "").split(",")]
+    codes = [c for c in codes if c]
+    if not codes:
+        raise HTTPException(status_code=400, detail="请提供至少一个条码")
+    if len(codes) > 200:
+        raise HTTPException(status_code=400, detail="一次最多查询 200 个条码")
+    if max(len(c) for c in codes) > 100:
+        raise HTTPException(status_code=400, detail="条码过长（最多 100 字符）")
+    _check_search_rate_limit(_client_ip(request))
+    wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+    if wh is None or not wh.is_active:
+        raise HTTPException(status_code=400, detail=f"仓库不存在或已停用：{warehouse_id}")
+    seen = set()
+    unique_codes = []
+    for c in codes:
+        if c not in seen:
+            seen.add(c)
+            unique_codes.append(c)
+    goods_rows = db.query(Goods.id, Goods.barcode).filter(Goods.barcode.in_(unique_codes)).all()
+    id_by_code = {bc: gid for (gid, bc) in goods_rows}
+    gids = [id_by_code[c] for c in unique_codes if c in id_by_code]
+    stock_map = {}
+    if gids:
+        stock_map = dict(
+            db.query(Goods.id, func.coalesce(func.sum(Stock.quantity), 0))
+            .join(Stock, Stock.goods_id == Goods.id)
+            .filter(Goods.id.in_(gids), Stock.warehouse_id == wh.id)
+            .group_by(Goods.id)
+            .all()
+        )
+    return [
+        {
+            "barcode": c,
+            "available_stock": float(stock_map.get(id_by_code[c]) or 0) if c in id_by_code else 0,
+        }
+        for c in unique_codes
+    ]
+
 @router.get("/public/warehouses", summary="启用仓库列表（免登录，公开申请页仓库选择用）")
 def list_warehouses_public(
     request: FastAPIRequest,

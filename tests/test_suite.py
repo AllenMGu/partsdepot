@@ -701,6 +701,49 @@ check("停用：申请单仍为待处理（可改仓重提/再处理）",
 s, b = req("PUT", f"/api/warehouses/{W1}", {"is_active": True}, admin)
 check("停用：恢复 W1 启用（环境复原）", s == 200 and (b or {}).get("is_active") in (True, 1), f"status={s} body={b}")
 
+# 15j. 批量按仓库存查询（评审 P2 跟进：切仓批量刷新，1 次调用替代 N 次 goods-search）
+def _lookup(wid, codes):
+    url = "/api/public/stock-lookup?warehouse_id=" + str(wid) + "&barcodes=" + urllib.parse.quote(codes, safe=",")
+    return req("GET", url)
+def _lk(rows, code):
+    hit = next((r for r in (rows or []) if isinstance(r, dict) and r.get("barcode") == code), None)
+    return float(hit.get("available_stock") or 0) if hit else "MISS"
+s, rows = _lookup(W2, "G003,G001")
+check("批量：W2 [G003,G001] → 200 且按输入顺序返回", s == 200 and isinstance(rows, list) and [r.get("barcode") for r in rows] == ["G003", "G001"], f"status={s} rows={rows}")
+check("批量：W2 G003 → 5（与按仓搜索一致）", _lk(rows, "G003") == 5, f"got={_lk(rows, 'G003')}")
+check("批量：W2 G001 → 0（G001 仅在 W1，不得串仓）", _lk(rows, "G001") == 0, f"got={_lk(rows, 'G001')}")
+check("批量：字段仅 barcode/available_stock（无名称/单价泄露）",
+      isinstance(rows, list) and rows and all(set(r.keys()) == {"barcode", "available_stock"} for r in rows),
+      f"keys={list(rows[0].keys()) if rows else '-'}")
+_w1_g1_now = _w1_g001_total()
+s, rows = _lookup(W1, "G001,G003")
+check("批量：W1 G001 → 与 W1 实际库存一致", s == 200 and _lk(rows, "G001") == _w1_g1_now, f"got={_lk(rows, 'G001')} actual={_w1_g1_now}")
+check("批量：W1 G003 → 0（与按仓搜索一致）", _lk(rows, "G003") == 0, f"got={_lk(rows, 'G003')}")
+s, rows = _lookup(W2, "G003,G003")
+check("批量：重复条码去重（输入序保留）", s == 200 and isinstance(rows, list) and [r.get("barcode") for r in rows] == ["G003"], f"rows={rows}")
+s, rows = _lookup(W2, "G003,NOPE-999")
+check("批量：未知条码 → 200 且 available_stock=0", s == 200 and _lk(rows, "NOPE-999") == 0, f"status={s} rows={rows}")
+s, b = _lookup(99999, "G001")
+check("批量：不存在的仓库 → 400", s == 400, f"status={s} body={b}")
+s, b = _lookup(W2, "")
+check("批量：空条码 → 400", s == 400, f"status={s} body={b}")
+s, b = _lookup(W2, ",,")
+check("批量：仅分隔符 → 400", s == 400, f"status={s} body={b}")
+s, b = _lookup(W2, ",".join(["B%03d" % i for i in range(201)]))
+check("批量：超过 200 条码 → 400", s == 400, f"status={s} body={b}")
+s, b = _lookup(W2, "B" * 101)
+check("批量：单条码超 100 字符 → 400", s == 400, f"status={s} body={b}")
+s, b = req("PUT", f"/api/warehouses/{W2}", {"is_active": False}, admin)
+check("批量：停用 W2 前置成功", s == 200, f"status={s} body={b}")
+s, b = _lookup(W2, "G003")
+check("批量：停用仓库 → 400（与按仓搜索一致）", s == 400, f"status={s} body={b}")
+s, b = req("PUT", f"/api/warehouses/{W2}", {"is_active": True}, admin)
+check("批量：恢复 W2 启用（环境复原）", s == 200 and (b or {}).get("is_active") in (True, 1), f"status={s} body={b}")
+# 限流：与 goods-search 同桶（30 次/分钟/IP），独立别名 IP 验证
+_rl2_headers = {"X-Real-IP": "8.8.8.88"}
+_rl2_codes = [req("GET", "/api/public/stock-lookup?warehouse_id=" + str(W2) + "&barcodes=G003", headers=_rl2_headers)[0] for _ in range(31)]
+check("批量限流：同一 IP 第 31 次 → 429（与搜索同桶）", _rl2_codes[:30] == [200] * 30 and _rl2_codes[30] == 429, f"codes={_rl2_codes}")
+
 # ---------- 汇总 ----------
 fails = [r for r in results if not r[1]]
 print(f"\n===== 汇总：{len(results)-len(fails)}/{len(results)} 通过 =====")

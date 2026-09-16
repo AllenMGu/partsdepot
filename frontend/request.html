@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Kk0d3L1WITfQeHI4RJP0MJ73gGahiGWoXrWrTA1XtvU='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-yNRAmzYVwpoq/9LFw/cZV+YSxmN7NVTPTw5R/Gt70zg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -196,7 +196,7 @@
             // ---------- 仓库切换联动（评审 P1：库存展示必须与审批扣减仓库一致） ----------
             // 切换仓库后：1) 在途搜索全部作废（epoch 递增，到达即丢弃）；
             // 2) 清空候选面板（候选里的库存是旧仓库的数据）；
-            // 3) 已选备件按新仓库重新取可用库存并重算"超可用库存"软提示。
+            // 3) 已选备件按新仓库【一次批量调用】重新取可用库存，并重算"超可用库存"软提示。
             let whEpoch = 0; // 仓库变更代：已选备件库存快照的失效标记
             function clearCandidates() {
                 panelOwner = null;
@@ -210,26 +210,41 @@
                 const myEpoch = whEpoch;
                 const wh = warehouseSelect.value;
                 if (!wh) return;
-                let allOk = true;
-                await Promise.all(picked.map(async function (row) {
-                    try {
-                        const resp = await fetch('api/public/goods-search?q=' + encodeURIComponent(row.g.barcode) +
-                                                 '&warehouse_id=' + encodeURIComponent(wh));
-                        const data = await resp.json().catch(function () { return []; });
-                        if (!resp.ok) { allOk = false; return; }
-                        if (myEpoch !== whEpoch) return; // 期间又切了仓库，本次结果作废
-                        const hit = Array.isArray(data)
-                            ? data.find(function (g) { return g && g.barcode === row.g.barcode; })
-                            : null;
-                        row.g.available_stock = hit ? (Number(hit.available_stock) || 0) : 0;
-                    } catch (e) {
-                        allOk = false;
+                // 评审 P2 跟进：批量查询——已选行全部条码一次取回（旧实现 N 行 = N 次 goods-search，
+                // 行数 >30 时部分请求会撞 30 次/分钟的搜索限流 429，页面残留旧仓库存误导申请人）
+                const codes = picked.map(function (r) { return r.g.barcode; });
+                let failed = false, got = null;
+                try {
+                    const resp = await fetch('api/public/stock-lookup?warehouse_id=' + encodeURIComponent(wh) +
+                                             '&barcodes=' + encodeURIComponent(codes.join(',')));
+                    got = await resp.json().catch(function () { return null; });
+                    if (!resp.ok) failed = true;
+                } catch (e) {
+                    failed = true;
+                }
+                if (myEpoch !== whEpoch) return; // 期间又切了仓库，本次结果作废
+                if (failed || !Array.isArray(got)) {
+                    // 刷新失败：已选行一律标记"库存未知"——不再保留旧仓数字误导申请人
+                    picked.forEach(function (r) { r.stockUnknown = true; });
+                    renderGoodsTable();
+                    showGoodsStatus('库存刷新失败（网络繁忙？）受影响行已标记"库存未知"。请重新选择仓库或刷新页面确认；提交时系统仍会按所选仓库复核库存', true);
+                    return;
+                }
+                const byCode = {};
+                got.forEach(function (it) { if (it && typeof it.barcode === 'string') byCode[it.barcode] = Number(it.available_stock) || 0; });
+                let missing = false;
+                picked.forEach(function (r) {
+                    if (Object.prototype.hasOwnProperty.call(byCode, r.g.barcode)) {
+                        r.g.available_stock = byCode[r.g.barcode];
+                        r.stockUnknown = false;
+                    } else {
+                        r.stockUnknown = true; // 防御：后端契约应返回全部条码，缺行同样视为未知
+                        missing = true;
                     }
-                }));
-                if (myEpoch !== whEpoch) return;
+                });
                 renderGoodsTable(); // 重渲染库存列，并按新库存重算"超出可用库存"软提示
-                if (!allOk) {
-                    showGoodsStatus('部分备件库存刷新失败，请重新搜索确认', true);
+                if (missing) {
+                    showGoodsStatus('部分备件库存刷新失败，受影响行已标记"库存未知"。请重新选择仓库或刷新页面确认', true);
                 } else {
                     showGoodsStatus('仓库已切换，已选备件库存已按新仓库刷新', false);
                 }
@@ -267,7 +282,11 @@
                 return String(parseFloat(n.toFixed(4)));
             }
 
-            function stockCellHTML(g) {
+            function stockCellHTML(g, unknown) {
+                // 评审 P2 跟进：刷新失败时标记"库存未知"（灰显），不保留旧仓数字误导申请人
+                if (unknown) {
+                    return '<span class="font-medium text-amber-600">库存未知（刷新失败，请重新确认）</span>';
+                }
                 const n = Number(g.available_stock) || 0;
                 const unit = g.unit ? ' ' + g.unit : '';
                 if (n > 0) {
@@ -333,7 +352,9 @@
                     // 可用库存列
                     const tdStock = document.createElement('td');
                     tdStock.className = 'px-3 py-2 text-sm';
-                    tdStock.innerHTML = row.picked ? stockCellHTML(row.g) : '<span class="text-gray-400">—</span>';
+                    tdStock.innerHTML = row.picked
+                        ? stockCellHTML(row.g, !!row.stockUnknown)
+                        : '<span class="text-gray-400">—</span>';
                     tr.appendChild(tdStock);
 
                     // 数量列（已选择备件后可填；超过可用库存给软提示，不阻断提交）
@@ -348,9 +369,17 @@
                         qtyInput.className = 'w-full px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent';
                         qtyInput.value = row.qty;
                         const warn = document.createElement('p');
-                        warn.className = 'qty-warn hidden text-xs text-red-500 mt-0.5';
-                        warn.textContent = '超过可用库存';
+                        warn.className = 'qty-warn hidden text-xs text-amber-600 mt-0.5';
+                        warn.textContent = '库存未知';
                         const refreshWarn = function () {
+                            if (row.stockUnknown) {
+                                // 评审 P2：刷新失败标记未知——不显示"超过可用库存"（无可靠基准），提示用户重新确认
+                                warn.textContent = '库存未知（请重新选择仓库或刷新确认）';
+                                warn.className = 'qty-warn text-xs text-amber-600 mt-0.5';
+                                return;
+                            }
+                            warn.textContent = '超过可用库存';
+                            warn.className = 'qty-warn text-xs text-red-500 mt-0.5';
                             const q = parseFloat(qtyInput.value);
                             const over = isFinite(q) && q > 0 && q > (Number(row.g.available_stock) || 0);
                             warn.classList.toggle('hidden', !over);
@@ -510,6 +539,7 @@
                     barcode: g.barcode, name: g.name, spec: g.spec, unit: g.unit,
                     available_stock: Number(g.available_stock) || 0
                 };
+                row.stockUnknown = false; // 新选行：库存来自当前仓库的最新搜索，清除"未知"标记
                 row.qty = '';
                 row.keyword = '';
                 panelOwner = null;
