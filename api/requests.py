@@ -605,15 +605,14 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
         )
 
     reference = f"APP-{req.create_time:%Y%m%d}-{req.id:04d}"
-    # 出库单号先取号（号段内最大尾号+1，PG 咨询锁串行化）：审批任一步失败整体回滚，
-    # 单号随事务释放（未提交不占号），不会留下"有单号无单据"的孤儿
-    order_no = generate_order_no("OUT", db)
-    out_items: list = []  # [(goods_id, location_id, 实扣数量, 单价)]
-    # 与手工出库共用 Stock.id 全局锁顺序；同一货物跨多个库位也不会因创建顺序不同死锁。
+    # 所有出库路径统一为“库存锁 → 号段锁”：扫码出库先锁库存再生成单号，审批也必须
+    # 使用相同顺序，否则两者并发时会形成“审批持号段等库存、扫码持库存等号段”的死锁。
     all_rows = lock_stock_rows_for_goods(db, warehouse_id, required.keys())
     rows_by_goods = {}
     for row in all_rows:
         rows_by_goods.setdefault(row.goods_id, []).append(row)
+
+    # 持有库存锁后先完成全部库存校验；任何一项不足都不获取号段锁，也不修改库存。
     for goods_id, qty in sorted(required.items()):
         rows = rows_by_goods.get(goods_id, [])
         available = sum(r.quantity or 0 for r in rows)
@@ -623,6 +622,12 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
                 detail=f"库存不足：{names.get(goods_id, f'#{goods_id}')} 需要 {qty:g}，"
                        f"仓库 {wh.name or wh.code} 现有 {available:g}（审批已回滚，库存未变动）"
             )
+
+    # 单号随当前事务提交/回滚；库存校验通过后再取号，锁顺序与扫码出库保持一致。
+    order_no = generate_order_no("OUT", db)
+    out_items: list = []  # [(goods_id, location_id, 实扣数量, 单价)]
+    for goods_id, qty in sorted(required.items()):
+        rows = rows_by_goods.get(goods_id, [])
         remaining = qty
         now = datetime.now()
         for r in rows:

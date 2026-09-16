@@ -76,22 +76,31 @@ Page({
   async refreshPickedStock(seq) {
     const items = this.data.goodsItems;
     if (!items.length || !this.data.warehouseId) return;
-    this.setData({ goodsItems: items.map((g) => Object.assign({}, g, { stockUnknown: true })) });
+    // 给本次请求覆盖的行打标记。请求期间新增、删除后重加的行没有该标记，旧响应不得覆盖它们。
+    const markedItems = items.map((g) => Object.assign({}, g, {
+      stockUnknown: true,
+      stockRefreshSeq: seq
+    }));
+    this.setData({ goodsItems: markedItems });
     try {
       const rows = await request({
         url: "/public/stock-lookup",
         method: "POST",
-        data: { warehouse_id: this.data.warehouseId, barcodes: items.map((g) => g.barcode) },
+        data: { warehouse_id: this.data.warehouseId, barcodes: markedItems.map((g) => g.barcode) },
         withToken: false
       });
       if (seq !== this._warehouseSeq) return;
       const byCode = {};
       (Array.isArray(rows) ? rows : []).forEach((row) => { byCode[row.barcode] = Number(row.available_stock) || 0; });
       this.setData({
-        goodsItems: this.data.goodsItems.map((g) => Object.assign({}, g, {
-          availableStock: byCode[g.barcode] || 0,
-          stockUnknown: !Object.prototype.hasOwnProperty.call(byCode, g.barcode)
-        }))
+        goodsItems: this.data.goodsItems.map((g) => {
+          if (g.stockRefreshSeq !== seq) return g;
+          return Object.assign({}, g, {
+            availableStock: byCode[g.barcode] || 0,
+            stockUnknown: !Object.prototype.hasOwnProperty.call(byCode, g.barcode),
+            stockRefreshSeq: null
+          });
+        })
       });
     } catch (e) {
       if (seq !== this._warehouseSeq) return;

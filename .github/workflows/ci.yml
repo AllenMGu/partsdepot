@@ -43,6 +43,43 @@ jobs:
           WMS_DATABASE_URL: postgresql+psycopg2://wms:wms_test_ci@localhost:5432/wms_test
         run: bash tests/run_regression.sh
 
+      - name: 运行小程序申请页单元测试
+        run: node tests/miniprogram_apply_unit.js
+
+  pg-concurrency:
+    name: PostgreSQL 并发专项
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: wms
+          POSTGRES_PASSWORD: wms_test_ci
+          POSTGRES_DB: wms_concurrency_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wms -d wms_concurrency_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: pip install -r requirements.txt
+
+      - name: 运行 PostgreSQL 并发专项
+        env:
+          WMS_DATABASE_URL: postgresql+psycopg2://wms:wms_test_ci@localhost:5432/wms_concurrency_test
+        run: python tests/pg_concurrency.py
+
   e2e:
     name: 浏览器端到端（Playwright / SQLite）
     runs-on: ubuntu-latest
