@@ -1,17 +1,57 @@
 #!/usr/bin/env python3
-"""Playwright 端到端验证（系统 Chromium）：
+"""Playwright 端到端验证（Chromium）：
 1. request.html 申请提交：添加行 → 行内搜索备件 → 候选/选中行显示可用库存 → 超库存软提示 → 提交
+1b. 多行异步搜索竞态（乱序响应不错行）/ 重渲染保留搜索词 / 精确聚焦到该行
 2. index.html 登录 → request-admin.html 申请管理：点击申请单 → 详情弹窗（表头信息 + 带表头的货物明细表）
    → 弹窗内通过处理 → 归档 Tab 点击归档单 → 只读详情
 """
 import os
 import sys
+import tempfile
 
-# 浏览器需要可写的 HOME 与浏览器缓存（沙箱内默认 HOME 只读）
-_WS_HOME = "/data/dsh/home/库存管理/.pw_home"
-os.makedirs(_WS_HOME, exist_ok=True)
-os.environ["HOME"] = _WS_HOME
-os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/data/dsh/home/库存管理/.pw_browsers"
+
+def _writable_dir(path):
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".w_probe")
+        with open(probe, "w") as f:
+            f.write("x")
+        os.remove(probe)
+        return True
+    except OSError:
+        return False
+
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# 浏览器缓存目录：优先环境变量，其次仓库内（CI），再次仓库父目录（本机沙箱布局），最后系统临时目录
+_browser_cands = [os.environ.get("PLAYWRIGHT_BROWSERS_PATH"),
+                  os.path.join(_REPO_ROOT, ".pw_browsers"),
+                  os.path.join(os.path.dirname(_REPO_ROOT), ".pw_browsers"),
+                  os.path.join(tempfile.gettempdir(), "pw_e2e_browsers")]
+_browser_cands = [c for c in _browser_cands if c]
+
+def _has_browser(p):
+    try:
+        return any(x.startswith("chromium-") for x in os.listdir(p))
+    except OSError:
+        return False
+
+_pw_browsers = next((c for c in _browser_cands if _has_browser(c)), None) \
+    or next((c for c in _browser_cands if _writable_dir(c)), None)
+if _pw_browsers:
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _pw_browsers
+
+# HOME 需要可写（某些沙箱内默认 HOME 只读）；可写则保持原值
+if not _writable_dir(os.environ.get("HOME") or "/nonexistent"):
+    _home_cands = [os.environ.get("PW_E2E_HOME"),
+                   os.path.join(_REPO_ROOT, ".pw_home"),
+                   os.path.join(tempfile.gettempdir(), "pw_e2e_home")]
+    _home_cands = [c for c in _home_cands if c]
+    _pw_home = next((c for c in _home_cands if _writable_dir(c)), None)
+    if not _pw_home:
+        raise SystemExit("找不到可写的 HOME/PW_E2E_HOME 目录")
+    os.environ["HOME"] = _pw_home
 
 from playwright.sync_api import sync_playwright
 
@@ -114,6 +154,110 @@ with sync_playwright() as p:
     ref2 = page.locator("#refValue").inner_text()
     check("提交页：第二张申请编号不同", ref2 != ref, ref2)
     page.click("#resetBtn")
+
+    # ================= 1b. 审核修复验证：多行异步竞态 / 输入保留 / 精确聚焦 =================
+    # 注：resetBtn 位于 successPanel 内（提交成功后才可见），干净状态一律用整页重载获取
+    def fresh_page():
+        page.goto(BASE + "/request.html")
+        page.wait_for_selector("#addGoodsRowBtn")
+
+    # P1：两行搜索交错 → 延迟的过期结果不得被选入错误的行
+    fresh_page()
+    # 在页面内包装 fetch：把行1（8888001 轴承）的响应人为延迟 1.5s（浏览器端延迟，
+    # 不阻塞 Playwright 分发线程，从而得到真实乱序）；真实数据仍由后端返回
+    page.evaluate("""
+        () => {
+            const orig = window.fetch;
+            window.fetch = function (url, opts) {
+                const u = String(url);
+                if (u.indexOf('q=8888001') !== -1) {
+                    return new Promise((resolve, reject) =>
+                        setTimeout(() => Promise.resolve(orig.call(window, u, opts)).then(resolve, reject), 1500));
+                }
+                return orig.call(window, u, opts);
+            };
+        }
+    """)
+
+    # 行1 搜索（响应延迟 1.5s）→ 行2 搜索（即时响应）→ 行2 的结果先到
+    page.click("#addGoodsRowBtn")
+    page.locator("#goodsTableBody tr:nth-child(1) input[type=text]").fill("8888001")
+    page.locator("#goodsTableBody tr:nth-child(1) button[title=搜索备件]").click()
+    page.click("#addGoodsRowBtn")
+    page.locator("#goodsTableBody tr:nth-child(2) input[type=text]").fill("8888002")
+    page.locator("#goodsTableBody tr:nth-child(2) button[title=搜索备件]").click()
+    page.wait_for_selector("#goodsSearchResults:not(.hidden)")
+    first = page.locator("#goodsSearchResults li button").first
+    check("竞态：行2（快响应）的结果先展示在候选面板", "测试密封圈" in first.inner_text(), first.inner_text())
+
+    page.wait_for_timeout(2000)  # 行1 的延迟响应此时已返回
+    first = page.locator("#goodsSearchResults li button").first
+    check("竞态：行1 的迟到过期结果未覆盖当前面板",
+          "测试密封圈" in first.inner_text() and "测试轴承" not in first.inner_text(), first.inner_text())
+
+    first.click()
+    row1 = page.locator("#goodsTableBody tr:nth-child(1)")
+    row2 = page.locator("#goodsTableBody tr:nth-child(2)")
+    check("竞态：候选正确归属行2", "测试密封圈" in row2.inner_text(), row2.inner_text())
+    check("竞态：行1 未被错误选中", row1.locator("input[type=text]").count() == 1, row1.inner_text())
+    check("竞态：行1 的搜索词在重渲染后保留",
+          row1.locator("input[type=text]").input_value() == "8888001",
+          row1.locator("input[type=text]").input_value())
+
+    # 行1 重新搜索 → 结果归属行1
+    page.locator("#goodsTableBody tr:nth-child(1) button[title=搜索备件]").click()
+    page.wait_for_selector("#goodsSearchResults:not(.hidden)")
+    page.locator("#goodsSearchResults li button").first.click()
+    row1 = page.locator("#goodsTableBody tr:nth-child(1)")
+    check("竞态：行1 重新搜索后结果归属行1", "测试轴承" in row1.inner_text(), row1.inner_text())
+    check("竞态：两行各自选中正确备件",
+          "测试轴承" in row1.inner_text() and "测试密封圈" in row2.inner_text())
+    fresh_page()
+
+    # P2：重新渲染（添加/删除其他行）不丢失未完成行的搜索词
+    page.click("#addGoodsRowBtn")
+    page.locator("#goodsTableBody tr:nth-child(1) input[type=text]").fill("轴承")
+    page.click("#addGoodsRowBtn")
+    check("输入保留：添加新行（触发重渲染）后前一行搜索词仍在",
+          page.locator("#goodsTableBody tr:nth-child(1) input[type=text]").input_value() == "轴承")
+    page.locator("#goodsTableBody tr:nth-child(1) button[title=搜索备件]").click()
+    page.wait_for_selector("#goodsSearchResults:not(.hidden)")
+    page.click("#addGoodsRowBtn")
+    check("输入保留：结果展示中再添加行，行1 搜索词仍在",
+          page.locator("#goodsTableBody tr:nth-child(1) input[type=text]").input_value() == "轴承")
+    page.locator("#goodsTableBody tr:nth-child(3) button[title=移除该行]").click()
+    check("输入保留：删除其他行后行1 搜索词仍在",
+          page.locator("#goodsTableBody tr:nth-child(1) input[type=text]").input_value() == "轴承")
+    fresh_page()
+
+    # 聚焦：添加行 / 选中 / 更换 都聚焦到「该行」而非最后一行
+    def focused_row_id():
+        return page.evaluate(
+            "() => { const a = document.activeElement;"
+            " const tr = a && a.closest ? a.closest('tr[data-row-id]') : null;"
+            " return tr ? tr.dataset.rowId : null; }")
+
+    page.click("#addGoodsRowBtn")
+    new_row_id = page.evaluate("() => document.querySelector('#goodsTableBody tr').dataset.rowId")
+    check("聚焦：添加行后焦点落在该行输入框", focused_row_id() == new_row_id, str(focused_row_id()))
+
+    page.locator("#goodsTableBody tr:nth-child(1) input[type=text]").fill("轴承")
+    page.locator("#goodsTableBody tr:nth-child(1) button[title=搜索备件]").click()
+    page.wait_for_selector("#goodsSearchResults:not(.hidden)")
+    page.locator("#goodsSearchResults li button").first.click()
+    check("聚焦：选中后焦点落在该行数量框",
+          focused_row_id() == page.evaluate("() => document.querySelector('#goodsTableBody tr').dataset.rowId"),
+          str(focused_row_id()))
+
+    page.click("#addGoodsRowBtn")
+    page.locator("#goodsTableBody tr:nth-child(2) input[type=text]").fill("密封圈")
+    page.locator("#goodsTableBody tr:nth-child(2) button[title=搜索备件]").click()
+    page.wait_for_selector("#goodsSearchResults:not(.hidden)")
+    page.locator("#goodsSearchResults li button").first.click()
+    row1_id = page.evaluate("() => document.querySelectorAll('#goodsTableBody tr')[0].dataset.rowId")
+    page.locator("#goodsTableBody tr:nth-child(1) button:has-text(\"更换\")").click()
+    check("聚焦：『更换』后焦点落回该行（行1）搜索框而非最后一行", focused_row_id() == row1_id, str(focused_row_id()))
+    fresh_page()
 
     # ================= 2. 登录 =================
     page.goto(BASE + "/index.html")

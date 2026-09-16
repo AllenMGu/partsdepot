@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-z9Zp//qcUzi7HPvnyi2T4Cssxa09SdSVO1rcGAfJJKA='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ySg3vmez06QOvqkN2US5UnWLwzMuBWisvUjahuWL+Lw='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -154,7 +154,7 @@
             }
 
             // ---------- 相关货物（选填，多行：添加行 → 行内搜索选择备件 → 显示可用库存） ----------
-            // 每行状态：{ picked: bool, g: {barcode,name,spec,unit,available_stock}|null, qty: '' }
+            // 每行状态：{ rowId: 稳定id, picked: bool, g: {barcode,name,spec,unit,available_stock}|null, qty: '', keyword: '' }
             const goodsRows = [];
             const goodsTableBody = document.getElementById('goodsTableBody');
             const goodsEmptyHint = document.getElementById('goodsEmptyHint');
@@ -162,7 +162,9 @@
             const addGoodsRowBtn = document.getElementById('addGoodsRowBtn');
             const goodsResults = document.getElementById('goodsSearchResults');
             const goodsStatus = document.getElementById('goodsSearchStatus');
-            let pendingRow = null;   // 当前触发搜索、等待选择备件的行
+            let rowIdSeq = 0;      // 行稳定 ID（重渲染后不变，用于精确定位某行）
+            let searchEpoch = 0;   // 全局搜索序号：只有最新一次搜索的结果可接管候选面板（防交错竞态）
+            let panelOwner = null; // { row, epoch } — 当前候选面板归属的行
 
             function showGoodsStatus(message, isError) {
                 goodsStatus.textContent = message;
@@ -192,6 +194,7 @@
                 goodsTableBody.innerHTML = '';
                 goodsRows.forEach(function (row, i) {
                     const tr = document.createElement('tr');
+                    tr.dataset.rowId = row.rowId;
 
                     const tdIdx = document.createElement('td');
                     tdIdx.className = 'px-3 py-2 text-gray-400';
@@ -218,6 +221,8 @@
                         input.maxLength = 100;
                         input.placeholder = '输入名称或条码搜索备件';
                         input.className = 'flex-1 min-w-0 px-2 py-1.5 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent';
+                        input.value = row.keyword || '';
+                        input.addEventListener('input', function () { row.keyword = input.value; });
                         const btn = document.createElement('button');
                         btn.type = 'button';
                         btn.className = 'px-2.5 py-1.5 border border-gray-300 rounded-md text-gray-700 hover:bg-gray-50 transition-all-300';
@@ -282,12 +287,14 @@
                             row.picked = false;
                             row.g = null;
                             row.qty = '';
-                            if (pendingRow === row) pendingRow = null;
-                            goodsResults.classList.add('hidden');
-                            goodsResults.innerHTML = '';
-                            goodsStatus.classList.add('hidden');
+                            if (panelOwner && panelOwner.row === row) {
+                                panelOwner = null;
+                                goodsResults.classList.add('hidden');
+                                goodsResults.innerHTML = '';
+                                goodsStatus.classList.add('hidden');
+                            }
                             renderGoodsTable();
-                            focusRowSearch(i);
+                            focusRowSearch(row);
                         });
                         tdDel.appendChild(changeBtn);
                         tdDel.appendChild(document.createTextNode(' '));
@@ -300,11 +307,13 @@
                     delIcon.className = 'fa fa-trash';
                     delBtn.appendChild(delIcon);
                     delBtn.addEventListener('click', function () {
-                        goodsRows.splice(i, 1);
-                        if (pendingRow === row) pendingRow = null;
-                        goodsResults.classList.add('hidden');
-                        goodsResults.innerHTML = '';
-                        goodsStatus.classList.add('hidden');
+                        goodsRows.splice(goodsRows.indexOf(row), 1);
+                        if (panelOwner && panelOwner.row === row) {
+                            panelOwner = null;
+                            goodsResults.classList.add('hidden');
+                            goodsResults.innerHTML = '';
+                            goodsStatus.classList.add('hidden');
+                        }
                         renderGoodsTable();
                     });
                     tdDel.appendChild(delBtn);
@@ -314,24 +323,28 @@
                 });
             }
 
-            function focusRowSearch(i) {
-                const inputs = goodsTableBody.querySelectorAll('input[type="text"]');
-                if (inputs.length) inputs[inputs.length - 1].focus();
+            function focusRowSearch(row) {
+                const tr = goodsTableBody.querySelector('tr[data-row-id="' + row.rowId + '"]');
+                const inp = tr ? tr.querySelector('input[type="text"]') : null;
+                if (inp) { inp.focus(); inp.select(); }
             }
 
             addGoodsRowBtn.addEventListener('click', function () {
-                goodsRows.push({ picked: false, g: null, qty: '' });
+                const row = { rowId: ++rowIdSeq, picked: false, g: null, qty: '', keyword: '' };
+                goodsRows.push(row);
                 renderGoodsTable();
-                focusRowSearch(goodsRows.length - 1);
+                focusRowSearch(row);
             });
 
             async function searchRowGoods(i, input) {
+                const row = goodsRows[i];
                 const keyword = (input ? input.value : '').trim();
+                if (input) row.keyword = input.value;
                 if (!keyword) {
                     showGoodsStatus('请先输入备件名称或条码', true);
                     return;
                 }
-                pendingRow = goodsRows[i];
+                const epoch = ++searchEpoch;
                 showGoodsStatus('正在搜索...', false);
                 goodsResults.classList.add('hidden');
                 goodsResults.innerHTML = '';
@@ -341,6 +354,9 @@
                     if (!resp.ok) {
                         throw new Error((data && data.detail) || ('搜索失败（HTTP ' + resp.status + '）'));
                     }
+                    // 过期结果防护：已有更新的搜索、或本行已被移除/重新选择 → 丢弃本次响应（防交错竞态/错行）
+                    if (epoch !== searchEpoch || goodsRows.indexOf(row) === -1 || row.picked) return;
+                    panelOwner = { row: row, epoch: epoch };
                     if (!Array.isArray(data) || data.length === 0) {
                         showGoodsStatus('未找到匹配的备件', false);
                         return;
@@ -369,20 +385,22 @@
                                 '<span class="text-red-500 font-medium">可用库存 0' + (g.unit ? ' ' + g.unit : '') + '（无库存，可先申请）</span>';
                         }
                         btn.appendChild(stockSpan);
-                        btn.addEventListener('click', function () { selectRowGoods(pendingRow, g); });
+                        btn.addEventListener('click', function () { selectRowGoods(row, g); });
                         li.appendChild(btn);
                         goodsResults.appendChild(li);
                     });
                     goodsStatus.classList.add('hidden');
                     goodsResults.classList.remove('hidden');
                 } catch (error) {
-                    showGoodsStatus(error.message || '网络错误，请稍后重试', true);
+                    if (epoch === searchEpoch) {
+                        showGoodsStatus(error.message || '网络错误，请稍后重试', true);
+                    }
                 }
             }
 
             function selectRowGoods(row, g) {
-                if (!row) {
-                    showGoodsStatus('请先点击"添加货物行"，再选择备件', true);
+                if (!row || !panelOwner || panelOwner.row !== row) {
+                    showGoodsStatus('搜索结果已失效，请重新搜索后再选择', true);
                     return;
                 }
                 let dupIndex = -1;
@@ -399,13 +417,15 @@
                     available_stock: Number(g.available_stock) || 0
                 };
                 row.qty = '';
-                pendingRow = null;
+                row.keyword = '';
+                panelOwner = null;
                 renderGoodsTable();
                 goodsResults.classList.add('hidden');
                 goodsResults.innerHTML = '';
                 goodsStatus.classList.add('hidden');
-                const qtyInputs = goodsTableBody.querySelectorAll('input[type="number"]');
-                if (qtyInputs.length) qtyInputs[qtyInputs.length - 1].focus();
+                const qtyTr = goodsTableBody.querySelector('tr[data-row-id="' + row.rowId + '"]');
+                const qtyInput = qtyTr ? qtyTr.querySelector('input[type="number"]') : null;
+                if (qtyInput) qtyInput.focus();
             }
 
             form.addEventListener('submit', async function (event) {
@@ -472,7 +492,7 @@
             document.getElementById('resetBtn').addEventListener('click', function () {
                 form.reset();
                 goodsRows.length = 0;
-                pendingRow = null;
+                panelOwner = null;
                 renderGoodsTable();
                 goodsResults.classList.add('hidden');
                 goodsResults.innerHTML = '';

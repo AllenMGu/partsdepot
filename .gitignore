@@ -9,3 +9,7 @@ node_modules/
 
 # PostgreSQL 测试集群数据（本地临时，勿提交）
 pgdata/
+
+# Playwright E2E 产物（本地/CI 临时，勿提交；*.db 与 *.log 已覆盖 scratch 库与服务日志）
+.pw_home/
+.pw_browsers/
