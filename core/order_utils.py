@@ -1,5 +1,6 @@
 """单据工具：编号生成、行级锁、总额重算、响应格式化。"""
 
+from sqlalchemy import tuple_
 from sqlalchemy.orm import Session
 from datetime import datetime
 import zlib
@@ -78,6 +79,45 @@ def lock_stock_row(db: Session, warehouse_id: int, goods_id: int, location_id: i
     except Exception:
         pass
     return q.first()
+
+def lock_stock_rows_for_keys(db: Session, warehouse_id: int, keys):
+    """按 Stock.id 全局稳定顺序锁定指定 (goods_id, location_id) 库存行。
+
+    多明细入/出库先一次性调用本函数，申请审批也按同一 Stock.id 顺序锁行，避免不同
+    业务路径因明细顺序、库位编号与库存行创建顺序不同而形成循环等待。
+    """
+    normalized = sorted(set(keys))
+    if not normalized:
+        return []
+    q = (
+        db.query(Stock)
+        .filter(
+            Stock.warehouse_id == warehouse_id,
+            tuple_(Stock.goods_id, Stock.location_id).in_(normalized),
+        )
+        .order_by(Stock.id)
+    )
+    try:
+        q = q.with_for_update()
+    except Exception:
+        pass
+    return q.all()
+
+def lock_stock_rows_for_goods(db: Session, warehouse_id: int, goods_ids):
+    """按 Stock.id 全局稳定顺序锁定仓库内指定货物的全部库存行。"""
+    normalized = sorted(set(goods_ids))
+    if not normalized:
+        return []
+    q = (
+        db.query(Stock)
+        .filter(Stock.warehouse_id == warehouse_id, Stock.goods_id.in_(normalized))
+        .order_by(Stock.id)
+    )
+    try:
+        q = q.with_for_update()
+    except Exception:
+        pass
+    return q.all()
 
 def lock_order_header(db: Session, model, order_id):
     """行级锁读取单据头（PostgreSQL FOR UPDATE），串行化同一单据的并发提交，

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-yNRAmzYVwpoq/9LFw/cZV+YSxmN7NVTPTw5R/Gt70zg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-IIRpWrEtFYA6ZO44HXNkw+U0p2SYOSZsZNaoIq/NVqg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -215,8 +215,11 @@
                 const codes = picked.map(function (r) { return r.g.barcode; });
                 let failed = false, got = null;
                 try {
-                    const resp = await fetch('api/public/stock-lookup?warehouse_id=' + encodeURIComponent(wh) +
-                                             '&barcodes=' + encodeURIComponent(codes.join(',')));
+                    const resp = await fetch('api/public/stock-lookup', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ warehouse_id: Number(wh), barcodes: codes })
+                    });
                     got = await resp.json().catch(function () { return null; });
                     if (!resp.ok) failed = true;
                 } catch (e) {

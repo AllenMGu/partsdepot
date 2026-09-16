@@ -10,7 +10,7 @@ from core.models import UserRole, InventoryType, Warehouse, UserWarehouse, User,
 from core.schemas import OutboundOrderItemCreate, OutboundOrderItemResponse, OutboundOrderHeaderCreate, OutboundOrderHeaderResponse, OutboundOrderDetailResponse
 from core.security import get_current_user
 from core.deps import get_db
-from core.order_utils import format_outbound_order_response, format_outbound_order_item_response, recalculate_outbound_order_total, lock_stock_row, lock_order_header, generate_order_no
+from core.order_utils import format_outbound_order_response, format_outbound_order_item_response, recalculate_outbound_order_total, lock_stock_rows_for_keys, lock_order_header, generate_order_no
 
 router = APIRouter()
 
@@ -205,9 +205,11 @@ async def submit_outbound_order(
             if item.goods:
                 names.setdefault(key, item.goods.name)
 
-        # 同一事务内：锁定库存行 → 按汇总数量校验 → 扣减
-        for (goods_id, location_id), qty in required.items():
-            stock = lock_stock_row(db, order.warehouse_id, goods_id, location_id)
+        # 一次性按 Stock.id 锁定全部相关库存行；申请审批也遵循同一全局顺序。
+        locked = lock_stock_rows_for_keys(db, order.warehouse_id, required.keys())
+        stock_by_key = {(row.goods_id, row.location_id): row for row in locked}
+        for (goods_id, location_id), qty in sorted(required.items()):
+            stock = stock_by_key.get((goods_id, location_id))
             current = stock.quantity if stock else 0
             if current < qty:
                 name = names.get((goods_id, location_id), f"#{goods_id}")

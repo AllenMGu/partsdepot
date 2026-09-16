@@ -35,8 +35,9 @@ from core.models import (
     RequestItem, RequestItemArchive, RequestStatus, Stock, User, UserRole, Warehouse,
     OutboundOrderHeader, OutboundOrderItem,
 )
-from core.order_utils import generate_order_no
+from core.order_utils import generate_order_no, lock_stock_rows_for_goods
 from core.schemas import (
+    PublicStockLookup,
     RequestArchiveResponse,
     RequestItemResponse,
     RequestResponse,
@@ -92,18 +93,20 @@ SEARCH_RATE_WINDOW_SECONDS = 60      # 搜索专用 1 分钟窗口（搜索是�
 SEARCH_RATE_MAX_PER_IP = 30          # 单 IP 1 分钟内最多 30 次搜索
 SEARCH_RATE_MAX_GLOBAL = 120         # 全局 1 分钟内最多 120 次
 
-def _check_search_rate_limit(ip: str) -> None:
+def _check_search_rate_limit(ip: str, cost: int = 1) -> None:
+    """搜索公共接口的加权滑动窗口限流。批量查询按条码数计费。"""
+    cost = max(1, int(cost))
     now = time.monotonic()
     cutoff = now - SEARCH_RATE_WINDOW_SECONDS
     with _rate_lock:
         global_hits = [t for t in _rate_hits.get("search:__global__", []) if t > cutoff]
         ip_hits = [t for t in _rate_hits.get("search:" + ip, []) if t > cutoff]
-        if len(ip_hits) >= SEARCH_RATE_MAX_PER_IP:
+        if len(ip_hits) + cost > SEARCH_RATE_MAX_PER_IP:
             raise HTTPException(status_code=429, detail="搜索过于频繁，请稍后再试")
-        if len(global_hits) >= SEARCH_RATE_MAX_GLOBAL:
+        if len(global_hits) + cost > SEARCH_RATE_MAX_GLOBAL:
             raise HTTPException(status_code=429, detail="当前搜索人数较多，请稍后再试")
-        global_hits.append(now)
-        ip_hits.append(now)
+        global_hits.extend([now] * cost)
+        ip_hits.extend([now] * cost)
         _rate_hits["search:__global__"] = global_hits
         _rate_hits["search:" + ip] = ip_hits
 
@@ -165,10 +168,9 @@ def search_goods_public(
         for (gid, b, n, s, u) in rows
     ]
 
-@router.get("/public/stock-lookup", summary="批量按仓可用库存查询（免登录，申请页切仓批量刷新用）")
+@router.post("/public/stock-lookup", summary="批量按仓可用库存查询（免登录，申请页切仓批量刷新用）")
 def stock_lookup_public(
-    warehouse_id: int,
-    barcodes: str,
+    payload: PublicStockLookup,
     request: FastAPIRequest,
     db: Session = Depends(get_db)
 ):
@@ -176,33 +178,26 @@ def stock_lookup_public(
 
     背景：申请页切换仓库时，旧实现按已选行数逐条调用 goods-search 刷新库存，
     行数超过 30 时部分请求会撞搜索限流（30 次/分钟）返回 429，页面残留旧仓库存
-    误导申请人。前端改为一次批量查询，行再多也只占 1 次限流配额。
+    误导申请人。前端改为一次批量查询，并按实际查询的唯一条码数量计算限流成本。
 
     契约：
-    - warehouse_id 必填：仅按该仓库汇总（与审批实际扣减仓库一致）；仓库不存在或已停用 → 400。
-    - barcodes 逗号分隔：1~200 条、每条 ≤100 字符；为空 → 400。
+    - JSON 请求体包含 warehouse_id + barcodes；仅按指定仓库汇总。
+    - barcodes 为 1~200 条、每条 ≤100 字符；使用 POST 避免批量参数生成超长 URL。
     - 响应按输入顺序去重返回；条码不存在或该仓无库存 → available_stock=0。
-    - 与 goods-search 共用搜索限流桶（同类查询，限流口径一致）。
+    - 与 goods-search 共用搜索限流桶；每 10 个唯一条码消耗 1 个配额。
     - 安全边界：仅返回 条码 + 可用库存 非敏感字段（不含名称/单价等）。
     """
-    codes = [c.strip() for c in (barcodes or "").split(",")]
-    codes = [c for c in codes if c]
-    if not codes:
-        raise HTTPException(status_code=400, detail="请提供至少一个条码")
-    if len(codes) > 200:
-        raise HTTPException(status_code=400, detail="一次最多查询 200 个条码")
-    if max(len(c) for c in codes) > 100:
-        raise HTTPException(status_code=400, detail="条码过长（最多 100 字符）")
-    _check_search_rate_limit(_client_ip(request))
-    wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
-    if wh is None or not wh.is_active:
-        raise HTTPException(status_code=400, detail=f"仓库不存在或已停用：{warehouse_id}")
+    codes = payload.barcodes
     seen = set()
     unique_codes = []
     for c in codes:
         if c not in seen:
             seen.add(c)
             unique_codes.append(c)
+    _check_search_rate_limit(_client_ip(request), cost=(len(unique_codes) + 9) // 10)
+    wh = db.query(Warehouse).filter(Warehouse.id == payload.warehouse_id).first()
+    if wh is None or not wh.is_active:
+        raise HTTPException(status_code=400, detail=f"仓库不存在或已停用：{payload.warehouse_id}")
     goods_rows = db.query(Goods.id, Goods.barcode).filter(Goods.barcode.in_(unique_codes)).all()
     id_by_code = {bc: gid for (gid, bc) in goods_rows}
     gids = [id_by_code[c] for c in unique_codes if c in id_by_code]
@@ -561,9 +556,9 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
       单号走 generate_order_no("OUT") 既有号段（PG 咨询锁防并发撞号）；
       明细按实际扣减的 (货物,库位) 行逐条落（数量=该行实扣，单价=货物档案价）；
       申请单回填 outbound_order_no（归档时随原单保留），双向可查；
-    - 并发安全：先锁申请单行（调用方），再按**货物 id 升序**（sorted）逐货 FOR UPDATE
-      锁该 (仓库,货物) 全部库存行，同一货物内再按 Stock.id 顺序锁行——
-      全局加锁顺序确定，两个多货明细单反序并发审批不会死锁（PostgreSQL；
+    - 并发安全：先锁申请单行（调用方），再将涉及货物的库存行统一按 **Stock.id 升序**
+      FOR UPDATE；手工出库/入库/盘点使用同一顺序——全局加锁顺序确定，跨流程的
+      多货、多库位反序操作不会死锁（PostgreSQL；
       SQLite 退化为普通查询，配合单 worker/写串行不超卖），与并发出库互斥；
     - 审批时再次校验仓库启用状态：提交后仓库被停用 → 400 拒绝扣减。
     """
@@ -614,17 +609,13 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
     # 单号随事务释放（未提交不占号），不会留下"有单号无单据"的孤儿
     order_no = generate_order_no("OUT", db)
     out_items: list = []  # [(goods_id, location_id, 实扣数量, 单价)]
-    # 按货物 id 升序处理：全局加锁顺序确定，反序明细的并发审批不会死锁
+    # 与手工出库共用 Stock.id 全局锁顺序；同一货物跨多个库位也不会因创建顺序不同死锁。
+    all_rows = lock_stock_rows_for_goods(db, warehouse_id, required.keys())
+    rows_by_goods = {}
+    for row in all_rows:
+        rows_by_goods.setdefault(row.goods_id, []).append(row)
     for goods_id, qty in sorted(required.items()):
-        rows_q = db.query(Stock).filter(
-            Stock.warehouse_id == warehouse_id,
-            Stock.goods_id == goods_id,
-        ).order_by(Stock.id)
-        try:
-            rows_q = rows_q.with_for_update()  # PostgreSQL 行锁；SQLite 忽略
-        except Exception:
-            pass
-        rows = rows_q.all()
+        rows = rows_by_goods.get(goods_id, [])
         available = sum(r.quantity or 0 for r in rows)
         if available < qty:
             raise HTTPException(

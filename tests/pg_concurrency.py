@@ -369,6 +369,45 @@ try:
     check("场景G 结果一致(编辑要么生效并过账=9、要么被 400 拒绝后按 2 过账)", consistentG,
           f"codes={codesG} status={stG} stock={qtyG}(期望 9 或 2)")
 
+    # ============================================================
+    # 场景 H：申请审批 ∥ 手工出库（明细反序）——跨流程必须使用同一 Stock.id 锁顺序
+    # ============================================================
+    print("\n--- 场景 H：申请审批 与 手工出库反序并发 ---")
+    req("POST","/api/goods/",{"barcode":"G007","name":"物料7","price":70}, admin)
+    req("POST","/api/goods/",{"barcode":"G008","name":"物料8","price":80}, admin)
+    req("POST","/api/locations/",{"warehouse_id":W1,"location_code":"L9","name":"库位9"}, admin)
+    req("POST","/api/locations/",{"warehouse_id":W1,"location_code":"L10","name":"库位10"}, admin)
+    req("POST","/api/inventory/scan",{"goods_barcode":"G007","location_code":"L9","type":"入库","quantity":10}, op)
+    req("POST","/api/inventory/scan",{"goods_barcode":"G008","location_code":"L10","type":"入库","quantity":10}, op)
+    s, appH = req("POST", "/api/requests/", {
+        "applicant_name":"并发申请", "contact":"pg-h@test.com", "description":"跨流程锁顺序",
+        "warehouse_id":W1,
+        "items":[{"barcode":"G007","quantity":1},{"barcode":"G008","quantity":1}],
+    }); RH=(appH or {}).get("id")
+    s, outH = req("POST","/api/outbound-orders/",{"customer":"并发出库"}, admin); OH=(outH or {}).get("id")
+    # 与申请单货物顺序相反
+    req("POST", f"/api/outbound-orders/{OH}/items", {"goods_barcode":"G008","location_code":"L10","quantity":1}, admin)
+    req("POST", f"/api/outbound-orders/{OH}/items", {"goods_barcode":"G007","location_code":"L9","quantity":1}, admin)
+    check("场景H 申请单与反序手工出库单就绪", RH and OH, f"request={RH} outbound={OH}")
+
+    resH = {}
+    barH = threading.Barrier(2)
+    def approveH():
+        barH.wait()
+        resH["approve"] = req("POST", f"/api/requests/{RH}/status", {"status":"approved"}, admin)
+    def submitH():
+        barH.wait()
+        resH["outbound"] = req("POST", f"/api/outbound-orders/{OH}/submit", {}, admin)
+    t1 = threading.Thread(target=approveH); t2 = threading.Thread(target=submitH)
+    t1.start(); t2.start(); t1.join(); t2.join()
+    qH7, _ = stock_qty_of("G007", "L9")
+    qH8, _ = stock_qty_of("G008", "L10")
+    codesH = {k: v[0] for k, v in resH.items()}
+    check("场景H 两条跨流程并发均成功（无 deadlock/500）",
+          codesH == {"approve": 200, "outbound": 200}, f"codes={codesH} bodies={resH}")
+    check("场景H 两种流程各扣1，G007/G008 最终均为8",
+          qH7 == 8 and qH8 == 8, f"G007={qH7} G008={qH8}")
+
 finally:
     srv.terminate()
     try:

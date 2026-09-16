@@ -69,3 +69,18 @@
 .submit-btn {
   margin-top: 8rpx;
 }
+
+.picker-value {
+  color: #334155;
+  line-height: 1.5;
+}
+.warehouse-error {
+  margin: -6rpx 0 16rpx;
+}
+.stock {
+  font-size: 24rpx;
+  margin-top: 6rpx;
+}
+.stock-ok { color: #15803d; }
+.stock-empty { color: #dc2626; }
+.stock-unknown { color: #d97706; }

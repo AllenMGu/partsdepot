@@ -6,6 +6,19 @@
 
   <view class="card">
     <view class="subtitle" style="margin-bottom: 12rpx;">申请信息</view>
+    <picker
+      mode="selector"
+      range="{{warehouses}}"
+      range-key="name"
+      value="{{warehouseIndex}}"
+      disabled="{{warehouseLoading || warehouses.length === 0}}"
+      bindchange="onWarehouseChange"
+    >
+      <view class="input picker-value">
+        {{warehouseLoading ? "仓库加载中…" : (warehouseIndex >= 0 ? warehouses[warehouseIndex].name : "请选择申请仓库（必填）")}}
+      </view>
+    </picker>
+    <view wx:if="{{warehouseError}}" class="error warehouse-error" bindtap="loadWarehouses">{{warehouseError}}（点击重试）</view>
     <input class="input" placeholder="申请人（必填）" value="{{applicantName}}" bindinput="onApplicantInput" maxlength="100" />
     <input class="input" placeholder="部门（选填）" value="{{department}}" bindinput="onDepartmentInput" maxlength="100" />
     <input class="input" type="text" placeholder="联系邮箱（必填，如 zhangsan@example.com）" value="{{contact}}" bindinput="onContactInput" maxlength="200" />
@@ -36,6 +49,7 @@
       class="input"
       placeholder="输入条码或名称搜索货物"
       value="{{goodsKeyword}}"
+      disabled="{{!warehouseId}}"
       bindinput="onGoodsKeyword"
       confirm-type="search"
     />
@@ -58,6 +72,9 @@
       <view class="goods-main">
         <view class="goods-name">{{item.name}}</view>
         <view class="subtitle">{{item.spec || "—"}} / {{item.unit || "单位"}}</view>
+        <view class="stock {{item.stockUnknown ? 'stock-unknown' : (item.availableStock > 0 ? 'stock-ok' : 'stock-empty')}}">
+          {{item.stockUnknown ? "库存未知" : "可用库存 " + item.availableStock + " " + (item.unit || "")}}
+        </view>
       </view>
       <input
         class="qty-input"
