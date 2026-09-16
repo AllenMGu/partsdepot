@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-cJggAdFwrpi5pQs02FLrALOKxOpWQroklu3AteHDMzg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-o0Es1Oni18kz8vfpjfzCZbolye/O+lWQGZZA1njZf/U='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -155,6 +155,7 @@
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">邮箱</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">事由描述</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">相关货物</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">申请仓库</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">提交时间</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">操作</th>
@@ -195,6 +196,7 @@
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">邮箱</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">事由描述</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">相关货物</th>
+                                    <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">申请仓库</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">提交时间</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">归档时状态</th>
                                     <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">归档时间</th>
@@ -380,7 +382,12 @@
                 if (!row) return;
                 const isRecent = kind === 'recent';
                 const ref = buildRef(row.create_time, isRecent ? row.id : row.original_id);
-                detailCtx = { kind: kind, id: isRecent ? row.id : row.original_id, ref: ref };
+                const items = Array.isArray(row.items) ? row.items : [];
+                detailCtx = {
+                    kind: kind, id: isRecent ? row.id : row.original_id, ref: ref,
+                    warehouseName: row.warehouse_name || (row.warehouse_id ? ('仓库#' + row.warehouse_id) : null),
+                    itemCount: items.length
+                };
 
                 el('detailRef').textContent = ref;
                 el('detailStatus').innerHTML = statusBadge(row.status);
@@ -393,6 +400,7 @@
                 pair('申请人', row.applicant_name);
                 pair('部门', row.department);
                 pair('邮箱', row.contact);
+                pair('申请仓库', row.warehouse_name || (row.warehouse_id ? ('仓库#' + row.warehouse_id) : null));
                 pair('提交时间', fmtTime(row.create_time));
                 if (isRecent) {
                     pair('状态', STATUS_TEXT[row.status] || row.status);
@@ -415,7 +423,6 @@
                     attWrap.classList.add('hidden');
                 }
 
-                const items = Array.isArray(row.items) ? row.items : [];
                 el('detailItemCount').textContent = String(items.length);
                 el('detailItemsEmpty').classList.toggle('hidden', items.length > 0);
                 const tbody = el('detailItemsBody');
@@ -454,7 +461,16 @@
                 el('detailOverlay').addEventListener('click', closeDetail);
                 el('detailApproveBtn').addEventListener('click', function () {
                     if (!detailCtx) return;
-                    if (!window.confirm('确认通过申请单 ' + detailCtx.ref + ' 吗？')) return;
+                    let msg;
+                    if (detailCtx.itemCount > 0) {
+                        const wh = detailCtx.warehouseName
+                            ? '，将从仓库「' + detailCtx.warehouseName + '」扣减对应货物库存'
+                            : '（未指定仓库，系统将按唯一启用仓库扣减）';
+                        msg = '确认通过申请单 ' + detailCtx.ref + ' 吗？\n通过后' + wh + '，且通过后不可撤销、不可重复处理。';
+                    } else {
+                        msg = '确认通过申请单 ' + detailCtx.ref + ' 吗？';
+                    }
+                    if (!window.confirm(msg)) return;
                     handleStatus(detailCtx.id, 'approved');
                 });
                 el('detailRejectBtn').addEventListener('click', function () {
@@ -495,7 +511,7 @@
                 const tbody = el('recentBody');
                 tbody.innerHTML = '';
                 if (!rows.length) {
-                    tbody.innerHTML = '<tr><td colspan="9" class="px-6 py-10 text-center text-gray-400 text-sm">暂无近期申请单</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="10" class="px-6 py-10 text-center text-gray-400 text-sm">暂无近期申请单</td></tr>';
                     return;
                 }
                 rows.forEach(function (r) {
@@ -521,6 +537,7 @@
                         '<td class="px-4 py-3 text-sm max-w-xs"><span class="block truncate align-middle" title="' + esc(r.description) + '">' + esc(truncate(r.description, 40)) + '</span>'
                         + (r.attachment_note ? '<span class="text-xs text-gray-400 block mt-0.5 truncate">备注：' + esc(r.attachment_note) + '</span>' : '') + '</td>' +
                         goodsCell(r) +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(r.warehouse_name || (r.warehouse_id ? ('仓库#' + r.warehouse_id) : '-')) + '</td>' +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(r.create_time) + '</td>' +
                         '<td class="px-4 py-3">' + statusBadge(r.status) + '</td>' +
                         '<td class="px-4 py-3 whitespace-nowrap">' + actions + '</td>';
@@ -542,7 +559,14 @@
                             return;
                         }
                         const actionText = target === 'approved' ? '通过' : '驳回';
-                        if (!window.confirm('确认' + actionText + '申请单 #' + id + ' 吗？')) return;
+                        const row = recentAll.filter(function (x) { return x.id === id; })[0];
+                        const hasItems = !!(row && row.items && row.items.length);
+                        if (target === 'approved' && hasItems) {
+                            const wh = row.warehouse_name
+                                ? '，将从仓库「' + row.warehouse_name + '」扣减对应货物库存'
+                                : '（未指定仓库，系统将按唯一启用仓库扣减）';
+                            if (!window.confirm('确认通过申请单 #' + id + ' 吗？\n通过后' + wh + '，且通过后不可撤销、不可重复处理。')) return;
+                        } else if (!window.confirm('确认' + actionText + '申请单 #' + id + ' 吗？')) return;
                         handleStatus(id, target);
                     });
                 });
@@ -589,7 +613,7 @@
                 const tbody = el('archivedBody');
                 tbody.innerHTML = '';
                 if (!rows.length) {
-                    tbody.innerHTML = '<tr><td colspan="11" class="px-6 py-10 text-center text-gray-400 text-sm">该页暂无归档记录</td></tr>';
+                    tbody.innerHTML = '<tr><td colspan="12" class="px-6 py-10 text-center text-gray-400 text-sm">该页暂无归档记录</td></tr>';
                 }
                 rows.forEach(function (a) {
                     const ref = 'APP-' + fmtTime(a.create_time).slice(0, 10).replace(/-/g, '') + '-' + String(a.original_id).padStart(4, '0');
@@ -605,6 +629,7 @@
                         '<td class="px-4 py-3 text-sm max-w-xs"><span class="block truncate align-middle" title="' + esc(a.description) + '">' + esc(truncate(a.description, 40)) + '</span>'
                         + (a.attachment_note ? '<span class="text-xs text-gray-400 block mt-0.5 truncate">备注：' + esc(a.attachment_note) + '</span>' : '') + '</td>' +
                         goodsCell(a) +
+                        '<td class="px-4 py-3 text-sm whitespace-nowrap">' + esc(a.warehouse_name || (a.warehouse_id ? ('仓库#' + a.warehouse_id) : '-')) + '</td>' +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(a.create_time) + '</td>' +
                         '<td class="px-4 py-3">' + statusBadge(a.status) + '</td>' +
                         '<td class="px-4 py-3 text-sm whitespace-nowrap">' + fmtTime(a.archived_at) + '</td>' +

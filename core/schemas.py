@@ -314,6 +314,9 @@ class RequestSubmit(BaseModel):
     category: Optional[str] = Field(None, max_length=50, description="申请类别（已停用，可选，后端不再强校验）")
     description: str = Field(..., min_length=1, max_length=2000, description="事由描述")
     attachment_note: Optional[str] = Field(None, max_length=500, description="备注（可选）")
+    # 申请仓库（可选）：通过审批时从该仓库扣减库存。
+    # 不传时由后端兜底：系统恰好一个启用仓库则默认该仓；多仓且未指定则审批时拒绝扣减。
+    warehouse_id: Optional[int] = Field(None, gt=0, description="申请仓库ID（可选，通过审批时从该仓库扣库存）")
     # 相关货物（可选，可多行）：每行 条码+数量，名称/规格/单位由后端查库快照
     items: List[RequestItemSubmit] = Field(default_factory=list, max_length=200, description="相关货物明细（可选，每行条码+数量）")
 
@@ -343,6 +346,8 @@ class RequestResponse(BaseModel):
     category: Optional[str] = None
     description: str
     attachment_note: Optional[str] = None
+    warehouse_id: Optional[int] = None
+    warehouse_name: Optional[str] = None
     items: List[RequestItemResponse] = Field(default_factory=list)
     status: str
     handler_name: Optional[str] = None
@@ -362,6 +367,8 @@ class RequestArchiveResponse(BaseModel):
     category: Optional[str] = None
     description: str
     attachment_note: Optional[str] = None
+    warehouse_id: Optional[int] = None
+    warehouse_name: Optional[str] = None
     items: List[RequestItemResponse] = Field(default_factory=list)
     status: str
     handler_name: Optional[str] = None

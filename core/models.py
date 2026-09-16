@@ -274,6 +274,7 @@ class Request(Base):
     category = Column(String(50), comment="申请类别（已停用，保留兼容）")
     description = Column(Text, nullable=False, comment="事由描述")
     attachment_note = Column(String(500), comment="备注（附件文件名与交付方式等，v1 不支持二进制上传）")
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), comment="申请仓库（通过审批时从该仓库扣减库存；历史数据为空）")
     goods_barcode = Column(String(100), comment="（已停用，货物改存 request_items）条码")
     goods_name = Column(String(100), comment="（已停用，货物改存 request_items）名称")
     goods_spec = Column(String(100), comment="（已停用，货物改存 request_items）规格型号")
@@ -301,6 +302,7 @@ class RequestArchive(Base):
     category = Column(String(50), comment="申请类别（已停用，保留兼容）")
     description = Column(Text, nullable=False, comment="事由描述")
     attachment_note = Column(String(500), comment="备注")
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), comment="申请仓库（原单仓库，归档时原样保留）")
     goods_barcode = Column(String(100), comment="（已停用，货物改存 request_items_archive）条码")
     goods_name = Column(String(100), comment="（已停用，货物改存 request_items_archive）名称")
     goods_spec = Column(String(100), comment="（已停用，货物改存 request_items_archive）规格型号")
@@ -356,3 +358,23 @@ if engine.dialect.name == "postgresql":
     with engine.begin() as _mig_conn:
         _mig_conn.execute(text("ALTER TABLE requests ALTER COLUMN category DROP NOT NULL"))
         _mig_conn.execute(text("ALTER TABLE requests_archive ALTER COLUMN category DROP NOT NULL"))
+        # 申请仓库（通过审批时从该仓库扣减库存）：新增可空列，存量行保持 NULL。
+        # ADD COLUMN IF NOT EXISTS 保证重复启动幂等。
+        _mig_conn.execute(text(
+            "ALTER TABLE requests ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id)"))
+        _mig_conn.execute(text(
+            "ALTER TABLE requests_archive ADD COLUMN IF NOT EXISTS warehouse_id INTEGER REFERENCES warehouses(id)"))
+else:
+    # SQLite：ADD COLUMN 无 IF NOT EXISTS，先查 information_schema 等价物（PRAGMA）再补列，
+    # 保证重复启动幂等。
+    def _sqlite_has_col(table: str, col: str) -> bool:
+        with engine.connect() as _c:
+            names = [r[1] for r in _c.execute(text(f"PRAGMA table_info({table})")).fetchall()]
+        return col in names
+
+    if not _sqlite_has_col("requests", "warehouse_id"):
+        with engine.begin() as _mig_conn:
+            _mig_conn.execute(text("ALTER TABLE requests ADD COLUMN warehouse_id INTEGER"))
+    if not _sqlite_has_col("requests_archive", "warehouse_id"):
+        with engine.begin() as _mig_conn:
+            _mig_conn.execute(text("ALTER TABLE requests_archive ADD COLUMN warehouse_id INTEGER"))
