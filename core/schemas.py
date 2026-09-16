@@ -352,6 +352,7 @@ class RequestResponse(BaseModel):
     status: str
     handler_name: Optional[str] = None
     handle_time: Optional[datetime] = None
+    outbound_order_no: Optional[str] = None
     create_time: datetime
     update_time: Optional[datetime] = None
 
@@ -373,6 +374,7 @@ class RequestArchiveResponse(BaseModel):
     status: str
     handler_name: Optional[str] = None
     handle_time: Optional[datetime] = None
+    outbound_order_no: Optional[str] = None
     create_time: datetime
     update_time: Optional[datetime] = None
     archived_at: Optional[datetime] = None
