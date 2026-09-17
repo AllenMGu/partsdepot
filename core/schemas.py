@@ -307,6 +307,23 @@ class RequestItemSubmit(BaseModel):
     barcode: str = Field(..., min_length=1, max_length=100, description="货物条码（必须存在于货物表）")
     quantity: float = Field(..., gt=0, description="数量（>0）")
 
+class PublicStockLookup(BaseModel):
+    warehouse_id: int = Field(..., gt=0, description="启用仓库ID")
+    barcodes: List[str] = Field(..., min_length=1, max_length=200, description="待查询条码（最多200条）")
+
+    @field_validator("barcodes")
+    @classmethod
+    def _validate_barcodes(cls, values: List[str]) -> List[str]:
+        cleaned = []
+        for value in values:
+            code = (value or "").strip()
+            if not code:
+                raise ValueError("条码不能为空")
+            if len(code) > 100:
+                raise ValueError("条码过长（最多100字符）")
+            cleaned.append(code)
+        return cleaned
+
 class RequestSubmit(BaseModel):
     applicant_name: str = Field(..., min_length=1, max_length=100, description="申请人")
     department: Optional[str] = Field(None, max_length=100, description="部门（可选）")

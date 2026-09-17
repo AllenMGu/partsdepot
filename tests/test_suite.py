@@ -703,8 +703,10 @@ check("停用：恢复 W1 启用（环境复原）", s == 200 and (b or {}).get(
 
 # 15j. 批量按仓库存查询（评审 P2 跟进：切仓批量刷新，1 次调用替代 N 次 goods-search）
 def _lookup(wid, codes):
-    url = "/api/public/stock-lookup?warehouse_id=" + str(wid) + "&barcodes=" + urllib.parse.quote(codes, safe=",")
-    return req("GET", url)
+    return req("POST", "/api/public/stock-lookup", {
+        "warehouse_id": wid,
+        "barcodes": codes.split(",") if isinstance(codes, str) else codes,
+    })
 def _lk(rows, code):
     hit = next((r for r in (rows or []) if isinstance(r, dict) and r.get("barcode") == code), None)
     return float(hit.get("available_stock") or 0) if hit else "MISS"
@@ -726,23 +728,26 @@ check("批量：未知条码 → 200 且 available_stock=0", s == 200 and _lk(ro
 s, b = _lookup(99999, "G001")
 check("批量：不存在的仓库 → 400", s == 400, f"status={s} body={b}")
 s, b = _lookup(W2, "")
-check("批量：空条码 → 400", s == 400, f"status={s} body={b}")
+check("批量：空条码 → 422", s == 422, f"status={s} body={b}")
 s, b = _lookup(W2, ",,")
-check("批量：仅分隔符 → 400", s == 400, f"status={s} body={b}")
+check("批量：空白条码 → 422", s == 422, f"status={s} body={b}")
 s, b = _lookup(W2, ",".join(["B%03d" % i for i in range(201)]))
-check("批量：超过 200 条码 → 400", s == 400, f"status={s} body={b}")
+check("批量：超过 200 条码 → 422", s == 422, f"status={s} body={b}")
 s, b = _lookup(W2, "B" * 101)
-check("批量：单条码超 100 字符 → 400", s == 400, f"status={s} body={b}")
+check("批量：单条码超 100 字符 → 422", s == 422, f"status={s} body={b}")
+s, b = req("GET", "/api/public/stock-lookup?warehouse_id=" + str(W2) + "&barcodes=G003")
+check("批量：旧 GET 接口已关闭（避免超长 URL）", s in (404, 405), f"status={s} body={b}")
 s, b = req("PUT", f"/api/warehouses/{W2}", {"is_active": False}, admin)
 check("批量：停用 W2 前置成功", s == 200, f"status={s} body={b}")
 s, b = _lookup(W2, "G003")
 check("批量：停用仓库 → 400（与按仓搜索一致）", s == 400, f"status={s} body={b}")
 s, b = req("PUT", f"/api/warehouses/{W2}", {"is_active": True}, admin)
 check("批量：恢复 W2 启用（环境复原）", s == 200 and (b or {}).get("is_active") in (True, 1), f"status={s} body={b}")
-# 限流：与 goods-search 同桶（30 次/分钟/IP），独立别名 IP 验证
+# 限流：与 goods-search 同桶；50 个唯一条码每次消耗 5 配额，独立别名 IP 验证
 _rl2_headers = {"X-Real-IP": "8.8.8.88"}
-_rl2_codes = [req("GET", "/api/public/stock-lookup?warehouse_id=" + str(W2) + "&barcodes=G003", headers=_rl2_headers)[0] for _ in range(31)]
-check("批量限流：同一 IP 第 31 次 → 429（与搜索同桶）", _rl2_codes[:30] == [200] * 30 and _rl2_codes[30] == 429, f"codes={_rl2_codes}")
+_rl2_body = {"warehouse_id": W2, "barcodes": ["ENUM-%02d" % i for i in range(50)]}
+_rl2_codes = [req("POST", "/api/public/stock-lookup", _rl2_body, headers=_rl2_headers)[0] for _ in range(7)]
+check("批量限流：50 条计 5 配额，同一 IP 第 7 次 → 429", _rl2_codes[:6] == [200] * 6 and _rl2_codes[6] == 429, f"codes={_rl2_codes}")
 
 # 15k. 审批通过 → 自动生成出库单（产品需求：确认后出库必须有出库单）
 import re as _re
@@ -832,6 +837,22 @@ for _pf in sorted(_glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file
             _bad_inline.append(os.path.basename(_pf) + ":" + _attr)
 check("前端：所有页面零内联事件处理器（CSP 会静默拦截 onclick= 等，动态按钮须用事件委托）",
       not _bad_inline, f"offenders={_bad_inline}")
+
+# 15m. 小程序申请页必须与 Web 多仓契约同步：加载仓库、按仓搜索、提交 warehouse_id，
+# 切仓时使用 POST JSON 批量刷新库存。防止后续只改 Web 又让小程序退回“可提交但无法审批”。
+_mini_apply = open(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wechat-miniprogram", "pages", "apply", "index.js"),
+    encoding="utf-8",
+).read()
+_mini_contract = all(token in _mini_apply for token in (
+    'url: "/public/warehouses"',
+    'data: { q: kw, warehouse_id: this.data.warehouseId }',
+    'url: "/public/stock-lookup"',
+    'method: "POST"',
+    'warehouse_id: this.data.warehouseId',
+))
+check("小程序：多仓申请契约完整（仓库列表/按仓搜索/POST批量库存/提交warehouse_id）",
+      _mini_contract)
 
 # ---------- 汇总 ----------
 fails = [r for r in results if not r[1]]

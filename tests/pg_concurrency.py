@@ -8,7 +8,8 @@
 #
 # 场景：A 并发首次入库同组合 | B 并发重复完成盘点 | C 盘点完成∥首次扫码入库
 #       D 入库 新增明细∥提交 | E 盘点 录入明细∥完成 | F 出库 新增明细∥提交 | G 入库 编辑明细∥提交
-#       D~G 断言"终态单据不得出现未过账/未扣减的新明细"：
+#       D~G 断言"终态单据不得出现未过账/未扣减的新明细"；H/I 验证跨流程锁顺序：
+#       H 申请审批∥手工出库，I 申请审批∥扫码出库。
 #       新明细要么随提交/完成一起过账，要么被 400 拒绝 —— 二者必居其一，不允许中间态。
 #
 # 安全：启动前先过 tests/test_db_guard.py 护栏 —— 目标库必须是可丢弃的空测试库
@@ -368,6 +369,76 @@ try:
     check("场景G 无 500", okG, f"codes={codesG} status={stG} stock={qtyG}")
     check("场景G 结果一致(编辑要么生效并过账=9、要么被 400 拒绝后按 2 过账)", consistentG,
           f"codes={codesG} status={stG} stock={qtyG}(期望 9 或 2)")
+
+    # ============================================================
+    # 场景 H：申请审批 ∥ 手工出库（明细反序）——跨流程必须使用同一 Stock.id 锁顺序
+    # ============================================================
+    print("\n--- 场景 H：申请审批 与 手工出库反序并发 ---")
+    req("POST","/api/goods/",{"barcode":"G007","name":"物料7","price":70}, admin)
+    req("POST","/api/goods/",{"barcode":"G008","name":"物料8","price":80}, admin)
+    req("POST","/api/locations/",{"warehouse_id":W1,"location_code":"L9","name":"库位9"}, admin)
+    req("POST","/api/locations/",{"warehouse_id":W1,"location_code":"L10","name":"库位10"}, admin)
+    req("POST","/api/inventory/scan",{"goods_barcode":"G007","location_code":"L9","type":"入库","quantity":10}, op)
+    req("POST","/api/inventory/scan",{"goods_barcode":"G008","location_code":"L10","type":"入库","quantity":10}, op)
+    s, appH = req("POST", "/api/requests/", {
+        "applicant_name":"并发申请", "contact":"pg-h@test.com", "description":"跨流程锁顺序",
+        "warehouse_id":W1,
+        "items":[{"barcode":"G007","quantity":1},{"barcode":"G008","quantity":1}],
+    }); RH=(appH or {}).get("id")
+    s, outH = req("POST","/api/outbound-orders/",{"customer":"并发出库"}, admin); OH=(outH or {}).get("id")
+    # 与申请单货物顺序相反
+    req("POST", f"/api/outbound-orders/{OH}/items", {"goods_barcode":"G008","location_code":"L10","quantity":1}, admin)
+    req("POST", f"/api/outbound-orders/{OH}/items", {"goods_barcode":"G007","location_code":"L9","quantity":1}, admin)
+    check("场景H 申请单与反序手工出库单就绪", RH and OH, f"request={RH} outbound={OH}")
+
+    resH = {}
+    barH = threading.Barrier(2)
+    def approveH():
+        barH.wait()
+        resH["approve"] = req("POST", f"/api/requests/{RH}/status", {"status":"approved"}, admin)
+    def submitH():
+        barH.wait()
+        resH["outbound"] = req("POST", f"/api/outbound-orders/{OH}/submit", {}, admin)
+    t1 = threading.Thread(target=approveH); t2 = threading.Thread(target=submitH)
+    t1.start(); t2.start(); t1.join(); t2.join()
+    qH7, _ = stock_qty_of("G007", "L9")
+    qH8, _ = stock_qty_of("G008", "L10")
+    codesH = {k: v[0] for k, v in resH.items()}
+    check("场景H 两条跨流程并发均成功（无 deadlock/500）",
+          codesH == {"approve": 200, "outbound": 200}, f"codes={codesH} bodies={resH}")
+    check("场景H 两种流程各扣1，G007/G008 最终均为8",
+          qH7 == 8 and qH8 == 8, f"G007={qH7} G008={qH8}")
+
+    # ============================================================
+    # 场景 I：申请审批 ∥ 扫码出库——两条路径都必须先锁库存、再锁 OUT 号段
+    # ============================================================
+    print("\n--- 场景 I：申请审批 与 扫码出库并发 ---")
+    req("POST","/api/goods/",{"barcode":"G009","name":"物料9","price":90}, admin)
+    req("POST","/api/locations/",{"warehouse_id":W1,"location_code":"L11","name":"库位11"}, admin)
+    req("POST","/api/inventory/scan",{"goods_barcode":"G009","location_code":"L11","type":"入库","quantity":10}, op)
+    s, appI = req("POST", "/api/requests/", {
+        "applicant_name":"扫码并发", "contact":"pg-i@test.com", "description":"库存锁与号段锁顺序",
+        "warehouse_id":W1, "items":[{"barcode":"G009","quantity":1}],
+    }); RI=(appI or {}).get("id")
+    check("场景I 申请单与扫码库存就绪", RI, f"request={RI} stock={stock_qty_of('G009','L11')[0]}")
+
+    resI = {}
+    barI = threading.Barrier(2)
+    def approveI():
+        barI.wait()
+        resI["approve"] = req("POST", f"/api/requests/{RI}/status", {"status":"approved"}, admin)
+    def scanI():
+        barI.wait()
+        resI["scan"] = req("POST", "/api/inventory/scan", {
+            "goods_barcode":"G009", "location_code":"L11", "type":"出库", "quantity":1,
+        }, op)
+    t1 = threading.Thread(target=approveI); t2 = threading.Thread(target=scanI)
+    t1.start(); t2.start(); t1.join(); t2.join()
+    qI, _ = stock_qty_of("G009", "L11")
+    codesI = {k: v[0] for k, v in resI.items()}
+    check("场景I 审批与扫码出库均成功（无号段锁/库存锁死锁）",
+          codesI == {"approve": 200, "scan": 200}, f"codes={codesI} bodies={resI}")
+    check("场景I 两条路径各扣1，G009 最终为8", qI == 8, f"G009={qI}")
 
 finally:
     srv.terminate()

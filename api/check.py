@@ -14,7 +14,7 @@ from core.models import UserRole, Warehouse, UserWarehouse, User, Location, Good
 from core.schemas import CheckCreate, CheckOrderCreate, CheckOrderHeaderResponse, CheckOrderItemResponse, CheckOrderFullResponse, CheckOrderItemCreate
 from core.security import get_current_user
 from core.deps import get_db
-from core.order_utils import lock_stock_row, lock_order_header, advisory_lock_stock_key
+from core.order_utils import lock_stock_row, lock_stock_rows_for_keys, lock_order_header, advisory_lock_stock_key
 
 router = APIRouter()
 router_report = APIRouter()
@@ -593,9 +593,20 @@ async def complete_check_order(
     # 将盘点差异回写到库存（行级锁，防止并发下丢失更新）
     # 冲突检测：录入时记录的系统库存基线（item.actual_quantity）与当前库存不一致，
     # 说明盘点期间发生了出入库 —— 直接覆盖会抹掉期间合法变动，必须要求重盘。
-    items = db.query(CheckOrderItem).filter(CheckOrderItem.header_id == order_id).all()
+    items = (
+        db.query(CheckOrderItem)
+        .filter(CheckOrderItem.header_id == order_id)
+        .order_by(CheckOrderItem.goods_id, CheckOrderItem.location_id, CheckOrderItem.id)
+        .all()
+    )
+    locked = lock_stock_rows_for_keys(
+        db,
+        order.warehouse_id,
+        ((item.goods_id, item.location_id) for item in items),
+    )
+    stock_by_key = {(row.goods_id, row.location_id): row for row in locked}
     for item in items:
-        stock = lock_stock_row(db, order.warehouse_id, item.goods_id, item.location_id)
+        stock = stock_by_key.get((item.goods_id, item.location_id))
         if stock is None:
             # 与入库/扫码入库同一把咨询锁：串行化"同一 (仓库,货物,库位)"的并发建行，
             # 避免盘点完成与首次扫码入库并发时都看到"无库存行"而各建一条。

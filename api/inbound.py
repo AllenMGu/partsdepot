@@ -10,7 +10,7 @@ from core.models import UserRole, InventoryType, Warehouse, UserWarehouse, User,
 from core.schemas import InboundOrderItemCreate, InboundOrderItemResponse, InboundOrderHeaderCreate, InboundOrderHeaderResponse, InboundOrderDetailResponse
 from core.security import get_current_user
 from core.deps import get_db
-from core.order_utils import format_outbound_order_response, recalculate_outbound_order_total, recalculate_inbound_order_total, lock_stock_row, lock_order_header, advisory_lock_stock_key, generate_order_no
+from core.order_utils import format_outbound_order_response, recalculate_outbound_order_total, recalculate_inbound_order_total, lock_stock_row, lock_stock_rows_for_keys, lock_order_header, advisory_lock_stock_key, generate_order_no
 
 router = APIRouter()
 
@@ -194,8 +194,10 @@ async def submit_inbound_order(
             key = (item.goods_id, item.location_id)
             inbound_qty[key] = inbound_qty.get(key, 0.0) + (item.quantity or 0)
 
-        for (goods_id, location_id), qty in inbound_qty.items():
-            stock = lock_stock_row(db, order.warehouse_id, goods_id, location_id)
+        locked = lock_stock_rows_for_keys(db, order.warehouse_id, inbound_qty.keys())
+        stock_by_key = {(row.goods_id, row.location_id): row for row in locked}
+        for (goods_id, location_id), qty in sorted(inbound_qty.items()):
+            stock = stock_by_key.get((goods_id, location_id))
             if not stock:
                 # 库存行尚不存在：先持咨询锁串行化并发建行，再重查
                 #（后到者等前一个事务提交后能看到新行，从而改为更新）
