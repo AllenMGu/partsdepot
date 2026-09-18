@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<title>出入库日志 - 备件管理系统（手机端）</title>
+<link rel="icon" href="../assets/images/logo.png">
+<link rel="stylesheet" href="../assets/css/font-awesome.min.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body class="m-body" data-page="logs">
+<div class="m-app no-tabbar">
+  <header class="m-header">
+    <button type="button" class="m-back" id="mBack"><i class="fa fa-angle-left"></i></button>
+    <div class="m-title"><i class="fa fa-history"></i> 出入库日志</div>
+    <div class="m-ctx" id="mCtx"></div>
+  </header>
+
+  <main class="m-main">
+    <div class="m-card">
+      <div class="m-row between">
+        <span class="m-muted" id="mLogsCount">加载中…</span>
+        <button type="button" class="m-btn m-btn-ghost m-btn-sm" data-act="logsRefresh"><i class="fa fa-refresh"></i> 刷新</button>
+      </div>
+    </div>
+    <div class="m-card" id="mLogsList">
+      <div class="m-empty">加载中…</div>
+    </div>
+  </main>
+</div>
+<script src="pages/logs.js"></script>
+<script src="mobile.js"></script>
+</body>
+</html>

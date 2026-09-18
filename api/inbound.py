@@ -247,12 +247,13 @@ async def submit_inbound_order(
 @router.get("/inbound-orders/", response_model=List[InboundOrderHeaderResponse], summary="获取入库单列表")
 async def get_inbound_orders(
     status: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取入库单列表"""
+    """获取入库单列表（warehouse_id 可选，用于 H5"当前仓库"语义；不传则行为不变）"""
     try:
         query = db.query(InboundOrderHeader).join(
             Warehouse, InboundOrderHeader.warehouse_id == Warehouse.id
@@ -271,7 +272,11 @@ async def get_inbound_orders(
                 query = query.filter(InboundOrderHeader.warehouse_id.in_(user_warehouse_ids))
             else:
                 query = query.filter(InboundOrderHeader.warehouse_id == -1)  # 返回空结果
-        
+
+        # 仓库过滤（可选参数，向后兼容）
+        if warehouse_id:
+            query = query.filter(InboundOrderHeader.warehouse_id == warehouse_id)
+
         # 状态过滤
         if status:
             query = query.filter(InboundOrderHeader.status == status)

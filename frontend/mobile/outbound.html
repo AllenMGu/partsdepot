@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<title>出库单 - 备件管理系统（手机端）</title>
+<link rel="icon" href="../assets/images/logo.png">
+<link rel="stylesheet" href="../assets/css/font-awesome.min.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body class="m-body" data-page="outbound">
+<div class="m-app no-tabbar">
+  <header class="m-header">
+    <button type="button" class="m-back" id="mBack"><i class="fa fa-angle-left"></i></button>
+    <div class="m-title"><i class="fa fa-truck"></i> 出库单</div>
+    <div class="m-ctx" id="mCtx"></div>
+  </header>
+
+  <main class="m-main">
+    <div class="m-card">
+      <div class="m-card-title">新建出库单</div>
+      <div class="m-field">
+        <div class="m-label">客户</div>
+        <input class="m-input" id="mCreatePartner" placeholder="客户名称">
+      </div>
+      <div class="m-field">
+        <div class="m-label">备注（选填）</div>
+        <input class="m-input" id="mCreateRemark" placeholder="备注">
+      </div>
+      <button type="button" class="m-btn m-btn-primary" data-act="ordCreate"><i class="fa fa-plus"></i> 创建出库单</button>
+    </div>
+
+    <div class="m-card">
+      <div class="m-card-title">
+        <span>出库单列表 <span class="m-sub" id="mOrderCount"></span></span>
+        <button type="button" class="m-btn m-btn-ghost m-btn-sm" data-act="ordRefresh"><i class="fa fa-refresh"></i></button>
+      </div>
+      <div id="mOrderList"><div class="m-empty">加载中…</div></div>
+    </div>
+
+    <div class="m-card m-hidden" id="mOrderDetail"></div>
+  </main>
+</div>
+<script src="pages/orders_common.js"></script>
+<script src="pages/outbound.js"></script>
+<script src="mobile.js"></script>
+</body>
+</html>

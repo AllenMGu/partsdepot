@@ -249,12 +249,13 @@ async def submit_outbound_order(
 @router.get("/outbound-orders/", response_model=List[OutboundOrderHeaderResponse], summary="获取出库单列表")
 async def get_outbound_orders(
     status: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取出库单列表"""
+    """获取出库单列表（warehouse_id 可选，用于 H5"当前仓库"语义；不传则行为不变）"""
     try:
         query = db.query(OutboundOrderHeader).join(
             Warehouse, OutboundOrderHeader.warehouse_id == Warehouse.id
@@ -272,7 +273,11 @@ async def get_outbound_orders(
                 query = query.filter(OutboundOrderHeader.warehouse_id.in_(user_warehouse_ids))
             else:
                 query = query.filter(OutboundOrderHeader.warehouse_id == -1)  # 返回空结果
-        
+
+        # 仓库过滤（可选参数，向后兼容）
+        if warehouse_id:
+            query = query.filter(OutboundOrderHeader.warehouse_id == warehouse_id)
+
         if status:
             query = query.filter(OutboundOrderHeader.status == status)
         

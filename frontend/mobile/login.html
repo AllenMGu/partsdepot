@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<title>登录 - 备件管理系统（手机端）</title>
+<link rel="icon" href="../assets/images/logo.png">
+<link rel="stylesheet" href="../assets/css/font-awesome.min.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body class="m-body" data-page="login">
+<div class="m-app no-tabbar" style="justify-content:flex-start;">
+  <div class="m-login-wrap">
+    <img class="m-login-logo" src="../assets/images/logo.png" alt="Logo">
+    <div class="m-login-title">备件管理系统</div>
+    <div class="m-login-sub">多仓库管理 · 手机端</div>
+
+    <form id="mLoginForm" novalidate>
+      <div class="m-field">
+        <div class="m-label">用户名</div>
+        <input class="m-input" id="mLoginUser" name="username" autocomplete="username" placeholder="请输入用户名" maxlength="100">
+      </div>
+      <div class="m-field">
+        <div class="m-label">密码</div>
+        <input class="m-input" id="mLoginPass" type="password" name="password" autocomplete="current-password" placeholder="请输入密码">
+      </div>
+      <button type="submit" class="m-btn m-btn-primary" id="mLoginBtn">登 录</button>
+    </form>
+
+    <div class="m-mt12" style="text-align:center;">
+      <a href="apply.html" style="color:var(--m-primary);font-size:14px;text-decoration:none;">
+        <i class="fa fa-paper-plane"></i> 免登录提交备件申请
+      </a>
+    </div>
+  </div>
+</div>
+<script src="pages/login.js"></script>
+<script src="mobile.js"></script>
+</body>
+</html>

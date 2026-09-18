@@ -37,3 +37,5 @@ done
 
 "$PYTHON" tests/seed_pw_e2e.py "$PORT" "$DB"
 "$PYTHON" tests/pw_e2e.py
+# H5 手机端端到端（同服务/同种子：登录→扫码回退→入库单→盘点→匿名申请→仓库过滤）
+"$PYTHON" tests/mobile_e2e.py
