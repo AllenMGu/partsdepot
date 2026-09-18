@@ -114,7 +114,38 @@ var AUTH = {
     var id = u.current_warehouse_id;
     var list = u.warehouses || [];
     for (var i = 0; i < list.length; i++) if (list[i].id === id) return list[i];
+    // 注意：后端 current_warehouse_id 为空时的 list[0] 只是过渡展示位，
+    // 真正的"当前仓库"建立必须走 ensureCurrentWarehouse() 同步到服务端。
     return u.current_warehouse_name ? { id: id, name: u.current_warehouse_name } : (list[0] || null);
+  },
+  /* 首次使用场景：用户有仓库、但后端 current_warehouse_id 为空。
+   * 纯前端 fallback（把 warehouses[0] 当"当前仓库"）会导致：页面/我的页把该仓
+   * 显示为"当前"，而入库/出库创建依赖服务端真实的 current_warehouse_id →
+   * 后端 400"请先选择当前仓库"；单仓库用户甚至没有"切换"按钮可自救。
+   * 因此这里自动选择（is_default 优先，否则 warehouses[0]）并真实调用
+   * POST /users/{id}/switch-warehouse 同步到服务端，成功后更新 AUTH 快照。
+   * 失败仅提示、不阻塞页面初始化（返回的 Promise 总是 resolve）。 */
+  ensureCurrentWarehouse: function () {
+    var self = this;
+    var a = this.getAuth();
+    var u = a.user;
+    if (!u || !u.id || u.current_warehouse_id) return Promise.resolve();
+    var list = u.warehouses || [];
+    if (!list.length) return Promise.resolve();
+    var target = list[0];
+    for (var i = 0; i < list.length; i++) if (list[i].is_default) { target = list[i]; break; }
+    return api("POST", "/users/" + u.id + "/switch-warehouse?warehouse_id=" + target.id)
+      .then(function (res) {
+        var nu = Object.assign({}, u, {
+          current_warehouse_id: (res && res.current_warehouse_id) || target.id,
+          current_warehouse_name: (res && res.current_warehouse_name) || target.name
+        });
+        self.save(nu, a.expiry); // 写回原 storage（local/session）
+        return nu;
+      })
+      .catch(function (err) {
+        toast("自动选择当前仓库失败：" + ((err && err.message) || err), "err");
+      });
   }
 };
 
@@ -445,9 +476,17 @@ function boot() {
   var activeTab = { index: "home", stock: "stock", scan: "scan", orders: "orders", profile: "me" }[page] || "";
   renderChrome(activeTab);
   var init = (window.M_PAGES || {})[page];
-  if (init) {
+  if (!init) return;
+  // 首次使用：已登录、有仓库、但后端 current_warehouse_id 为空 →
+  // 先自动建立当前仓库（真实同步到服务端），再初始化页面；
+  // 否则页面会把 warehouses[0] 显示为"当前仓库"，而创建单据时后端 400。
+  var u0 = AUTH.isLoggedIn() ? AUTH.getUser() : null;
+  var ready = (u0 && !u0.current_warehouse_id && (u0.warehouses || []).length)
+      ? AUTH.ensureCurrentWarehouse().then(function () { renderChrome(activeTab); })
+      : Promise.resolve();
+  ready.then(function () {
     try { init(); } catch (e) { toast(e.message || "页面初始化失败", "err"); }
-  }
+  });
 }
 window.addEventListener("load", boot);
 })();

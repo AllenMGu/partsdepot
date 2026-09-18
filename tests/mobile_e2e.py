@@ -10,6 +10,7 @@
   F.  盘点单：创建 → 确认数量（弹窗显示标题 + 正文）→ 完成盘点（数量一致→"盘点一致"）
   G.  仓库过滤：入库单列表按 warehouse_id 过滤（不混入其它仓库的单）
   H.  鉴权兼容：sessionStorage 中的 user/token_expiry 可登录（与桌面"不记住我"对齐）
+  I.  首次使用：后端 current_warehouse_id 为空 + 单仓库 → 登录自动建立当前仓库（同步服务端）→ 创建入库单成功
 
 前置：按 tests/run_pw_e2e.sh 方式起服务（端口 PW_E2E_PORT，默认 8099）+ 种子数据
 （种子：一号仓 W1 含 8888001/8888003 于 A1，二号仓 W2 含 8888002 于 A2）。
@@ -533,6 +534,58 @@ with sync_playwright() as p:
     except Exception:
         ok3 = "login.html" in page3.evaluate("() => location.href")
     check("无任何本地凭据时跳登录页", ok3, page3.evaluate("() => location.href"))
+
+    # ---------- I. 首次使用：后端 current_warehouse_id 为空 → 自动建立当前仓库 ----------
+    # 入库/出库创建依赖服务端真实的 user.current_warehouse_id（为空 → 400"请先选择当前仓库"）。
+    # 旧 H5 仅前端 fallback 把 warehouses[0] 当"当前"：profile 显示"当前"、单据列表按该仓查询，
+    # 一创建单据就 400；单仓库用户连"切换"按钮都没有，无法在 H5 内自救。
+    # 修法：boot 时 ensureCurrentWarehouse() 自动选仓（is_default 优先）并真实 POST switch-warehouse。
+    # 本用例按审核要求构造最坏场景：current_warehouse_id 为空 + 用户只有 1 个仓库。
+    import sqlite3 as _s3
+    _db = os.path.join(_REPO_ROOT, ".pwtest.db")
+    _con = _s3.connect(_db)
+    _wh1 = _con.execute("SELECT id FROM warehouses WHERE name = '一号仓'").fetchone()[0]
+    _uid = _con.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()[0]
+    _con.execute("UPDATE users SET current_warehouse_id = NULL")
+    _con.execute("DELETE FROM user_warehouses WHERE user_id = ? AND warehouse_id != ?",
+                 (_uid, _wh1))  # 只留一号仓 → 单仓库用户
+    _con.commit()
+    _con.close()
+    page.evaluate("() => { localStorage.clear(); sessionStorage.clear(); }")
+    page.goto(BASE + "/mobile/login.html", wait_until="networkidle")
+    page.fill("#mLoginUser", "admin")
+    page.fill("#mLoginPass", "Admin-Test-2026")
+    page.locator("#mLoginBtn").click()
+    ok = wait_until(lambda: "index.html" in page.evaluate("() => location.href"), timeout_ms=10000)
+    check("首次使用用户登录成功（重定向首页）", ok, page.evaluate("() => location.href"))
+    # ensureCurrentWarehouse：快照自动带上当前仓库（唯一的 W1）
+    ok = wait_until(lambda: (page.evaluate("() => (window.M.AUTH.getUser() || {}).current_warehouse_id") or 0) > 0,
+                    timeout_ms=10000)
+    check("登录后快照已自动建立当前仓库（ensureCurrentWarehouse）", ok,
+          page.evaluate("() => JSON.stringify(window.M.AUTH.getUser() || {})"))
+    _con = _s3.connect(_db)
+    _row = _con.execute("SELECT current_warehouse_id FROM users WHERE id = ?", (_uid,)).fetchone()
+    _con.close()
+    check("服务端 user.current_warehouse_id 已真实设置（非纯前端状态）",
+          _row is not None and _row[0] == _wh1, _row)
+    # profile 页：唯一仓库显示"当前"，无"切换"按钮
+    page.goto(BASE + "/mobile/profile.html", wait_until="networkidle")
+    page.wait_for_timeout(300)
+    _wh_box = page.locator("#mProfileWarehouses")
+    check("profile 页：唯一仓库显示'当前'",
+          _wh_box.locator(".m-item", has_text="一号仓").locator(".m-badge-done").count() == 1,
+          _wh_box.inner_text())
+    check("profile 页：无'切换'按钮（当前仓库已建立）",
+          page.locator('[data-act="whSwitch"]').count() == 0,
+          _wh_box.inner_text())
+    # 创建入库单——旧实现的故障场景（后端 400"请先选择当前仓库"）
+    page.goto(BASE + "/mobile/inbound.html", wait_until="networkidle")
+    page.wait_for_timeout(300)
+    page.fill("#mCreatePartner", "首用验证")
+    page.locator("[data-act='ordCreate']").click()
+    ok = wait_until(lambda: page.locator(".m-item", has_text="首用验证").count() > 0, timeout_ms=10000)
+    check("首次使用用户创建入库单成功（不再 400'请先选择当前仓库'）", ok,
+          (page.locator("#mToast").text_content() or ""))
 
     browser.close()
 
