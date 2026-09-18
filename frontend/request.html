@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-IIRpWrEtFYA6ZO44HXNkw+U0p2SYOSZsZNaoIq/NVqg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-q8eYZXhHOd9KeOyPbWbhMHAOu3niOJnRT49+Ml36rFU='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -67,7 +67,7 @@
                         </div>
 
                         <div id="goodsSection">
-                            <label class="block text-sm font-medium text-gray-700 mb-1">相关货物 <span class="text-xs text-gray-400">选填 · 可添加多行 · 选择备件后显示可用库存</span></label>
+                            <label class="block text-sm font-medium text-gray-700 mb-1">相关货物 <span class="text-red-500">*</span> <span class="text-xs text-gray-400">必选（至少一行）· 可添加多行 · 选择备件后显示可用库存</span></label>
                             <div class="border border-gray-200 rounded-md overflow-hidden">
                                 <table class="w-full text-sm">
                                     <thead class="bg-gray-50">
@@ -81,7 +81,7 @@
                                     </thead>
                                     <tbody id="goodsTableBody" class="divide-y divide-gray-100"></tbody>
                                 </table>
-                                <p id="goodsEmptyHint" class="px-3 py-3 text-xs text-gray-400 text-center">尚未添加货物：点击下方"添加货物行"，在该行内搜索并选择备件</p>
+                                <p id="goodsEmptyHint" class="px-3 py-3 text-xs text-gray-400 text-center">尚未添加货物（必选，至少一行）：点击下方"添加货物行"，在该行内搜索并选择备件</p>
                                 <div class="px-3 py-2 border-t border-gray-100 flex items-center justify-between bg-gray-50">
                                     <button type="button" id="addGoodsRowBtn"
                                             class="px-3 py-1.5 text-sm font-medium text-primary rounded-md hover:bg-blue-50 transition-all-300">
@@ -260,7 +260,7 @@
                 refreshPickedStock();
             });
 
-            // ---------- 相关货物（选填，多行：添加行 → 行内搜索选择备件 → 显示可用库存） ----------
+            // ---------- 相关货物（必选，多行：添加行 → 行内搜索选择备件 → 显示可用库存） ----------
             // 每行状态：{ rowId: 稳定id, picked: bool, g: {barcode,name,spec,unit,available_stock}|null, qty: '', keyword: '' }
             const goodsRows = [];
             const goodsTableBody = document.getElementById('goodsTableBody');
@@ -586,8 +586,8 @@
                     return;
                 }
 
-                // 相关货物（选填，可多行）：未选择备件的行不含数据、不参与提交；
-                // 已选择备件的行必须填写数量（大于 0）
+                // 相关货物（必选，可多行）：至少一行已选择备件；
+                // 未选择备件的行不含数据、不参与提交；已选择备件的行必须填写数量（大于 0）
                 // 安全约定：只提交 条码+数量；名称/规格/单位由后端按条码查库填充，不传客户端快照
                 const items = [];
                 for (let i = 0; i < goodsRows.length; i++) {
@@ -599,6 +599,10 @@
                         return;
                     }
                     items.push({ barcode: row.g.barcode, quantity: qty });
+                }
+                if (items.length === 0) {
+                    showError('请至少添加一行相关货物（必选）');
+                    return;
                 }
                 payload.items = items;
 

@@ -42,7 +42,7 @@
 
   <view class="card">
     <view class="row" style="margin-bottom: 12rpx;">
-      <text>相关货物（选填，可多行）</text>
+      <text>相关货物（必选，可多行）</text>
       <text class="muted">已加 {{goodsItems.length}} 行</text>
     </view>
     <input

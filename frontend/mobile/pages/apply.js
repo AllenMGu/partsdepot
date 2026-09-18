@@ -188,7 +188,7 @@ window.M_PAGES["apply"] = function () {
   function renderItems() {
     var items = state.goodsItems;
     if (!items.length) {
-      elItems.innerHTML = '<div class="m-hint">尚未添加货物（选填）</div>';
+      elItems.innerHTML = '<div class="m-hint">尚未添加货物（必选，至少一行）</div>';
       return;
     }
     elItems.innerHTML = items.map(function (g, i) {
@@ -236,17 +236,25 @@ window.M_PAGES["apply"] = function () {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) return M.toast("联系邮箱格式不正确", "err");
     if (!description) return M.toast("请填写事由描述", "err");
 
-    var items = state.goodsItems.filter(function (g) { return (g.qty || "").trim() !== ""; });
-    items.forEach(function (g) {
-      if (!(Number(g.qty) > 0)) throw new Error("货物「" + g.name + "」数量需大于 0");
-    });
+    // 相关货物（必选，可多行）：与 PC 端一致——至少一行已选货物；
+    // 已选行必须填写数量（大于 0），不再静默丢弃未填数量的行
+    var items = [];
+    for (var gi = 0; gi < state.goodsItems.length; gi++) {
+      var g = state.goodsItems[gi];
+      var q = (g.qty || "").trim();
+      if (q === "" || !(Number(q) > 0)) {
+        return M.toast("请填写第 " + (gi + 1) + " 行货物（" + g.name + "）的数量（大于 0）", "err");
+      }
+      items.push({ barcode: g.barcode, quantity: Number(q) });
+    }
+    if (!items.length) return M.toast("请至少添加一行相关货物（必选）", "err");
 
     var payload = {
       applicant_name: applicant,
       contact: contact,
       description: description,
       warehouse_id: state.warehouseId,
-      items: items.map(function (g) { return { barcode: g.barcode, quantity: Number(g.qty) }; })
+      items: items
     };
     if (department) payload.department = department;
     if (attachmentNote) payload.attachment_note = attachmentNote;

@@ -199,6 +199,8 @@ Page({
     if (!contact) return "请填写联系邮箱";
     if (!EMAIL_RE.test(contact)) return "邮箱格式不正确（示例：zhangsan@example.com）";
     if (!description) return "请填写事由描述";
+    // 相关货物（必选，可多行）：与 PC 端一致——至少一行已选货物
+    if (!d.goodsItems.length) return "请至少添加一行相关货物（必选）";
     for (let i = 0; i < d.goodsItems.length; i++) {
       const q = Number(d.goodsItems[i].qty);
       if (d.goodsItems[i].qty === "" || isNaN(q) || q <= 0) {
