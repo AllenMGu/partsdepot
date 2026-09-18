@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<title>首页 - 备件管理系统（手机端）</title>
+<link rel="icon" href="../assets/images/logo.png">
+<link rel="stylesheet" href="../assets/css/font-awesome.min.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body class="m-body" data-page="index">
+<div class="m-app">
+  <header class="m-header">
+    <img src="../assets/images/logo.png" alt="" style="width:28px;height:28px;">
+    <div class="m-title">备件管理系统</div>
+    <div class="m-ctx" id="mCtx"></div>
+  </header>
+
+  <main class="m-main">
+    <!-- 已登录：概览 -->
+    <div id="mHomeLoggedIn">
+      <div class="m-hero">
+        <div class="m-hero-title" id="mHomeUserName">你好</div>
+        <div class="m-hero-sub">多仓库管理 · 手机端</div>
+        <div id="mOverview"><div class="m-empty" style="color:rgba(255,255,255,.85);">加载中…</div></div>
+      </div>
+    </div>
+
+    <!-- 匿名可见：申请入口 + 登录 -->
+    <div id="mHomeAnon">
+      <div class="m-hero">
+        <div class="m-hero-title">备件申请与仓库服务</div>
+        <div class="m-hero-sub">免登录即可提交备件申请 · 员工可登录使用完整功能</div>
+      </div>
+      <div class="m-card m-mt12">
+        <div class="m-row between">
+          <div>
+            <div class="m-item-title"><i class="fa fa-paper-plane" style="color:var(--m-primary);"></i> 备件申请</div>
+            <div class="m-item-sub">免登录提交，申请后请保存编号</div>
+          </div>
+          <button type="button" class="m-btn m-btn-primary m-btn-sm" data-act="goApply">去申请</button>
+        </div>
+      </div>
+      <div class="m-card">
+        <button type="button" class="m-btn m-btn-ghost" data-act="goLogin"><i class="fa fa-sign-in"></i> 员工登录（库存/扫码/单据/盘点）</button>
+      </div>
+    </div>
+
+    <!-- 功能入口（已登录） -->
+    <div class="m-card m-mt12" id="mHomeGrid">
+      <div class="m-card-title">常用功能</div>
+      <div class="m-grid">
+        <button type="button" class="m-grid-item m-featured" data-act="goApply"><i class="fa fa-paper-plane"></i><span>备件申请</span></button>
+        <button type="button" class="m-grid-item" data-act="goScan"><i class="fa fa-barcode"></i><span>扫码出入库</span></button>
+        <button type="button" class="m-grid-item" data-act="goOrders"><i class="fa fa-list-alt"></i><span>单据中心</span></button>
+        <a class="m-grid-item" href="stock.html"><i class="fa fa-cubes"></i><span>库存查询</span></a>
+        <a class="m-grid-item" href="logs.html"><i class="fa fa-history"></i><span>出入库日志</span></a>
+        <a class="m-grid-item" href="check.html"><i class="fa fa-clipboard"></i><span>盘点单</span></a>
+        <a class="m-grid-item" href="inbound.html"><i class="fa fa-inbox"></i><span>入库单</span></a>
+        <a class="m-grid-item" href="outbound.html"><i class="fa fa-truck"></i><span>出库单</span></a>
+      </div>
+      <div class="m-mt12">
+        <button type="button" class="m-btn m-btn-ghost" id="mLogoutBtn" data-act="logout"><i class="fa fa-sign-out"></i> 退出登录</button>
+      </div>
+    </div>
+  </main>
+
+  <nav class="m-tabbar" id="mTabbar"></nav>
+</div>
+<script src="pages/home.js"></script>
+<script src="mobile.js"></script>
+</body>
+</html>

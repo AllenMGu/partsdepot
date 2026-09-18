@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<title>单据中心 - 备件管理系统（手机端）</title>
+<link rel="icon" href="../assets/images/logo.png">
+<link rel="stylesheet" href="../assets/css/font-awesome.min.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body class="m-body" data-page="orders">
+<div class="m-app">
+  <header class="m-header">
+    <div class="m-title"><i class="fa fa-list-alt"></i> 单据中心</div>
+    <div class="m-ctx" id="mCtx"></div>
+  </header>
+
+  <main class="m-main">
+    <div class="m-grid" style="grid-template-columns:repeat(3,1fr);">
+      <button type="button" class="m-grid-item" data-act="goInbound"><i class="fa fa-inbox"></i><span>入库单</span></button>
+      <button type="button" class="m-grid-item" data-act="goOutbound"><i class="fa fa-truck"></i><span>出库单</span></button>
+      <button type="button" class="m-grid-item" data-act="goCheck"><i class="fa fa-clipboard"></i><span>盘点单</span></button>
+    </div>
+    <div class="m-card">
+      <div class="m-card-title">说明</div>
+      <div class="m-muted" style="line-height:1.7;">
+        · 入库单：创建 → 添加明细（货物/库位/数量/单价）→ 提交后扣增库存；已完成单据可「退库」自动生成出库单；<br>
+        · 出库单：创建 → 添加明细 → 提交后扣减库存；<br>
+        · 盘点单：创建盘点单 → 逐项扫码确认数量 → 完成盘点生成差异。
+      </div>
+    </div>
+  </main>
+
+  <nav class="m-tabbar" id="mTabbar"></nav>
+</div>
+<script src="pages/orders.js"></script>
+<script src="mobile.js"></script>
+</body>
+</html>

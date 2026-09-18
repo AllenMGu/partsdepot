@@ -18,6 +18,7 @@
 - **用户管理**：用户创建、权限分配
 - **LDAP 登录**：支持 LDAP 绑定认证与批量导入
 - **微信小程序**：独立的移动端接口客户端（`wechat-miniprogram/`）
+- **手机端网页版（H5）**：手机浏览器直接访问的功能完整移动端（`frontend/mobile/`，见下文）
 
 ## 技术栈
 
@@ -46,8 +47,10 @@ partsdepot/
 │   ├── check.html      # 盘点管理
 │   ├── user.html       # 用户管理
 │   ├── common.js       # 通用脚本（含 escapeHtml/XSS 防护）
+│   ├── mobile/         # 手机端网页版（H5，见下节）
 │   └── assets/         # 资源文件（JS/CSS/图片/字体）
 ├── wechat-miniprogram/ # 微信小程序客户端
+├── gh_mirror_switch.sh # GitHub 直连/镜像站切换工具
 └── README.md           # 项目说明
 ```
 
@@ -163,6 +166,40 @@ bash tests/run_regression.sh
 ```
 
 覆盖：出库拆单/并发重复提交、盘点基线冲突、扫码单事务、LDAP 未配置降级与配置撤销、零仓库授权、库位越权、入库/出库明细编辑（跨仓校验、单价可选）、入库单同(货物,库位)多条明细、单号撞号、JWT 有效期、管理员自举等，共 61 项 HTTP 检查 + 3 项进程内 LDAP 加载检查。详见 `tests/README.md`。
+
+## 手机端网页版（H5）
+
+功能对标微信小程序（`wechat-miniprogram/`），手机浏览器直接访问，无需安装：
+
+- **入口**：`http://<host>:8000/mobile/index.html`（后端同域托管，登录态与桌面端共享 Cookie 会话）
+- **页面**（均在 `frontend/mobile/` 下）：
+  | 页面 | 功能 |
+  | --- | --- |
+  | `index.html` | 首页：库存概览 + 功能入口（匿名可见申请入口） |
+  | `login.html` | 登录（`/token`，HttpOnly Cookie 会话） |
+  | `apply.html` | 备件申请：**免登录**提交，仓库选择、货物搜索（350ms 防抖）、批量库存刷新（`POST /public/stock-lookup`）、提交后展示申请编号 |
+  | `stock.html` | 库存查询（当前仓库过滤 + 关键字筛选） |
+  | `scan.html` | 扫码出入库：BarcodeDetector 相机扫码（不支持时回退手动输入/扫码枪）、库位联想、当前库存参考、出库不超库存校验 |
+  | `orders.html` | 单据中心（入库单/出库单/盘点单入口） |
+  | `inbound.html` / `outbound.html` | 单据列表、创建、明细增删、提交；入库单完成后可「退库」 |
+  | `check.html` | 盘点单：创建、逐项扫码确认数量、差异展示、完成盘点 |
+  | `logs.html` | 出入库日志 |
+  | `profile.html` | 我的：用户信息、切换仓库、退出登录 |
+- **实现约定**（与仓库 CSP 策略一致）：全部脚本外置、零内联 `<script>`、零内联事件处理器（统一 `data-act`/`data-scan` 事件委托）；每页 meta CSP `script-src 'self'`；API 基址相对路径 `../api`（任意子路径部署可用）。
+- **扫码说明**：相机扫码依赖 `BarcodeDetector` + `getUserMedia`（需 HTTPS 或 localhost，Android Chrome 等支持）；不支持时可外接扫码枪（键盘模式）或手动输入。
+
+## GitHub 镜像切换（网络不稳时）
+
+本机/部分网络访问 `github.com` 可能不稳定（SYN 丢失、fetch/push 超时）。仓库自带切换工具：
+
+```bash
+./gh_mirror_switch.sh status    # 查看当前模式 + 探测直连/镜像可达性
+./gh_mirror_switch.sh mirror    # 切到镜像（gh-proxy.com）
+./gh_mirror_switch.sh direct    # 切回直连（github.com）
+./gh_mirror_switch.sh auto      # 自动：直连不稳则切镜像，恢复则切回
+```
+
+约定：**网络不稳定时优先使用镜像**（`auto` 或 `mirror`）；网络恢复后可 `direct` 切回。只修改 `origin` 远端 URL，不影响其它配置。
 
 ## 注意事项
 

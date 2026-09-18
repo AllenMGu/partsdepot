@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<title>备件申请 - 备件管理系统（手机端）</title>
+<link rel="icon" href="../assets/images/logo.png">
+<link rel="stylesheet" href="../assets/css/font-awesome.min.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body class="m-body" data-page="apply">
+<div class="m-app no-tabbar">
+  <header class="m-header">
+    <button type="button" class="m-back" id="mBack"><i class="fa fa-angle-left"></i></button>
+    <div class="m-title"><i class="fa fa-paper-plane"></i> 备件申请</div>
+  </header>
+
+  <main class="m-main">
+    <div class="m-card">
+      <div class="m-card-title">申请信息 <span class="m-sub">免登录提交 · 提交后请保存申请编号</span></div>
+
+      <div class="m-field">
+        <div class="m-label">申请仓库（必填）</div>
+        <select class="m-select" id="mApplyWarehouse"><option value="">加载中…</option></select>
+        <div class="m-error m-hidden" id="mApplyWarehouseErr">仓库加载失败</div>
+      </div>
+
+      <div class="m-field">
+        <div class="m-label">申请人（必填）</div>
+        <input class="m-input" id="mApplyApplicant" maxlength="100" placeholder="您的姓名">
+      </div>
+
+      <div class="m-field">
+        <div class="m-label">部门（选填）</div>
+        <input class="m-input" id="mApplyDepartment" maxlength="100" placeholder="部门名称">
+      </div>
+
+      <div class="m-field">
+        <div class="m-label">联系邮箱（必填）</div>
+        <input class="m-input" id="mApplyContact" maxlength="200" type="email" inputmode="email" placeholder="如 zhangsan@example.com">
+      </div>
+
+      <div class="m-field">
+        <div class="m-label">事由描述（必填）</div>
+        <textarea class="m-textarea" id="mApplyDescription" maxlength="2000" placeholder="请说明申请用途、时间要求等"></textarea>
+      </div>
+
+      <div class="m-field">
+        <div class="m-label">备注（选填，如附件说明）</div>
+        <textarea class="m-textarea" id="mApplyAttachment" maxlength="500" style="min-height:56px;" placeholder="备注"></textarea>
+      </div>
+    </div>
+
+    <div class="m-card">
+      <div class="m-card-title">相关货物（选填，可多行）</div>
+
+      <div class="m-field">
+        <input class="m-input" id="mApplyGoodsKw" placeholder="输入条码或名称搜索货物">
+        <div id="mApplySearchStatus"></div>
+      </div>
+
+      <div id="mApplyGoodsResults" style="border-top:1px solid var(--m-line);"></div>
+
+      <div class="m-mt12" id="mApplyGoodsItems"></div>
+    </div>
+
+    <button type="button" class="m-btn m-btn-primary" id="mApplySubmitBtn" data-act="applySubmit">提交申请</button>
+  </main>
+</div>
+<script src="pages/apply.js"></script>
+<script src="mobile.js"></script>
+</body>
+</html>

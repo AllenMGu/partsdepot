@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
+<title>扫码出入库 - 备件管理系统（手机端）</title>
+<link rel="icon" href="../assets/images/logo.png">
+<link rel="stylesheet" href="../assets/css/font-awesome.min.css">
+<link rel="stylesheet" href="mobile.css">
+</head>
+<body class="m-body" data-page="scan">
+<div class="m-app">
+  <header class="m-header">
+    <div class="m-title"><i class="fa fa-barcode"></i> 扫码出入库</div>
+    <a class="m-ctx" href="check.html" style="text-decoration:none;"><i class="fa fa-clipboard"></i> 盘点单</a>
+  </header>
+
+  <main class="m-main">
+    <div class="m-card">
+      <div class="m-seg" style="margin-bottom:12px;">
+        <button type="button" id="mScanTypeIn" class="on">入库</button>
+        <button type="button" id="mScanTypeOut">出库</button>
+      </div>
+
+      <div class="m-field">
+        <div class="m-label">货物条码</div>
+        <div class="m-row" style="gap:8px;">
+          <input class="m-input m-grow" id="mScanBarcode" placeholder="扫描或输入货物条码" autocomplete="off">
+          <button type="button" class="m-btn m-btn-ghost m-btn-sm" data-scan="barcode"><i class="fa fa-camera"></i> 扫码</button>
+        </div>
+      </div>
+
+      <div class="m-field">
+        <div class="m-label">库位编码</div>
+        <div class="m-row" style="gap:8px;">
+          <input class="m-input m-grow" id="mScanLocation" placeholder="扫描或输入库位编码" autocomplete="off">
+          <button type="button" class="m-btn m-btn-ghost m-btn-sm" data-scan="location"><i class="fa fa-camera"></i> 扫码</button>
+        </div>
+        <div id="mScanLocOptions" class="m-mt8" style="border-top:1px solid var(--m-line);"></div>
+      </div>
+
+      <div class="m-row between" style="margin-bottom:10px;">
+        <span class="m-muted">库存参考</span>
+        <span id="mScanStock" class="m-muted">输入条码与库位后显示当前库存</span>
+      </div>
+
+      <div class="m-row" style="gap:8px;">
+        <div class="m-field m-grow">
+          <div class="m-label">数量</div>
+          <input class="m-input" id="mScanQty" type="number" inputmode="decimal" min="0" step="any" placeholder="数量">
+        </div>
+        <div class="m-field m-grow">
+          <div class="m-label">备注（选填）</div>
+          <input class="m-input" id="mScanRemark" placeholder="备注">
+        </div>
+      </div>
+
+      <button type="button" class="m-btn m-btn-primary" id="mScanSubmitBtn" data-act="scanSubmit">提交出入库</button>
+      <div id="mScanResult" class="m-mt8"></div>
+    </div>
+
+    <div class="m-card">
+      <div class="m-card-title">说明</div>
+      <div class="m-muted" style="line-height:1.7;">
+        · 支持相机扫码（Android Chrome 等支持 BarcodeDetector 的浏览器），也可外接扫码枪或手动输入；<br>
+        · 出库数量不能大于当前库存；<br>
+        · 盘点业务请使用「盘点单」。
+      </div>
+    </div>
+  </main>
+
+  <nav class="m-tabbar" id="mTabbar"></nav>
+</div>
+<script src="pages/scan.js"></script>
+<script src="mobile.js"></script>
+</body>
+</html>
