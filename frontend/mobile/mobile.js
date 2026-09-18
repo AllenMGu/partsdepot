@@ -41,32 +41,62 @@ function fmtDT(v) {
 function $(sel, root) { return (root || document).querySelector(sel); }
 function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
 
-/* ---------------- 鉴权（与桌面端 common.js 共享键名） ----------------
- * 读取策略与桌面 getStoredAuth() 一致：localStorage 优先，其次 sessionStorage
- * （桌面端“不勾选记住我”时写入 sessionStorage，H5 必须同样可读，否则 Cookie
- *  有效却被判为未登录）。保存统一写 localStorage（等同桌面“记住我”）。 */
+/* ---------------- 鉴权（与桌面端 common.js 共享键名，读写语义对齐桌面） ----------------
+ * 桌面端 getStoredAuth() 的语义：local/session 各作为一个"完整 auth pair
+ * （user + token_expiry）"，按"local 有效 > session 有效 > local（即使过期）
+ * > session（即使过期）"选最佳有效项——绝不跨 storage 拼 user/expiry。
+ * H5 旧实现 getUser/getExpiry 各自独立"localStorage 优先"，当 local 残留旧用户、
+ * session 是当前有效用户时会发生 user/expiry 配对错误，现改为与桌面完全一致。
+ * 另外记住当前 auth 来源（local/session）：save() 未显式指定目标时写回原
+ * storage——修复"session-only 用户（桌面不勾记住我）在 H5 切仓后被转写进
+ * localStorage"的迁移问题。
+ * 移动端登录页无"记住我"开关：新登录显式写 local（等同桌面勾选记住我）。 */
 var AUTH = {
-  getUser: function () {
+  _source: null, // "local" | "session" | null —— 当前 auth 对的来源（每页加载重新计算）
+  _pair: function (storage) {
+    return { user: storage.getItem("user"), expiry: storage.getItem("token_expiry") || "" };
+  },
+  _pick: function (localPair, sessionPair) {
+    var complete = function (p) { return !!p.user; };
+    var expired = function (p) { return !!(p.expiry && Date.now() >= new Date(p.expiry).getTime()); };
+    if (complete(localPair) && !expired(localPair)) return { pair: localPair, src: "local" };
+    if (complete(sessionPair) && !expired(sessionPair)) return { pair: sessionPair, src: "session" };
+    if (complete(localPair)) return { pair: localPair, src: "local" };
+    if (complete(sessionPair)) return { pair: sessionPair, src: "session" };
+    return { pair: { user: null, expiry: "" }, src: null };
+  },
+  getAuth: function () {
     try {
-      var raw = localStorage.getItem("user");
-      if (raw == null) raw = sessionStorage.getItem("user");
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) { return null; }
+      var best = this._pick(this._pair(localStorage), this._pair(sessionStorage));
+      this._source = best.src;
+      var user = null;
+      if (best.pair.user) {
+        try { user = JSON.parse(best.pair.user); } catch (e) { user = null; }
+      }
+      return { user: user, expiry: best.pair.expiry || "", src: best.src };
+    } catch (e) {
+      return { user: null, expiry: "", src: null };
+    }
   },
-  getExpiry: function () {
-    return localStorage.getItem("token_expiry") || sessionStorage.getItem("token_expiry") || "";
-  },
+  getUser: function () { return this.getAuth().user; },
+  getExpiry: function () { return this.getAuth().expiry; },
   isLoggedIn: function () {
-    var u = this.getUser();
-    if (!u) return false;
-    var ex = this.getExpiry();
-    return !ex || new Date().getTime() < new Date(ex).getTime();
+    var a = this.getAuth();
+    if (!a.user) return false;
+    return !a.expiry || Date.now() < new Date(a.expiry).getTime();
   },
-  save: function (user, expiry) {
-    if (user) localStorage.setItem("user", JSON.stringify(user));
-    if (expiry) localStorage.setItem("token_expiry", String(expiry));
+  save: function (user, expiry, target) {
+    // target: "local" | "session"（登录等显式场景）；
+    // 未指定时写回当前 auth 来源；无既有 auth（全新登录）默认 local
+    var st;
+    if (target === "session") st = sessionStorage;
+    else if (target === "local") st = localStorage;
+    else st = (this._source === "session") ? sessionStorage : localStorage;
+    if (user) st.setItem("user", JSON.stringify(user));
+    if (expiry) st.setItem("token_expiry", String(expiry));
   },
   clear: function () {
+    this._source = null;
     localStorage.removeItem("user");
     localStorage.removeItem("token_expiry");
     sessionStorage.removeItem("user");

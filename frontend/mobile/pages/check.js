@@ -12,6 +12,16 @@ window.M_PAGES["check"] = function () {
   var currentHeader = null;
   var locations = [];
 
+  /* in-flight guard：手机双击/连点防护（与 orders_common 同一模式）——
+   * 任一 mutation（创建/加明细/完成）在途时拒绝新的 mutation，
+   * 防止连点创建两张盘点单、重复写入盘点记录（GET 刷新不受限） */
+  var inFlight = 0;
+  function guarded(fn) {
+    if (inFlight > 0) { M.toast("操作处理中，请勿重复操作", "err"); return; }
+    inFlight += 1;
+    fn(function () { inFlight = Math.max(0, inFlight - 1); });
+  }
+
   loadOrders();
   loadLocations();
 
@@ -153,20 +163,23 @@ window.M_PAGES["check"] = function () {
   window.M_ACTIONS["chkCreate"] = function () {
     var remark = elRemark.value.trim();
     var w = M.AUTH.currentWarehouse();
-    M.api("POST", "/check-orders/", {
-      warehouse_id: (w && w.id) ? w.id : null,
-      remark: remark || null
-    })
-      .then(function (created) {
-        M.toast("盘点单已创建", "ok");
-        elRemark.value = "";
-        loadOrders();
-        if (created && created.id) {
-          elDetail.classList.remove("m-hidden");
-          openDetail(created.id);
-        }
+    guarded(function (release) {
+      M.api("POST", "/check-orders/", {
+        warehouse_id: (w && w.id) ? w.id : null,
+        remark: remark || null
       })
-      .catch(function (err) { M.toast(err.message || "创建失败", "err"); });
+        .then(function (created) {
+          release();
+          M.toast("盘点单已创建", "ok");
+          elRemark.value = "";
+          loadOrders();
+          if (created && created.id) {
+            elDetail.classList.remove("m-hidden");
+            openDetail(created.id);
+          }
+        })
+        .catch(function (err) { release(); M.toast(err.message || "创建失败", "err"); });
+    });
   };
 
   window.M_ACTIONS["chkAddItem"] = function () {
@@ -175,12 +188,26 @@ window.M_PAGES["check"] = function () {
     var location = document.getElementById("mChkLocation").value.trim();
     var qty = Number(document.getElementById("mChkQty").value);
     if (!barcode || !location || isNaN(qty) || qty < 0) { M.toast("请完整填写盘点信息", "err"); return; }
+    // 跨仓库防护（与扫码页同一类问题）：后端按"库位所属仓库"执行盘点，
+    // 若库位不属于当前仓库，页面上下文（顶部仓库/库存参考）与实际执行仓库不一致，阻止提交
+    var curWh = M.AUTH.currentWarehouse();
+    if (curWh && curWh.id) {
+      var inCurWh = locations.some(function (l) {
+        return String(l.location_code || "") === location;
+      });
+      if (!inCurWh) {
+        M.toast("该库位不属于当前仓库「" + (curWh.name || String(curWh.id)) + "」，无法加入本盘点单", "err");
+        return;
+      }
+    }
+    guarded(function (release) {
     M.api("POST", "/check-orders/items/", {
       header_id: currentHeader.id,
       goods_barcode: barcode,
       location_code: location,
       check_quantity: qty
     }).then(function (res) {
+      release();
       var diff = Number((res && res.diff_quantity) || 0);
       var msg = Math.abs(diff) < 0.01 ? "盘点一致" : "盘点差异: " + M.fmtNum(diff);
       M.modal({
@@ -203,18 +230,22 @@ window.M_PAGES["check"] = function () {
       });
       openDetail(currentHeader.id);
       loadOrders();
-    }).catch(function (err) { M.toast(err.message || "保存失败", "err"); });
+    }).catch(function (err) { release(); M.toast(err.message || "保存失败", "err"); });
+    });
   };
 
   window.M_ACTIONS["chkComplete"] = function () {
     if (!currentHeader || !currentHeader.id) { M.toast("请先选择盘点单", "err"); return; }
-    M.api("POST", "/check-orders/" + currentHeader.id + "/complete")
-      .then(function (res) {
-        M.toast((res && res.message) || "盘点完成", "ok");
-        openDetail(currentHeader.id);
-        loadOrders();
-      })
-      .catch(function (err) { M.toast(err.message || "完成失败", "err"); });
+    guarded(function (release) {
+      M.api("POST", "/check-orders/" + currentHeader.id + "/complete")
+        .then(function (res) {
+          release();
+          M.toast((res && res.message) || "盘点完成", "ok");
+          openDetail(currentHeader.id);
+          loadOrders();
+        })
+        .catch(function (err) { release(); M.toast(err.message || "完成失败", "err"); });
+    });
   };
 
   window.M_ACTIONS["chkRefresh"] = loadOrders;

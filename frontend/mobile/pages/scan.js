@@ -14,6 +14,7 @@ window.M_PAGES["scan"] = function () {
     quantity: "",
     remark: "",
     locations: [],
+    locationsLoaded: false,
     currentStock: null
   };
 
@@ -62,6 +63,7 @@ window.M_PAGES["scan"] = function () {
     if (!w || !w.id) { state.locations = []; return; }
     M.api("GET", "/locations/?warehouse_id=" + w.id).then(function (rows) {
       state.locations = rows || [];
+      state.locationsLoaded = true;
     }).catch(function () { state.locations = []; });
   }
 
@@ -110,6 +112,24 @@ window.M_PAGES["scan"] = function () {
       remark: elRemark.value.trim()
     };
     if (!payload.goods_barcode || !payload.location_code) { M.toast("请完整填写条码与库位", "err"); return; }
+    // 跨仓库防护：后端 /inventory/scan 按"库位所属仓库"执行（只要有该仓权限即可），
+    // 并不要求等于 current_warehouse_id——若不做前端校验，页面顶部显示仓库 A、
+    // 参考库存按 A 查询，提交却可能实际操作有权限的仓库 B 库位。
+    // 因此库位必须属于当前仓库，否则直接阻止提交。
+    var curWh = M.AUTH.currentWarehouse();
+    if (curWh && curWh.id) {
+      if (!state.locationsLoaded) {
+        M.toast("库位列表未加载成功，无法校验库位所属仓库，请刷新页面重试", "err");
+        return;
+      }
+      var inCurWh = state.locations.some(function (l) {
+        return String(l.location_code || "") === payload.location_code;
+      });
+      if (!inCurWh) {
+        M.toast("该库位不属于当前仓库「" + (curWh.name || String(curWh.id)) + "」，请先切换到该库位所在仓库再操作", "err");
+        return;
+      }
+    }
     if (!(payload.quantity > 0)) { M.toast("数量需大于 0", "err"); return; }
     if (payload.type === "出库" && state.currentStock != null && payload.quantity > state.currentStock) {
       M.toast("出库数量不能大于当前库存", "err"); return;

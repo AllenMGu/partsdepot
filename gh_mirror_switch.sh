@@ -88,6 +88,16 @@ case "$cmd" in
         exit 0
         ;;
     esac
+    # 迁移兜底（安全）：本脚本第一版曾把整个 origin（含 push）指向镜像站。
+    # 升级到本版的仓库若运行 auto，可能"当前已是镜像，保持不变"而遗留
+    # push 仍指向代理地址——凭证与推送内容会经第三方。
+    # 因此只要确认 origin 属于本仓库的 direct/mirror URL，先无条件把
+    # push URL 规范化回 github.com 直连，再决定 fetch URL；
+    # 这样任何"保持不变"分支也能自愈旧配置。
+    if [[ "$(push_url)" != "$DIRECT_URL" ]]; then
+      git remote set-url --push origin "$DIRECT_URL"
+      echo "已将 push URL 规范化为直连: $DIRECT_URL"
+    fi
     if probe "$DIRECT_URL"; then
       if [[ "$cur" == *gh-proxy.com* ]]; then
         echo "直连已恢复，切回直连。"

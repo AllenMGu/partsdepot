@@ -302,6 +302,40 @@ with sync_playwright() as p:
                 mon["console_errors"], mon["page_errors"], mon["http_failures"]), flush=True)
         check("扫码页库存参考显示（%s@%s）" % (barcode, location), ok3, stock_txt)
 
+        # D-guard：跨仓库防护——库位不属于当前仓库时必须阻止提交。
+        # 后端 /inventory/scan 按"库位所属仓库"执行（只要有该仓权限即可），
+        # 没有前端校验时会出现"页面显示仓库 A、实际操作仓库 B 库位"的错仓风险。
+        other_loc = "A2" if location == "A1" else "A1"
+        dres = page.evaluate("""(loc) => {
+            return new Promise(function (resolve) {
+                var posts = 0;
+                var orig = window.M.api;
+                window.M.api = function (method, path) {
+                    if (method === 'POST' && path === '/inventory/scan') posts++;
+                    return new Promise(function (r) { setTimeout(function () { r({ message: 'mocked' }); }, 200); });
+                };
+                // 注意：scanSubmit 的 payload 取自闭包 state（由 input 事件同步），
+                // 直接改 .value 不会更新 state——必须派发 input 事件
+                var b = document.getElementById('mScanBarcode');
+                var l = document.getElementById('mScanLocation');
+                var q = document.getElementById('mScanQty');
+                b.value = '8888001';
+                l.value = loc;
+                q.value = '1';
+                b.dispatchEvent(new Event('input'));
+                l.dispatchEvent(new Event('input'));
+                window.M_ACTIONS['scanSubmit']();
+                var toast = (document.getElementById('mToast') || {}).textContent || '';
+                setTimeout(function () {
+                    window.M.api = orig;
+                    resolve(JSON.stringify({ posts: posts, toast: toast }));
+                }, 400);
+            });
+        }""", other_loc)
+        d = json.loads(dres)
+        check("跨仓防护：填入他仓库位被阻止提交（0 次 POST /inventory/scan）", d["posts"] == 0, d)
+        check("跨仓防护：提示'该库位不属于当前仓库'", "不属于当前仓库" in (d["toast"] or ""), d)
+
     # ---------- E. 入库单（guard 防重复 + 创建/明细/提交） ----------
     page.goto(BASE + "/mobile/inbound.html", wait_until="networkidle")
     page.wait_for_timeout(300)
@@ -389,10 +423,28 @@ with sync_playwright() as p:
           % (barcode, location, cur_stock, count_qty, expect_match), flush=True)
     page.goto(BASE + "/mobile/check.html", wait_until="networkidle")
     page.wait_for_timeout(300)
+    # F-guard1：创建盘点单双击只允许 1 次 POST（guarded 防护，与单据页同一模式；
+    # 连点会创建两张独立盘点单）
+    f1 = json.loads(page.evaluate(GUARD_TEST_JS, {"action": "chkCreate", "arg": None}))
+    check("guard：创建盘点单双击只产生一次 POST", f1["calls"] == 1, f1)
+    check("guard：创建盘点单第二次触发提示'操作处理中'", "操作处理中" in (f1["toast_second"] or ""), f1)
     page.locator("[data-act='chkCreate']").click()
     ok = wait_until(lambda: page.locator("#mChkBarcode").count() > 0)
     check("盘点单创建并自动打开详情", ok)
     if ok:
+        # F-guard2：确认数量双击只允许 1 次 POST（后端每次都会生成盘点记录，
+        # 双击会造成重复审计记录）
+        page.fill("#mChkBarcode", barcode)
+        page.fill("#mChkLocation", location)
+        page.fill("#mChkQty", str(count_qty))
+        f2 = json.loads(page.evaluate(GUARD_TEST_JS, {"action": "chkAddItem", "arg": None}))
+        check("guard：盘点确认数量双击只产生一次 POST", f2["calls"] == 1, f2)
+        check("guard：盘点确认数量第二次触发提示'操作处理中'", "操作处理中" in (f2["toast_second"] or ""), f2)
+        # mock 的 then 分支弹出了"继续盘点"弹窗并清空输入框：先关闭，再重新填写真实提交
+        _cont = page.locator(".m-modal .m-btn", has_text="继续")
+        if _cont.count():
+            _cont.click()
+            page.wait_for_timeout(100)
         page.fill("#mChkBarcode", barcode)
         page.fill("#mChkLocation", location)
         page.fill("#mChkQty", str(count_qty))
@@ -413,8 +465,11 @@ with sync_playwright() as p:
         ok = wait_until(lambda: page.locator("#mCheckDetail .m-badge-done").count() > 0, timeout_ms=8000)
         check("完成盘点后状态为已完成", ok)
 
-    # ---------- H. sessionStorage 鉴权兼容 ----------
-    # 桌面端"不记住我"把 user/token_expiry 写入 sessionStorage；H5 必须同样认可
+    # ---------- H. 鉴权存储兼容（与桌面 getStoredAuth 语义对齐） ----------
+    # H1: 桌面"不记住我"把 user/token_expiry 写入 sessionStorage，H5 必须同样认可
+    # H2: 两处均无凭据 → 跳登录页
+    # H3: local 过期 + session 有效 → 按完整 pair 选 session（不跨 storage 拼 user/expiry）
+    # H4: session-only 用户切仓 → 写回原 storage（session），不迁移进 local
     page2 = ctx.new_page()
     page2.goto(BASE + "/mobile/apply.html", wait_until="networkidle")
     page2.evaluate("""() => {
@@ -431,6 +486,39 @@ with sync_playwright() as p:
                     and "stock.html" in page2.evaluate("() => location.href"))
     check("仅 sessionStorage 有凭据时 H5 认可登录（不跳登录页）", ok,
           page2.evaluate("() => location.href"))
+    # H3. local 残留过期凭据 + session 有效 → 必须按"完整 pair"选 session
+    #（旧实现 user 与 expiry 各自独立 local 优先，此处会 user(expired local)+expiry 配对错误 → 误判未登录）
+    page2.evaluate("""() => {
+        var u = JSON.parse(sessionStorage.getItem("user"));
+        localStorage.setItem("user", JSON.stringify(u));
+        localStorage.setItem("token_expiry", "2020-01-01T00:00:00");  // local 过期
+    }""")
+    page2.goto(BASE + "/mobile/stock.html", wait_until="networkidle")
+    ok = wait_until(lambda: page2.locator("#mStockList").count() > 0
+                    and "stock.html" in page2.evaluate("() => location.href"))
+    check("local 过期 + session 有效：选中 session 对（不跳登录页）", ok,
+          page2.evaluate("() => location.href"))
+    # H4. session-only 用户切仓 → AUTH.save 必须写回 session，不得迁移进 local
+    page2.evaluate("""() => {
+        localStorage.removeItem("user");
+        localStorage.removeItem("token_expiry");
+    }""")
+    page2.goto(BASE + "/mobile/profile.html", wait_until="networkidle")
+    page2.wait_for_timeout(300)
+    h4_btns = page2.locator('[data-act="whSwitch"]')
+    if h4_btns.count() == 0:
+        check("session-only 用户存在可切换仓库（测试前提）", False, "无 whSwitch 按钮")
+    else:
+        h4_target = int(h4_btns.first.get_attribute("data-arg"))
+        h4_btns.first.click()
+        ok = wait_until(lambda: "切换成功" in (page2.locator("#mToast").text_content() or ""), timeout_ms=8000)
+        check("session-only 用户切仓成功", ok)
+        h4_st = page2.evaluate("""() => ({
+            local_user: localStorage.getItem("user") == null ? "absent" : "present",
+            session_wh: (JSON.parse(sessionStorage.getItem("user") || "null") || {}).current_warehouse_id
+        })""")
+        check("切仓写回原 storage（session），未迁移进 localStorage",
+              h4_st["local_user"] == "absent" and h4_st["session_wh"] == h4_target, h4_st)
     # 反向：两处都清空 → 应跳登录页
     page3 = ctx.new_page()
     page3.goto(BASE + "/mobile/apply.html", wait_until="networkidle")

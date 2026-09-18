@@ -22,7 +22,9 @@ window.M_PAGES["login"] = function () {
     btn.textContent = "登录中…";
     window.M.apiForm("POST", "/token", { username: username, password: password })
       .then(function (res) {
-        window.M.AUTH.save(res.user, res.expiry);
+        // 移动端登录页无"记住我"开关：新登录显式写 localStorage
+        // （等同桌面勾选"记住我"；session 来源的既有凭据不受影响）
+        window.M.AUTH.save(res.user, res.expiry, "local");
         window.M.toast("登录成功", "ok");
         setTimeout(function () { window.location.href = "index.html"; }, 350);
       })
