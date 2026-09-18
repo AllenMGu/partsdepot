@@ -19,9 +19,14 @@ window.M_PAGES["index"] = function () {
   function loadOverview() {
     var box = document.getElementById("mOverview");
     box.innerHTML = '<div class="m-empty">加载中…</div>';
+    // 按当前仓库查询（后端 /stock/ 对管理员返回全部仓库，前端不能拿全量再猜）
+    var w = M.AUTH.currentWarehouse();
+    var wh = (w && w.id) ? "?warehouse_id=" + w.id : "";
+    // 注意：/inventory/logs 自带 ?limit=10，追加参数必须用 &
+    var wh2 = (w && w.id) ? "&warehouse_id=" + w.id : "";
     Promise.all([
-      M.api("GET", "/stock/", null, { auth: true }),
-      M.api("GET", "/inventory/logs?limit=10", null, { auth: true })
+      M.api("GET", "/stock/" + wh, null, { auth: true }),
+      M.api("GET", "/inventory/logs?limit=10" + wh2, null, { auth: true })
     ]).then(function (res) {
       var stocks = res[0] || [];
       var logs = res[1] || [];

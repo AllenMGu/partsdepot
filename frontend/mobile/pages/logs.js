@@ -13,7 +13,10 @@ window.M_PAGES["logs"] = function () {
 
   function loadLogs() {
     elList.innerHTML = '<div class="m-empty">加载中…</div>';
-    M.api("GET", "/inventory/logs?limit=50").then(function (rows) {
+    // 按当前仓库查询（管理员默认可见全部仓库，这里统一为"当前仓库"语义）
+    var w = M.AUTH.currentWarehouse();
+    var wh = (w && w.id) ? "&warehouse_id=" + w.id : "";
+    M.api("GET", "/inventory/logs?limit=50" + wh).then(function (rows) {
       var list = rows || [];
       elCount.textContent = "最近 " + list.length + " 条";
       if (!list.length) {

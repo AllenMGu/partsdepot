@@ -69,6 +69,13 @@ with sync_playwright() as p:
         match = bool(meta) and meta.group(1) == actual
         ok_all &= match
         print(f"{'PASS' if match else 'FAIL'} | {f}: meta hash 与内联脚本 sha256 一致")
+
+    # 5. H5 手机端页面（零内联脚本，script-src 'self'）：逐页加载，确认无 CSP 违规。
+    #    H5 无内联 <script>，故不做 meta hash 交叉校验；此处仅验证 CSP 策略下脚本可正常加载执行。
+    mobile_pages = ("index.html", "apply.html", "inbound.html", "outbound.html", "check.html",
+                    "scan.html", "stock.html", "logs.html", "orders.html", "profile.html", "login.html")
+    for f in mobile_pages:
+        csp_check("/mobile/" + f, "mobile/" + f)
     browser.close()
 
 sys.exit(0 if ok_all else 1)

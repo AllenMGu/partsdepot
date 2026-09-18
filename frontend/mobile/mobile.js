@@ -41,12 +41,21 @@ function fmtDT(v) {
 function $(sel, root) { return (root || document).querySelector(sel); }
 function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
 
-/* ---------------- 鉴权（与桌面端 common.js 共享键名） ---------------- */
+/* ---------------- 鉴权（与桌面端 common.js 共享键名） ----------------
+ * 读取策略与桌面 getStoredAuth() 一致：localStorage 优先，其次 sessionStorage
+ * （桌面端“不勾选记住我”时写入 sessionStorage，H5 必须同样可读，否则 Cookie
+ *  有效却被判为未登录）。保存统一写 localStorage（等同桌面“记住我”）。 */
 var AUTH = {
   getUser: function () {
-    try { return JSON.parse(localStorage.getItem("user") || "null"); } catch (e) { return null; }
+    try {
+      var raw = localStorage.getItem("user");
+      if (raw == null) raw = sessionStorage.getItem("user");
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
   },
-  getExpiry: function () { return localStorage.getItem("token_expiry") || ""; },
+  getExpiry: function () {
+    return localStorage.getItem("token_expiry") || sessionStorage.getItem("token_expiry") || "";
+  },
   isLoggedIn: function () {
     var u = this.getUser();
     if (!u) return false;
@@ -60,6 +69,8 @@ var AUTH = {
   clear: function () {
     localStorage.removeItem("user");
     localStorage.removeItem("token_expiry");
+    sessionStorage.removeItem("user");
+    sessionStorage.removeItem("token_expiry");
   },
   require: function () {
     if (!this.isLoggedIn()) {
@@ -158,25 +169,35 @@ function toast(msg, kind) {
 }
 
 function modal(opts) {
-  // opts: {title, body(html), bodyText, buttons:[{label, kind, onClick(close)}]}
+  // opts: {title, body(纯文本), bodyHtml(受信 HTML), buttons:[{label, kind, onClick(close)}]}
   var mask = document.createElement("div");
   mask.className = "m-modal-mask";
   var box = document.createElement("div");
   box.className = "m-modal";
-  var html = "";
-  if (opts.title) html += '<div class="m-modal-title">' + esc(opts.title) + "</div>";
-  if (opts.body) html += '<div class="m-modal-body">' + esc(opts.body) + "</div>";
-  else if (opts.bodyHtml) html += '<div class="m-modal-body">' + opts.bodyHtml + "</div>";
-  mask.appendChild(box);
-  document.body.appendChild(mask);
 
   function close() {
     if (mask.parentNode) mask.parentNode.removeChild(mask);
   }
+
+  // 标题（textContent，杜绝注入）
+  if (opts.title) {
+    var t = document.createElement("div");
+    t.className = "m-modal-title";
+    t.textContent = opts.title;
+    box.appendChild(t);
+  }
+  // 正文：始终创建 .m-modal-body（promptCode 等依赖此节点挂输入框）
+  var bodyDiv = document.createElement("div");
+  bodyDiv.className = "m-modal-body";
+  if (opts.body != null) bodyDiv.textContent = opts.body;
+  else if (opts.bodyHtml) bodyDiv.innerHTML = opts.bodyHtml; // 仅允许页面代码自身拼接的受信 HTML
+  box.appendChild(bodyDiv);
+  // 按钮
   var foot = document.createElement("div");
   foot.className = "m-modal-foot";
   (opts.buttons || [{ label: "知道了", kind: "primary" }]).forEach(function (b) {
     var btn = document.createElement("button");
+    btn.type = "button";
     btn.className = "m-btn m-btn-" + (b.kind || "primary");
     btn.textContent = b.label;
     btn.addEventListener("click", function () {
@@ -186,30 +207,33 @@ function modal(opts) {
     foot.appendChild(btn);
   });
   box.appendChild(foot);
-  return { mask: mask, box: box, close: close };
+
+  mask.appendChild(box);
+  document.body.appendChild(mask);
+  return { mask: mask, box: box, body: bodyDiv, close: close };
 }
 
 /* 手动输入编码弹窗（扫码回退 / 扫码枪场景） */
 function promptCode(title, placeholder, onCode) {
+  var inp = document.createElement("input");
+  inp.type = "text";
+  inp.autocomplete = "off";
+  inp.className = "m-input m-code-inp";
+  inp.placeholder = placeholder || "扫码枪扫描或手动输入";
   var m = modal({
     title: title || "输入编码",
     buttons: [
       { label: "取消", kind: "ghost" },
       { label: "确定", kind: "primary", onClick: function (close) {
-          var inp = $(".m-modal input.m-code-inp");
-          var v = inp ? inp.value.trim() : "";
-          if (!v) { toast("请输入编码", "err"); return; }
+          var v = inp.value.trim();
+          if (!v) { toast("请输入编码", "err"); inp.focus(); return; }
           close();
           onCode(v);
         } }
     ]
   });
-  var bodyDiv = $(".m-modal-body", m.box);
-  var inp2 = document.createElement("input");
-  inp2.className = "m-input m-code-inp";
-  inp2.placeholder = placeholder || "扫码枪扫描或手动输入";
-  if (bodyDiv) bodyDiv.appendChild(inp2);
-  setTimeout(function () { inp2.focus(); }, 80);
+  m.body.appendChild(inp);
+  setTimeout(function () { inp.focus(); inp.select && inp.select(); }, 80);
   return m;
 }
 

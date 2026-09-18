@@ -51,11 +51,13 @@ window.M_PAGES["apply"] = function () {
         state.warehouseId = state.warehouses[0].id;
       }
     }).catch(function (err) {
-      elWarehouse.innerHTML = '<option value="">仓库加载失败（' + M.esc(err.message || "网络错误") + "）</option>";
+      // 失败态：select 禁用占位 + 错误区可点击重试（data-act 委托，见 apply.html）
+      var msg = M.esc("仓库加载失败（" + (err && err.message ? err.message : "网络错误") + "）");
+      elWarehouse.innerHTML = '<option value="">' + msg + "</option>";
       elWarehouse.disabled = true;
       if (elWarehouseErr) {
         elWarehouseErr.classList.remove("m-hidden");
-        elWarehouseErr.textContent = "仓库加载失败，点击重试";
+        elWarehouseErr.textContent = "仓库加载失败，点击此处重试";
       }
     });
   }
@@ -64,14 +66,22 @@ window.M_PAGES["apply"] = function () {
     var id = Number(elWarehouse.value) || null;
     state.warehouseId = id;
     state.warehouseSeq += 1;
-    var seq = state.warehouseSeq;
-    refreshStocks();
+    // 切仓同时使在途搜索失效：搜索结果（含可用库存）是仓库维度的
+    state.searchSeq += 1;
+    if (state.searchTimer) { clearTimeout(state.searchTimer); state.searchTimer = null; }
+    state.goodsResults = [];
+    elResults.innerHTML = "";
+    elSearchStatus.innerHTML = "";
+    refreshStocks(state.warehouseSeq);
   }
 
-  /* 切仓批量刷新已选货物库存（与小程序一致：POST /public/stock-lookup） */
-  function refreshStocks() {
+  /* 切仓批量刷新已选货物库存（与小程序一致：POST /public/stock-lookup）
+   * seq 校验：响应回来时若已切过仓（seq 过期），丢弃结果，防止 A 仓旧响应覆盖 B 仓库存 */
+  function refreshStocks(seq) {
     var items = state.goodsItems;
     if (!state.warehouseId || !items.length) return;
+    if (seq == null) seq = state.warehouseSeq;
+    if (seq !== state.warehouseSeq) return;
     var barcodes = [];
     items.forEach(function (g) {
       g.stockUnknown = true;
@@ -80,6 +90,7 @@ window.M_PAGES["apply"] = function () {
     renderItems();
     M.api("POST", "/public/stock-lookup", { warehouse_id: state.warehouseId, barcodes: barcodes }, { auth: false })
       .then(function (rows) {
+        if (seq !== state.warehouseSeq) return; // 已切仓，丢弃
         var byCode = {};
         (rows || []).forEach(function (r) { byCode[r.barcode] = Number(r.available_stock) || 0; });
         items.forEach(function (g) {
@@ -88,9 +99,11 @@ window.M_PAGES["apply"] = function () {
         });
       })
       .catch(function () {
+        if (seq !== state.warehouseSeq) return; // 已切仓，丢弃
         items.forEach(function (g) { g.stockUnknown = true; });
       })
       .then(function () {
+        if (seq !== state.warehouseSeq) return; // 已切仓，不再渲染
         renderItems();
       });
   }

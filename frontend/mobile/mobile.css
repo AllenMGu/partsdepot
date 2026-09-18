@@ -118,6 +118,7 @@ body.m-body {
 .m-field { margin-bottom: 10px; }
 .m-field:last-child { margin-bottom: 0; }
 .m-error { color: var(--m-err); font-size: 12px; margin-top: 4px; }
+.m-error[data-act] { cursor: pointer; padding: 6px 8px; margin-top: 6px; background: rgba(239,68,68,.08); border-radius: 8px; }
 .m-hint { color: var(--m-sub); font-size: 12px; }
 
 /* ---------- 按钮 ---------- */
@@ -292,6 +293,8 @@ body.m-body {
 }
 .m-modal-title { font-size: 16px; font-weight: 600; margin-bottom: 10px; }
 .m-modal-body { font-size: 14px; color: #374151; line-height: 1.6; }
+.m-modal-body:empty { display: none; } /* 无正文的确认弹窗不留空档 */
+.m-modal-body .m-input { margin-top: 10px; }
 .m-modal-foot { display: flex; gap: 8px; margin-top: 16px; }
 .m-modal-foot .m-btn { flex: 1; }
 

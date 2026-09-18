@@ -190,16 +190,20 @@ bash tests/run_regression.sh
 
 ## GitHub 镜像切换（网络不稳时）
 
-本机/部分网络访问 `github.com` 可能不稳定（SYN 丢失、fetch/push 超时）。仓库自带切换工具：
+本机/部分网络访问 `github.com` 可能不稳定（SYN 丢失、fetch 超时）。仓库自带切换工具：
 
 ```bash
-./gh_mirror_switch.sh status    # 查看当前模式 + 探测直连/镜像可达性
-./gh_mirror_switch.sh mirror    # 切到镜像（gh-proxy.com）
-./gh_mirror_switch.sh direct    # 切回直连（github.com）
-./gh_mirror_switch.sh auto      # 自动：直连不稳则切镜像，恢复则切回
+./gh_mirror_switch.sh status    # 查看当前 fetch/push URL + 探测直连/镜像可达性
+./gh_mirror_switch.sh mirror    # fetch 切到镜像（gh-proxy.com），push 仍直连
+./gh_mirror_switch.sh direct    # fetch/push 均直连 github.com
+./gh_mirror_switch.sh auto      # 自动：直连优先；直连挂、镜像活才切镜像
 ```
 
-约定：**网络不稳定时优先使用镜像**（`auto` 或 `mirror`）；网络恢复后可 `direct` 切回。只修改 `origin` 远端 URL，不影响其它配置。
+安全约定：
+- **镜像只用于 fetch**（ls-remote/fetch/pull）；**push 永远直连 github.com**（`git remote set-url --push`），凭证与推送内容不经过任何第三方代理；
+- `auto` 只在「直连不可达 且 镜像可达」时才切镜像；两者都不可达时保持现状；
+- `origin` 是自定义 URL（fork/内网等）时，`auto` 一律不改动；
+- 只修改 `origin` 的 fetch/push URL，不影响其它远端与配置。
 
 ## 注意事项
 

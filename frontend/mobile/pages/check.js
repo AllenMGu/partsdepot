@@ -50,7 +50,10 @@ window.M_PAGES["check"] = function () {
 
   function loadOrders() {
     elOrders.innerHTML = '<div class="m-empty">加载中…</div>';
-    M.api("GET", "/check-orders/").then(function (res) {
+    // 按当前仓库查询（与页面顶部仓库上下文一致）
+    var w = M.AUTH.currentWarehouse();
+    var wh = (w && w.id) ? "?warehouse_id=" + w.id : "";
+    M.api("GET", "/check-orders/" + wh).then(function (res) {
       var list = ((res && res.data) || res || []);
       if (!Array.isArray(list)) list = [];
       if (!list.length) {

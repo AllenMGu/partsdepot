@@ -86,17 +86,17 @@ window.M_PAGES["scan"] = function () {
       elStock.innerHTML = '<span class="m-muted">输入条码与库位后显示当前库存</span>';
       return;
     }
-    M.api("GET", "/stock/").then(function (rows) {
-      var w = M.AUTH.currentWarehouse();
+    var w = M.AUTH.currentWarehouse();
+    var wh = (w && w.id) ? "?warehouse_id=" + w.id : "";
+    M.api("GET", "/stock/" + wh).then(function (rows) {
       var found = (rows || []).filter(function (s) {
         return s.goods_barcode === state.goodsBarcode &&
-          s.location_code === state.locationCode &&
-          (!w || !w.name || s.warehouse_name === w.name);
+          s.location_code === state.locationCode;
       });
       var total = found.reduce(function (sum, r) { return sum + Number(r.quantity || 0); }, 0);
       state.currentStock = total;
       elStock.innerHTML = "当前库存：<b class='m-mono'>" + M.fmtNum(total) + "</b>";
-    }).catch(function () {
+    }).catch(function (err) {
       elStock.innerHTML = '<span class="m-muted">库存查询失败</span>';
     });
   }

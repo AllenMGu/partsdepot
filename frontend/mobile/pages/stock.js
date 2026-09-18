@@ -17,12 +17,11 @@ window.M_PAGES["stock"] = function () {
 
   function loadStock() {
     elList.innerHTML = '<div class="m-empty">加载中…</div>';
-    M.api("GET", "/stock/").then(function (rows) {
-      var w = M.AUTH.currentWarehouse();
-      var warehouseName = w ? w.name : "";
-      rawList = (rows || []).filter(function (it) {
-        return warehouseName ? (it.warehouse_name === warehouseName) : true;
-      });
+    // 按当前仓库查询（API 过滤，不拉全量再前端猜）
+    var w = M.AUTH.currentWarehouse();
+    var wh = (w && w.id) ? "?warehouse_id=" + w.id : "";
+    M.api("GET", "/stock/" + wh).then(function (rows) {
+      rawList = rows || [];
       elCount.textContent = "共 " + rawList.length + " 条";
       applyFilter();
     }).catch(function (err) {

@@ -19,11 +19,26 @@ function createOrderPage(cfg) {
 
     var base = cfg.apiBase; // '/inbound-orders' 或 '/outbound-orders'
 
+    /* in-flight guard：手机双击/连点防护——任一 mutation 在途时拒绝新的 mutation，
+     * 防止创建两张草稿、重复添加明细、重复提交（GET 刷新不受限） */
+    var inFlight = 0;
+    function guarded(fn) {
+      if (inFlight > 0) { M.toast("操作处理中，请勿重复操作", "err"); return; }
+      inFlight += 1;
+      fn(function () { inFlight = Math.max(0, inFlight - 1); });
+    }
+
+    /* 当前仓库过滤：H5 语义统一为"当前仓库"（与页面顶部上下文一致） */
+    function whParam() {
+      var w = M.AUTH.currentWarehouse();
+      return (w && w.id) ? "?warehouse_id=" + w.id : "";
+    }
+
     loadOrders();
 
     function loadOrders() {
       elOrders.innerHTML = '<div class="m-empty">加载中…</div>';
-      M.api("GET", base + "/").then(function (rows) {
+      M.api("GET", base + "/" + whParam()).then(function (rows) {
         var list = rows || [];
         elCount.textContent = "共 " + list.length + " 单";
         if (!list.length) {
@@ -136,14 +151,17 @@ function createOrderPage(cfg) {
     window.M_ACTIONS["ordCreate"] = function () {
       var partner = elPartner.value.trim();
       var remark = elRemark.value.trim();
-      M.api("POST", base + "/", { [cfg.partnerField]: partner, remark: remark })
-        .then(function () {
-          M.toast("创建成功", "ok");
-          elPartner.value = "";
-          elRemark.value = "";
-          loadOrders();
-        })
-        .catch(function (err) { M.toast(err.message || "创建失败", "err"); });
+      guarded(function (release) {
+        M.api("POST", base + "/", { [cfg.partnerField]: partner, remark: remark })
+          .then(function () {
+            release();
+            M.toast("创建成功", "ok");
+            elPartner.value = "";
+            elRemark.value = "";
+            loadOrders();
+          })
+          .catch(function (err) { release(); M.toast(err.message || "创建失败", "err"); });
+      });
     };
 
     window.M_ACTIONS["ordAddItem"] = function (el, arg) {
@@ -161,9 +179,11 @@ function createOrderPage(cfg) {
         unit_price: priceRaw === "" ? null : Number(priceRaw),
         remark: remark
       };
-      M.api("POST", base + "/" + headerId + "/items", body)
-        .then(function () { M.toast("已添加", "ok"); loadOrders(); openDetail(headerId); })
-        .catch(function (err) { M.toast(err.message || "添加失败", "err"); });
+      guarded(function (release) {
+        M.api("POST", base + "/" + headerId + "/items", body)
+          .then(function () { release(); M.toast("已添加", "ok"); loadOrders(); openDetail(headerId); })
+          .catch(function (err) { release(); M.toast(err.message || "添加失败", "err"); });
+      });
     };
 
     window.M_ACTIONS["ordDelItem"] = function (el, arg) {
@@ -177,9 +197,11 @@ function createOrderPage(cfg) {
           { label: "取消", kind: "ghost" },
           { label: "删除", kind: "danger", onClick: function (close) {
               close();
-              M.api("DELETE", base + "/" + headerId + "/items/" + itemId)
-                .then(function () { M.toast("已删除", "ok"); loadOrders(); openDetail(headerId); })
-                .catch(function (err) { M.toast(err.message || "删除失败", "err"); });
+              guarded(function (release) {
+                M.api("DELETE", base + "/" + headerId + "/items/" + itemId)
+                  .then(function () { release(); M.toast("已删除", "ok"); loadOrders(); openDetail(headerId); })
+                  .catch(function (err) { release(); M.toast(err.message || "删除失败", "err"); });
+              });
             } }
         ]
       });
@@ -187,9 +209,11 @@ function createOrderPage(cfg) {
 
     window.M_ACTIONS["ordSubmit"] = function (el, arg) {
       var id = Number(arg);
-      M.api("POST", base + "/" + id + "/submit")
-        .then(function () { M.toast("提交成功", "ok"); loadOrders(); elDetail.innerHTML = ""; elDetail.classList.add("m-hidden"); })
-        .catch(function (err) { M.toast(err.message || "提交失败", "err"); });
+      guarded(function (release) {
+        M.api("POST", base + "/" + id + "/submit")
+          .then(function () { release(); M.toast("提交成功", "ok"); loadOrders(); elDetail.innerHTML = ""; elDetail.classList.add("m-hidden"); })
+          .catch(function (err) { release(); M.toast(err.message || "提交失败", "err"); });
+      });
     };
 
     window.M_ACTIONS["ordDelOrder"] = function (el, arg) {
@@ -201,9 +225,11 @@ function createOrderPage(cfg) {
           { label: "取消", kind: "ghost" },
           { label: "删除", kind: "danger", onClick: function (close) {
               close();
-              M.api("DELETE", base + "/" + id)
-                .then(function () { M.toast("已删除", "ok"); elDetail.innerHTML = ""; elDetail.classList.add("m-hidden"); loadOrders(); })
-                .catch(function (err) { M.toast(err.message || "删除失败", "err"); });
+              guarded(function (release) {
+                M.api("DELETE", base + "/" + id)
+                  .then(function () { release(); M.toast("已删除", "ok"); elDetail.innerHTML = ""; elDetail.classList.add("m-hidden"); loadOrders(); })
+                  .catch(function (err) { release(); M.toast(err.message || "删除失败", "err"); });
+              });
             } }
         ]
       });
@@ -212,9 +238,11 @@ function createOrderPage(cfg) {
     if (cfg.hasReturn) {
       window.M_ACTIONS["ordReturn"] = function (el, arg) {
         var id = Number(arg);
-        M.api("POST", base + "/" + id + "/return")
-          .then(function (res) { M.toast("已生成 " + ((res && res.order_no) || "出库单"), "ok"); loadOrders(); })
-          .catch(function (err) { M.toast(err.message || "退库失败", "err"); });
+        guarded(function (release) {
+          M.api("POST", base + "/" + id + "/return")
+            .then(function (res) { release(); M.toast("已生成 " + ((res && res.order_no) || "出库单"), "ok"); loadOrders(); })
+            .catch(function (err) { release(); M.toast(err.message || "退库失败", "err"); });
+        });
       };
     }
 
