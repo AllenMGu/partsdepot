@@ -2,6 +2,7 @@
   <view class="card">
     <view class="subtitle" wx:if="{{currentWarehouseName}}" style="margin-bottom: 10rpx;">当前仓库：{{currentWarehouseName}}</view>
     <input class="input" placeholder="搜索条码/货名/库位" value="{{keyword}}" bindinput="onKeywordInput" />
+    <button class="btn-primary" size="mini" bindtap="scanStockCode">扫码查询</button>
     <button class="btn-ghost" bindtap="loadStock">刷新</button>
   </view>
 
