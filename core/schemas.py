@@ -127,6 +127,19 @@ class InventoryCreate(BaseModel):
     quantity: float = Field(gt=0)
     remark: Optional[str] = ""
 
+class InventoryBatchItem(BaseModel):
+    """连续扫码临时列表中的一行；同一条码/库位可在后端再次汇总。"""
+    goods_barcode: str = Field(..., min_length=1, max_length=100)
+    location_code: str = Field(..., min_length=1, max_length=50)
+    quantity: float = Field(..., gt=0)
+
+class InventoryBatchCreate(BaseModel):
+    """批量扫码确认请求。request_id 兼容无法设置自定义请求头的客户端。"""
+    type: InventoryType
+    items: List[InventoryBatchItem] = Field(..., min_length=1, max_length=500)
+    remark: Optional[str] = Field(default="", max_length=500)
+    request_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
+
 class CheckCreate(BaseModel):
     goods_barcode: str
     location_code: str
@@ -307,6 +320,11 @@ class RequestItemSubmit(BaseModel):
     barcode: str = Field(..., min_length=1, max_length=100, description="货物条码（必须存在于货物表）")
     quantity: float = Field(..., gt=0, description="数量（>0）")
 
+class RequestItemEdit(BaseModel):
+    """管理员编辑申请单明细；名称/规格/单位仍由条码对应的货物档案生成。"""
+    barcode: str = Field(..., min_length=1, max_length=100)
+    quantity: float = Field(..., gt=0)
+
 class PublicStockLookup(BaseModel):
     warehouse_id: int = Field(..., gt=0, description="启用仓库ID")
     barcodes: List[str] = Field(..., min_length=1, max_length=200, description="待查询条码（最多200条）")
@@ -346,6 +364,7 @@ class RequestSubmit(BaseModel):
         return v
 
 class RequestItemResponse(BaseModel):
+    id: Optional[int] = None
     barcode: str
     name: Optional[str] = None
     spec: Optional[str] = None
