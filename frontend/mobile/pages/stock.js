@@ -15,12 +15,14 @@ window.M_PAGES["stock"] = function () {
 
   loadStock();
 
-  function loadStock() {
+  function loadStock(scanCode) {
     elList.innerHTML = '<div class="m-empty">加载中…</div>';
     // 按当前仓库查询（API 过滤，不拉全量再前端猜）
     var w = M.AUTH.currentWarehouse();
-    var wh = (w && w.id) ? "?warehouse_id=" + w.id : "";
-    M.api("GET", "/stock/" + wh).then(function (rows) {
+    var params = [];
+    if (w && w.id) params.push("warehouse_id=" + encodeURIComponent(w.id));
+    if (scanCode) params.push("goods_barcode=" + encodeURIComponent(scanCode));
+    M.api("GET", "/stock/" + (params.length ? "?" + params.join("&") : "")).then(function (rows) {
       rawList = rows || [];
       elCount.textContent = "共 " + rawList.length + " 条";
       applyFilter();
@@ -28,6 +30,13 @@ window.M_PAGES["stock"] = function () {
       elList.innerHTML = '<div class="m-empty">' + M.esc(err.message || "加载失败") + "</div>";
     });
   }
+
+  window.M_ACTIONS["stockScan"] = function () {
+    M.scanCode(function (code) {
+      elKw.value = String(code || "").trim();
+      loadStock(elKw.value);
+    });
+  };
 
   function applyFilter() {
     var kw = (elKw.value || "").trim().toLowerCase();
