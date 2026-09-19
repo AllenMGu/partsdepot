@@ -20,8 +20,8 @@
     <view class="order-item" wx:for="{{quickRows}}" wx:key="goods_barcode">
       <view class="row"><view><view>{{item.goods_name}}</view><view class="subtitle">{{item.goods_barcode}} · {{item.location_code}}</view></view><text>×{{item.quantity}}</text></view>
       <view class="row" style="margin-top: 6rpx;">
-        <button class="btn-ghost" size="mini" data-index="{{index}}" data-delta="-1" bindtap="changeQuickQuantity">−</button>
-        <button class="btn-ghost" size="mini" data-index="{{index}}" data-delta="1" bindtap="changeQuickQuantity">+</button>
+        <button class="btn-ghost" size="mini" data-index="{{index}}" data-delta="-1" bindtap="changeQuickQuantity" disabled="{{quickLoading || quickUnknown}}">−</button>
+        <button class="btn-ghost" size="mini" data-index="{{index}}" data-delta="1" bindtap="changeQuickQuantity" disabled="{{quickLoading || quickUnknown}}">+</button>
       </view>
     </view>
     <view class="row" style="margin-bottom: 16rpx;" wx:if="{{quickRows.length}}">
