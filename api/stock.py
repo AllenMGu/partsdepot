@@ -1,5 +1,6 @@
 """库存路由：扫码出入库、库存查询、出入库记录（三个子路由保持原始注册顺序）。"""
 
+import hashlib
 import json
 import logging
 
@@ -33,6 +34,22 @@ def _batch_operation_response(order_no: str, inventory_type: InventoryType, ware
         "items": rows,
     }
 
+def _batch_request_hash(payload: InventoryBatchCreate) -> str:
+    canonical_items = sorted([
+        {
+            "goods_barcode": item.goods_barcode.strip(),
+            "location_code": item.location_code.strip(),
+            "quantity": item.quantity,
+        }
+        for item in payload.items
+    ], key=lambda item: (item["goods_barcode"], item["location_code"], item["quantity"]))
+    canonical = json.dumps({
+        "type": payload.type.value,
+        "items": canonical_items,
+        "remark": payload.remark or "",
+    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
 @router.post("/inventory/batch", summary="连续扫码批量确认出入库")
 async def batch_inventory(
     payload: InventoryBatchCreate,
@@ -47,14 +64,9 @@ async def batch_inventory(
     """
     key = _batch_idempotency_key(idempotency_key, payload.request_id)
     operation = "inventory-batch"
+    request_hash = _batch_request_hash(payload)
     try:
         advisory_lock_idempotency_key(db, operation, key)
-        previous = db.query(IdempotencyRecord).filter(
-            IdempotencyRecord.operation == operation,
-            IdempotencyRecord.idempotency_key == key,
-        ).first()
-        if previous:
-            return json.loads(previous.response_json)
 
         # 先按条码/库位解析全部明细并汇总，拒绝跨仓批量请求。
         resolved = {}
@@ -89,6 +101,19 @@ async def batch_inventory(
         if len(warehouse_ids) != 1:
             raise HTTPException(status_code=400, detail="一次连续扫码只能操作同一仓库")
         warehouse_id = next(iter(warehouse_ids))
+
+        # 缓存响应必须在权限与请求合法性校验之后返回，避免另一个用户通过猜测
+        # 幂等键读取单号/货物/库位响应；同一用户复用 key 发送不同载荷也必须报冲突。
+        previous = db.query(IdempotencyRecord).filter(
+            IdempotencyRecord.operation == operation,
+            IdempotencyRecord.idempotency_key == key,
+        ).first()
+        if previous:
+            if (previous.operator_id != current_user.id or
+                    not previous.request_hash or previous.request_hash != request_hash):
+                raise HTTPException(status_code=409, detail="幂等键已被使用或请求内容不同，请更换幂等键")
+            return json.loads(previous.response_json)
+
         keys = sorted(resolved)
 
         # 入库允许首笔扫码创建库存行：先锁咨询锁，再重新读取，避免并发插入重复行。
@@ -202,6 +227,7 @@ async def batch_inventory(
         response = _batch_operation_response(order_no, payload.type, warehouse_id, rows)
         db.add(IdempotencyRecord(
             operation=operation, idempotency_key=key,
+            operator_id=current_user.id, request_hash=request_hash,
             response_json=json.dumps(response, ensure_ascii=False), create_time=now,
         ))
         db.commit()
