@@ -850,6 +850,8 @@ s, b = req("POST", "/api/requests/archive-now", {}, admin)
 check("申请编辑：归档含审计的申请单成功", s == 200 and (b or {}).get("archived", 0) >= 1, f"status={s} body={b}")
 s, b = req("GET", f"/api/requests/archive/{_edit_id}/item-audits", token=admin)
 check("申请编辑：归档后仍可查询完整货物审计", s == 200 and [x.get("action") for x in (b or [])] == ["ADD_ITEM", "UPDATE_ITEM", "DELETE_ITEM"], f"status={s} body={b}")
+_active_audits = db_execute("SELECT COUNT(*) FROM request_item_audits WHERE request_id = :rid", {"rid": _edit_id})
+check("申请编辑：归档后活跃审计表无孤儿记录", bool(_active_audits) and _active_audits[0][0] == 0, f"active_audits={_active_audits}")
 
 _batch_before = _w1_g001_total()
 _batch_key = "test-batch-idempotency-001"
