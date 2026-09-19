@@ -364,7 +364,23 @@ class RequestItemAudit(Base):
     request = relationship("Request")
     operator = relationship("User")
 
-# 12.6 批量扫码业务幂等记录。业务提交成功后保存响应，重试同一 key 直接返回原结果。
+# 12.6 归档后的申请单货物修改审计。归档时从 request_item_audits 搬移，保留完整历史。
+class RequestItemAuditArchive(Base):
+    __tablename__ = "request_item_audits_archive"
+    id = Column(Integer, primary_key=True, index=True)
+    archive_id = Column(Integer, ForeignKey("requests_archive.id", ondelete="CASCADE"), index=True, nullable=False)
+    original_request_id = Column(Integer, index=True, nullable=False)
+    request_item_id = Column(Integer, nullable=True, index=True)
+    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action = Column(String(30), nullable=False)
+    before_json = Column(Text, nullable=True)
+    after_json = Column(Text, nullable=True)
+    create_time = Column(DateTime, default=datetime.now, nullable=False, index=True)
+
+    archive = relationship("RequestArchive")
+    operator = relationship("User")
+
+# 12.7 批量扫码业务幂等记录。业务提交成功后保存响应，重试同一 key 直接返回原结果。
 class IdempotencyRecord(Base):
     __tablename__ = "idempotency_records"
     __table_args__ = (
@@ -373,8 +389,13 @@ class IdempotencyRecord(Base):
     id = Column(Integer, primary_key=True, index=True)
     operation = Column(String(50), nullable=False)
     idempotency_key = Column(String(200), nullable=False)
+    # nullable 兼容已存在的历史记录；新写入记录始终填充这两个字段。
+    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    request_hash = Column(String(64), nullable=True, index=True)
     response_json = Column(Text, nullable=False)
     create_time = Column(DateTime, default=datetime.now, nullable=False, index=True)
+
+    operator = relationship("User")
 
 # 创建所有表
 Base.metadata.create_all(bind=engine)
