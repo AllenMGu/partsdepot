@@ -68,6 +68,8 @@ Page({
     quickCallbackBusy: false,
     quickLoading: false,
     quickRequestId: "",
+    quickLastCode: "",
+    quickLastAcceptedAt: 0,
 
     checkOrders: [],
     checkOrder: null,
@@ -143,10 +145,26 @@ Page({
   onQuantityInput(e) { this.setData({ "inventory.quantity": e.detail.value.trim() }); },
   onRemarkInput(e) { this.setData({ "inventory.remark": e.detail.value }); },
 
-  onQuickLocationInput(e) { this.setData({ quickLocation: e.detail.value.trim() }); },
-  scanQuickLocation() { this.scanCode((code) => this.setData({ quickLocation: String(code || "").trim() })); },
+  onQuickLocationInput(e) {
+    const location = e.detail.value.trim();
+    if ((this.data.quickScanning || this.data.quickRows.length) && location !== this.data.quickLocation) {
+      wx.showToast({ title: "请先清空扫码明细", icon: "none" });
+      return;
+    }
+    if (this.data.quickLoading) return;
+    this.setData({ quickLocation: location });
+  },
+  scanQuickLocation() {
+    if (this.data.quickLoading || this.data.quickScanning || this.data.quickRows.length) {
+      wx.showToast({ title: "请先完成或清空当前明细", icon: "none" });
+      return;
+    }
+    this.scanCode((code) => this.setData({ quickLocation: String(code || "").trim() }));
+  },
   setQuickType(e) {
-    if (this.data.quickScanning) return wx.showToast({ title: "请先停止连续扫码", icon: "none" });
+    if (this.data.quickScanning || this.data.quickLoading || this.data.quickRows.length) {
+      return wx.showToast({ title: "请先完成或清空当前明细", icon: "none" });
+    }
     this.setData({ quickType: e.currentTarget.dataset.type });
   },
   quickKey(row) { return `${row.goods_barcode}|${row.location_code}`; },
@@ -156,6 +174,7 @@ Page({
     wx.showToast({ title, icon: ok ? "success" : "none" });
   },
   toggleQuickScan() {
+    if (this.data.quickLoading) return;
     if (this.data.quickScanning) {
       this.setData({ quickScanning: false, quickCallbackBusy: false });
       return;
@@ -163,20 +182,29 @@ Page({
     const code = this.data.quickLocation;
     const validLocation = (this.data.warehouseLocations || []).some((l) => l.location_code === code);
     if (!code || !validLocation) return wx.showToast({ title: "请先选择当前仓库的库位", icon: "none" });
-    this.setData({ quickScanning: true, quickRequestId: this.newQuickRequestId() }, () => this.scanNextQuick());
+    this.setData({
+      quickScanning: true,
+      quickRequestId: this.data.quickRequestId || this.newQuickRequestId(),
+    }, () => this.scanNextQuick());
   },
   scanNextQuick() {
     if (!this.data.quickScanning || this.data.quickCallbackBusy) return;
+    const location = this.data.quickLocation;
     this.setData({ quickCallbackBusy: true });
     this.scanCode((code) => {
       if (!this.data.quickScanning) return this.setData({ quickCallbackBusy: false });
-      this.validateQuickBarcode(code).then((goods) => {
+      this.validateQuickBarcode(code, location).then((goods) => {
+        const now = Date.now();
+        if (goods.barcode === this.data.quickLastCode && now - this.data.quickLastAcceptedAt < 1500) {
+          wx.showToast({ title: "请移开上一件货物后再扫描", icon: "none" });
+          return;
+        }
         const rows = (this.data.quickRows || []).slice();
-        const index = rows.findIndex((row) => row.goods_barcode === goods.barcode && row.location_code === this.data.quickLocation);
+        const index = rows.findIndex((row) => row.goods_barcode === goods.barcode && row.location_code === location);
         if (index >= 0) rows[index].quantity += 1;
-        else rows.push({ goods_barcode: goods.barcode, goods_name: goods.name, location_code: this.data.quickLocation, quantity: 1 });
+        else rows.push({ goods_barcode: goods.barcode, goods_name: goods.name, location_code: location, quantity: 1 });
         this.quickFeedback(true, goods.name || goods.barcode);
-        this.setData({ quickRows: rows });
+        this.setData({ quickRows: rows, quickLastCode: goods.barcode, quickLastAcceptedAt: now });
       }).catch((err) => this.quickFeedback(false, err.message || `未找到该货物：${code}`))
         .then(() => {
           this.setData({ quickCallbackBusy: false });
@@ -184,7 +212,7 @@ Page({
         });
     });
   },
-  async validateQuickBarcode(code) {
+  async validateQuickBarcode(code, location) {
     const value = String(code || "").trim();
     if (!value) throw new Error("未读取到条码");
     const goodsList = await request({ url: "/goods/", data: { keyword: value } });
@@ -193,14 +221,15 @@ Page({
     if (this.data.quickType === "出库") {
       const user = getUser() || {};
       const stocks = await request({ url: "/stock/", data: { warehouse_id: user.current_warehouse_id, goods_barcode: value } });
-      const available = (stocks || []).filter((row) => row.location_code === this.data.quickLocation)
+      const available = (stocks || []).filter((row) => row.location_code === location)
         .reduce((sum, row) => sum + Number(row.quantity || 0), 0);
-      const current = (this.data.quickRows || []).find((row) => row.goods_barcode === value && row.location_code === this.data.quickLocation);
+      const current = (this.data.quickRows || []).find((row) => row.goods_barcode === value && row.location_code === location);
       if (available <= Number(current && current.quantity || 0)) throw new Error(`库存不足：${goods.name} 当前可出库 ${available}`);
     }
     return goods;
   },
   changeQuickQuantity(e) {
+    if (this.data.quickLoading) return;
     const index = Number(e.currentTarget.dataset.index);
     const delta = Number(e.currentTarget.dataset.delta);
     const rows = (this.data.quickRows || []).slice();
@@ -209,18 +238,23 @@ Page({
     if (rows[index].quantity <= 0) rows.splice(index, 1);
     this.setData({ quickRows: rows });
   },
-  clearQuickRows() { if (!this.data.quickScanning) this.setData({ quickRows: [], quickRequestId: "" }); },
+  clearQuickRows() {
+    if (!this.data.quickScanning && !this.data.quickLoading) {
+      this.setData({ quickRows: [], quickRequestId: "", quickLastCode: "", quickLastAcceptedAt: 0 });
+    }
+  },
   async confirmQuickScan() {
     if (this.data.quickScanning || this.data.quickLoading) return;
     const rows = this.data.quickRows || [];
     if (!rows.length) return wx.showToast({ title: "请先扫码添加货物", icon: "none" });
-    this.setData({ quickLoading: true });
+    const requestId = this.data.quickRequestId || this.newQuickRequestId();
+    this.setData({ quickLoading: true, quickRequestId: requestId });
     try {
       const res = await request({
         url: "/inventory/batch", method: "POST",
         data: {
           type: this.data.quickType,
-          request_id: this.data.quickRequestId || this.newQuickRequestId(),
+          request_id: requestId,
           items: rows.map((row) => ({ goods_barcode: row.goods_barcode, location_code: row.location_code, quantity: row.quantity }))
         }
       });
