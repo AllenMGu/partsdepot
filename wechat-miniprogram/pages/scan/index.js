@@ -67,9 +67,9 @@ Page({
     quickScanning: false,
     quickCallbackBusy: false,
     quickLoading: false,
+    quickUnknown: false,
+    quickPendingPayload: null,
     quickRequestId: "",
-    quickLastCode: "",
-    quickLastAcceptedAt: 0,
 
     checkOrders: [],
     checkOrder: null,
@@ -147,8 +147,8 @@ Page({
 
   onQuickLocationInput(e) {
     const location = e.detail.value.trim();
-    if ((this.data.quickScanning || this.data.quickRows.length) && location !== this.data.quickLocation) {
-      wx.showToast({ title: "请先清空扫码明细", icon: "none" });
+    if ((this.data.quickScanning || this.data.quickRows.length || this.data.quickUnknown) && location !== this.data.quickLocation) {
+      wx.showToast({ title: this.data.quickUnknown ? "提交结果未知，请先用原清单重试" : "请先清空扫码明细", icon: "none" });
       return;
     }
     if (this.data.quickLoading) return;
@@ -162,7 +162,7 @@ Page({
     this.scanCode((code) => this.setData({ quickLocation: String(code || "").trim() }));
   },
   setQuickType(e) {
-    if (this.data.quickScanning || this.data.quickLoading || this.data.quickRows.length) {
+    if (this.data.quickScanning || this.data.quickLoading || this.data.quickRows.length || this.data.quickUnknown) {
       return wx.showToast({ title: "请先完成或清空当前明细", icon: "none" });
     }
     this.setData({ quickType: e.currentTarget.dataset.type });
@@ -174,7 +174,7 @@ Page({
     wx.showToast({ title, icon: ok ? "success" : "none" });
   },
   toggleQuickScan() {
-    if (this.data.quickLoading) return;
+    if (this.data.quickLoading || this.data.quickUnknown) return;
     if (this.data.quickScanning) {
       this.setData({ quickScanning: false, quickCallbackBusy: false });
       return;
@@ -194,22 +194,20 @@ Page({
     this.scanCode((code) => {
       if (!this.data.quickScanning) return this.setData({ quickCallbackBusy: false });
       this.validateQuickBarcode(code, location).then((goods) => {
-        const now = Date.now();
-        if (goods.barcode === this.data.quickLastCode && now - this.data.quickLastAcceptedAt < 1500) {
-          wx.showToast({ title: "请移开上一件货物后再扫描", icon: "none" });
-          return;
-        }
         const rows = (this.data.quickRows || []).slice();
         const index = rows.findIndex((row) => row.goods_barcode === goods.barcode && row.location_code === location);
         if (index >= 0) rows[index].quantity += 1;
         else rows.push({ goods_barcode: goods.barcode, goods_name: goods.name, location_code: location, quantity: 1 });
         this.quickFeedback(true, goods.name || goods.barcode);
-        this.setData({ quickRows: rows, quickLastCode: goods.barcode, quickLastAcceptedAt: now });
+        this.setData({ quickRows: rows });
       }).catch((err) => this.quickFeedback(false, err.message || `未找到该货物：${code}`))
         .then(() => {
           this.setData({ quickCallbackBusy: false });
           if (this.data.quickScanning) setTimeout(() => this.scanNextQuick(), 80);
         });
+    }, () => {
+      this.setData({ quickCallbackBusy: false, quickScanning: false });
+      wx.showToast({ title: "扫码已取消，连续扫码已停止", icon: "none" });
     });
   },
   async validateQuickBarcode(code, location) {
@@ -239,29 +237,47 @@ Page({
     this.setData({ quickRows: rows });
   },
   clearQuickRows() {
+    if (this.data.quickUnknown) {
+      return wx.showToast({ title: "提交结果未知，请先用原清单重试", icon: "none" });
+    }
     if (!this.data.quickScanning && !this.data.quickLoading) {
-      this.setData({ quickRows: [], quickRequestId: "", quickLastCode: "", quickLastAcceptedAt: 0 });
+      this.setData({ quickRows: [], quickRequestId: "", quickPendingPayload: null });
     }
   },
   async confirmQuickScan() {
     if (this.data.quickScanning || this.data.quickLoading) return;
-    const rows = this.data.quickRows || [];
-    if (!rows.length) return wx.showToast({ title: "请先扫码添加货物", icon: "none" });
-    const requestId = this.data.quickRequestId || this.newQuickRequestId();
-    this.setData({ quickLoading: true, quickRequestId: requestId });
+    let requestId;
+    let payload;
+    if (this.data.quickUnknown) {
+      requestId = this.data.quickRequestId;
+      payload = this.data.quickPendingPayload;
+      if (!requestId || !payload) return wx.showToast({ title: "原提交信息已丢失，请联系管理员确认库存", icon: "none" });
+    } else {
+      const rows = this.data.quickRows || [];
+      if (!rows.length) return wx.showToast({ title: "请先扫码添加货物", icon: "none" });
+      requestId = this.data.quickRequestId || this.newQuickRequestId();
+      payload = {
+        type: this.data.quickType,
+        request_id: requestId,
+        items: rows.map((row) => ({ goods_barcode: row.goods_barcode, location_code: row.location_code, quantity: row.quantity }))
+      };
+    }
+    this.setData({ quickLoading: true, quickRequestId: requestId, quickPendingPayload: payload });
     try {
       const res = await request({
         url: "/inventory/batch", method: "POST",
-        data: {
-          type: this.data.quickType,
-          request_id: requestId,
-          items: rows.map((row) => ({ goods_barcode: row.goods_barcode, location_code: row.location_code, quantity: row.quantity }))
-        }
+        data: payload
       });
       this.quickFeedback(true, "整单提交成功");
-      this.setData({ quickRows: [], quickRequestId: "", result: `${res.message}：${res.order_no}` });
+      this.setData({ quickRows: [], quickRequestId: "", quickUnknown: false, quickPendingPayload: null, result: `${res.message}：${res.order_no}` });
     } catch (err) {
-      this.quickFeedback(false, err.message || "提交失败，整单未提交");
+      if (err && err.status == null) {
+        this.setData({ quickUnknown: true, quickRequestId: requestId, quickPendingPayload: payload });
+        this.quickFeedback(false, "提交结果未知，请勿清空或修改，使用原清单重试");
+      } else {
+        this.setData({ quickUnknown: false, quickRequestId: "", quickPendingPayload: null });
+        this.quickFeedback(false, err.message || "提交失败，整单未提交");
+      }
     } finally { this.setData({ quickLoading: false }); }
   },
 
@@ -379,8 +395,15 @@ Page({
   scanCheckGoodsCode() { this.scanCode((code) => this.setData({ "checkForm.goods_barcode": code }, () => this.validateCheckGoodsAndStock())); },
   scanCheckLocationCode() { this.scanCode((code) => this.setData({ "checkForm.location_code": code }, () => this.validateCheckLocationAndStock())); },
 
-  scanCode(onSuccess) {
-    wx.scanCode({ onlyFromCamera: false, success: (res) => onSuccess(res.result || ""), fail: () => wx.showToast({ title: "\u626b\u7801\u53d6\u6d88/\u5931\u8d25", icon: "none" }) });
+  scanCode(onSuccess, onCancel) {
+    wx.scanCode({
+      onlyFromCamera: false,
+      success: (res) => onSuccess(res.result || ""),
+      fail: () => {
+        if (onCancel) onCancel();
+        else wx.showToast({ title: "\u626b\u7801\u53d6\u6d88/\u5931\u8d25", icon: "none" });
+      }
+    });
   },
 
   validateCheckGoodsAndStock() {
