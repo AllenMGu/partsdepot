@@ -70,6 +70,7 @@ Page({
     quickUnknown: false,
     quickPendingPayload: null,
     quickRequestId: "",
+    quickScanGeneration: 0,
 
     checkOrders: [],
     checkOrder: null,
@@ -176,37 +177,54 @@ Page({
   toggleQuickScan() {
     if (this.data.quickLoading || this.data.quickUnknown) return;
     if (this.data.quickScanning) {
-      this.setData({ quickScanning: false, quickCallbackBusy: false });
+      this.setData({
+        quickScanning: false,
+        quickCallbackBusy: false,
+        quickScanGeneration: this.data.quickScanGeneration + 1
+      });
       return;
     }
     const code = this.data.quickLocation;
     const validLocation = (this.data.warehouseLocations || []).some((l) => l.location_code === code);
     if (!code || !validLocation) return wx.showToast({ title: "请先选择当前仓库的库位", icon: "none" });
+    const generation = this.data.quickScanGeneration + 1;
     this.setData({
       quickScanning: true,
+      quickScanGeneration: generation,
       quickRequestId: this.data.quickRequestId || this.newQuickRequestId(),
-    }, () => this.scanNextQuick());
+    }, () => this.scanNextQuick(generation));
   },
-  scanNextQuick() {
-    if (!this.data.quickScanning || this.data.quickCallbackBusy) return;
+  scanNextQuick(generation) {
+    if (!this.data.quickScanning || generation !== this.data.quickScanGeneration || this.data.quickCallbackBusy) return;
     const location = this.data.quickLocation;
     this.setData({ quickCallbackBusy: true });
     this.scanCode((code) => {
-      if (!this.data.quickScanning) return this.setData({ quickCallbackBusy: false });
+      if (!this.data.quickScanning || generation !== this.data.quickScanGeneration) return;
       this.validateQuickBarcode(code, location).then((goods) => {
+        if (!this.data.quickScanning || generation !== this.data.quickScanGeneration || this.data.quickUnknown) return;
         const rows = (this.data.quickRows || []).slice();
         const index = rows.findIndex((row) => row.goods_barcode === goods.barcode && row.location_code === location);
         if (index >= 0) rows[index].quantity += 1;
         else rows.push({ goods_barcode: goods.barcode, goods_name: goods.name, location_code: location, quantity: 1 });
         this.quickFeedback(true, goods.name || goods.barcode);
         this.setData({ quickRows: rows });
-      }).catch((err) => this.quickFeedback(false, err.message || `未找到该货物：${code}`))
+      }).catch((err) => {
+        if (this.data.quickScanning && generation === this.data.quickScanGeneration) {
+          this.quickFeedback(false, err.message || `未找到该货物：${code}`);
+        }
+      })
         .then(() => {
+          if (generation !== this.data.quickScanGeneration) return;
           this.setData({ quickCallbackBusy: false });
-          if (this.data.quickScanning) setTimeout(() => this.scanNextQuick(), 80);
+          if (this.data.quickScanning) setTimeout(() => this.scanNextQuick(generation), 80);
         });
     }, () => {
-      this.setData({ quickCallbackBusy: false, quickScanning: false });
+      if (generation !== this.data.quickScanGeneration) return;
+      this.setData({
+        quickCallbackBusy: false,
+        quickScanning: false,
+        quickScanGeneration: generation + 1
+      });
       wx.showToast({ title: "扫码已取消，连续扫码已停止", icon: "none" });
     });
   },
@@ -227,7 +245,7 @@ Page({
     return goods;
   },
   changeQuickQuantity(e) {
-    if (this.data.quickLoading) return;
+    if (this.data.quickLoading || this.data.quickUnknown) return;
     const index = Number(e.currentTarget.dataset.index);
     const delta = Number(e.currentTarget.dataset.delta);
     const rows = (this.data.quickRows || []).slice();
@@ -271,7 +289,7 @@ Page({
       this.quickFeedback(true, "整单提交成功");
       this.setData({ quickRows: [], quickRequestId: "", quickUnknown: false, quickPendingPayload: null, result: `${res.message}：${res.order_no}` });
     } catch (err) {
-      if (err && err.status == null) {
+      if (err && (err.status == null || err.status >= 500)) {
         this.setData({ quickUnknown: true, quickRequestId: requestId, quickPendingPayload: payload });
         this.quickFeedback(false, "提交结果未知，请勿清空或修改，使用原清单重试");
       } else {
