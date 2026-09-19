@@ -19,11 +19,9 @@ Page({
   async loadStock() {
     wx.showLoading({ title: "加载中" });
     try {
-      const res = await request({ url: "/stock/" });
-      const warehouseName = this.data.currentWarehouseName;
-      const filtered = (res || []).filter((item) =>
-        warehouseName ? item.warehouse_name === warehouseName : true
-      );
+      const user = getUser() || {};
+      const res = await request({ url: "/stock/", data: { warehouse_id: user.current_warehouse_id || undefined } });
+      const filtered = res || [];
       const normalized = filtered.map((item) => ({
         ...item,
         quantity: fmtNum(item.quantity),
@@ -38,6 +36,19 @@ Page({
   },
   onKeywordInput(e) {
     this.setData({ keyword: e.detail.value.trim() }, () => this.applyFilter());
+  },
+  scanStockCode() {
+    wx.scanCode({
+      onlyFromCamera: false,
+      success: async (res) => {
+        const code = String(res.result || "").trim();
+        if (!code) return wx.showToast({ title: "未读取到条码", icon: "none" });
+        if (wx.vibrateShort) wx.vibrateShort({ type: "light" });
+        this.setData({ keyword: code });
+        await this.loadStock();
+      },
+      fail: () => wx.showToast({ title: "扫码取消/失败，请手工输入", icon: "none" })
+    });
   },
   applyFilter() {
     const kw = (this.data.keyword || "").toLowerCase();
