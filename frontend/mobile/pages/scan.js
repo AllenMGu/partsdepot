@@ -32,7 +32,7 @@ window.M_PAGES["scan"] = function () {
     type: "入库", location: "", rows: {}, scanning: false,
     callbackBusy: false, scanner: null, submitting: false, unknown: false,
     requestKey: null, pendingPayload: null,
-    lastAcceptedCode: null, lastAcceptedAt: 0
+    lastAcceptedCode: null, lastAcceptedAt: 0, scanGeneration: 0
   };
   var elQuickTypeIn = document.getElementById("mQuickTypeIn");
   var elQuickTypeOut = document.getElementById("mQuickTypeOut");
@@ -152,6 +152,7 @@ window.M_PAGES["scan"] = function () {
     if (quick.unknown) return M.toast("提交结果未知，请先用原清单重试", "err");
     if (quick.scanning) {
       quick.scanning = false;
+      quick.scanGeneration += 1;
       quick.callbackBusy = false;
       var scanner = quick.scanner;
       quick.scanner = null;
@@ -161,32 +162,38 @@ window.M_PAGES["scan"] = function () {
       return;
     }
     if (!quickLocationReady()) return;
+    quick.scanGeneration += 1;
+    var generation = quick.scanGeneration;
     quick.scanning = true;
     if (!quick.requestKey) quick.requestKey = newRequestKey();
     elQuickStart.textContent = "停止扫码";
     renderQuickRows();
-    quickScanNext();
+    quickScanNext(generation);
   }
-  function quickScanNext() {
-    if (!quick.scanning || quick.scanner) return;
+  function quickScanNext(generation) {
+    if (!quick.scanning || generation !== quick.scanGeneration || quick.scanner) return;
     quick.scanner = M.scanCode(function (code) {
-      if (!quick.scanning || quick.submitting || quick.unknown || quick.callbackBusy) return false;
+      if (!quick.scanning || generation !== quick.scanGeneration || quick.submitting || quick.unknown || quick.callbackBusy) return false;
       quick.callbackBusy = true;
       var location = quick.location;
       validateQuickBarcode(String(code || "").trim(), location).then(function (goods) {
+        if (!quick.scanning || generation !== quick.scanGeneration || quick.unknown) return;
         var key = quickKey(goods.barcode, location);
         if (!quick.rows[key]) quick.rows[key] = { barcode: goods.barcode, name: goods.name, location: location, quantity: 0 };
         quick.rows[key].quantity += 1;
         feedback(true, goods.name || goods.barcode);
         renderQuickRows();
       }).catch(function (err) {
+        if (!quick.scanning || generation !== quick.scanGeneration) return;
         feedback(false, err.message || ("未找到该货物：" + code));
       }).then(function () {
+        if (generation !== quick.scanGeneration) return;
         quick.callbackBusy = false;
         renderQuickRows();
       });
       return true;
     }, { continuous: true, onCancel: function () {
+      if (generation !== quick.scanGeneration) return;
       quick.scanner = null;
       quick.scanning = false;
       quick.callbackBusy = false;
@@ -239,7 +246,7 @@ window.M_PAGES["scan"] = function () {
         quick.rows = {}; quick.requestKey = null; quick.pendingPayload = null; quick.unknown = false;
         quick.lastAcceptedCode = null; quick.lastAcceptedAt = 0;
       }).catch(function (err) {
-        if (err && err.status == null) {
+        if (err && (err.status == null || err.status >= 500)) {
           quick.unknown = true;
           quick.requestKey = requestKey;
           quick.pendingPayload = payload;
