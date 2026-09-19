@@ -30,7 +30,8 @@ window.M_PAGES["scan"] = function () {
 
   var quick = {
     type: "入库", location: "", rows: {}, scanning: false,
-    callbackBusy: false, requestKey: null
+    callbackBusy: false, submitting: false, requestKey: null,
+    lastAcceptedCode: null, lastAcceptedAt: 0
   };
   var elQuickTypeIn = document.getElementById("mQuickTypeIn");
   var elQuickTypeOut = document.getElementById("mQuickTypeOut");
@@ -66,7 +67,14 @@ window.M_PAGES["scan"] = function () {
   loadLocations();
   elQuickTypeIn.addEventListener("click", function () { setQuickType("入库"); });
   elQuickTypeOut.addEventListener("click", function () { setQuickType("出库"); });
-  elQuickLocation.addEventListener("input", function () { quick.location = elQuickLocation.value.trim(); });
+  elQuickLocation.addEventListener("input", function () {
+    var next = elQuickLocation.value.trim();
+    if ((Object.keys(quick.rows).length || quick.submitting) && next !== quick.location) {
+      elQuickLocation.value = quick.location;
+      return feedback(false, "已有扫描清单，不能更换库位；请先清空清单");
+    }
+    quick.location = next;
+  });
   elQuickStart.addEventListener("click", toggleQuickScan);
   elQuickClear.addEventListener("click", clearQuickRows);
   elQuickConfirm.addEventListener("click", confirmQuickScan);
@@ -75,7 +83,7 @@ window.M_PAGES["scan"] = function () {
     if (!btn) return;
     var key = btn.getAttribute("data-key");
     var row = quick.rows[key];
-    if (!row) return;
+    if (!row || quick.submitting) return;
     if (btn.getAttribute("data-quick-action") === "plus") row.quantity += 1;
     if (btn.getAttribute("data-quick-action") === "minus") row.quantity -= 1;
     if (btn.getAttribute("data-quick-action") === "delete" || row.quantity <= 0) delete quick.rows[key];
@@ -84,13 +92,14 @@ window.M_PAGES["scan"] = function () {
 
   function setQuickType(t) {
     if (quick.scanning) return M.toast("请先停止连续扫码", "err");
+    if (quick.submitting || Object.keys(quick.rows).length) return M.toast("已有扫描清单，请先提交或清空", "err");
     quick.type = t;
     elQuickTypeIn.classList.toggle("on", t === "入库");
     elQuickTypeOut.classList.toggle("on", t === "出库");
     elQuickConfirm.textContent = t === "入库" ? "确认入库" : "确认出库";
   }
 
-  function quickKey(barcode) { return barcode + "|" + quick.location; }
+  function quickKey(barcode, location) { return barcode + "|" + location; }
   function newRequestKey() {
     if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
     return "h5-" + Date.now() + "-" + Math.random().toString(16).slice(2);
@@ -99,20 +108,25 @@ window.M_PAGES["scan"] = function () {
     var rows = Object.keys(quick.rows).map(function (key) { return quick.rows[key]; });
     var total = rows.reduce(function (sum, row) { return sum + row.quantity; }, 0);
     elQuickSummary.textContent = rows.length ? ("已扫描 " + total + " 件 · " + rows.length + " 种") : (quick.scanning ? "等待扫码…" : "尚未开始");
-    elQuickClear.disabled = !rows.length || quick.scanning;
-    elQuickConfirm.disabled = !rows.length || quick.scanning;
+    elQuickClear.disabled = !rows.length || quick.scanning || quick.submitting;
+    elQuickConfirm.disabled = !rows.length || quick.scanning || quick.submitting;
     elQuickList.innerHTML = rows.map(function (row) {
-      var key = M.esc(quickKey(row.barcode));
+      var key = M.esc(quickKey(row.barcode, row.location));
       return '<div class="m-item"><div class="m-row between">' +
         '<div class="m-grow"><div class="m-item-title">' + M.esc(row.name || row.barcode) + '</div>' +
-        '<div class="m-item-sub m-mono">' + M.esc(row.barcode) + ' · ' + M.esc(quick.location) + '</div></div>' +
+        '<div class="m-item-sub m-mono">' + M.esc(row.barcode) + ' · ' + M.esc(row.location) + '</div></div>' +
         '<div class="m-row" style="gap:6px;"><button type="button" class="m-btn m-btn-ghost m-btn-sm" data-quick-action="minus" data-key="' + key + '">−</button>' +
         '<strong class="m-mono">' + M.esc(row.quantity) + '</strong>' +
         '<button type="button" class="m-btn m-btn-ghost m-btn-sm" data-quick-action="plus" data-key="' + key + '">+</button>' +
         '<button type="button" class="m-btn m-btn-danger m-btn-sm" data-quick-action="delete" data-key="' + key + '">删</button></div></div></div>';
     }).join("");
   }
-  function clearQuickRows() { if (!quick.scanning) { quick.rows = {}; quick.requestKey = null; elQuickResult.innerHTML = ""; renderQuickRows(); } }
+  function clearQuickRows() {
+    if (!quick.scanning && !quick.submitting) {
+      quick.rows = {}; quick.requestKey = null; quick.lastAcceptedCode = null; quick.lastAcceptedAt = 0;
+      elQuickResult.innerHTML = ""; renderQuickRows();
+    }
+  }
   function feedback(ok, message) {
     if (navigator.vibrate) navigator.vibrate(ok ? 45 : [40, 50, 40]);
     M.toast(message, ok ? "ok" : "err");
@@ -127,10 +141,11 @@ window.M_PAGES["scan"] = function () {
     return true;
   }
   function toggleQuickScan() {
+    if (quick.submitting) return M.toast("正在提交，请稍候", "err");
     if (quick.scanning) { quick.scanning = false; quick.callbackBusy = false; elQuickStart.textContent = "继续连续扫码"; renderQuickRows(); return; }
     if (!quickLocationReady()) return;
     quick.scanning = true;
-    quick.requestKey = newRequestKey();
+    if (!quick.requestKey) quick.requestKey = newRequestKey();
     elQuickStart.textContent = "停止扫码";
     renderQuickRows();
     quickScanNext();
@@ -140,9 +155,16 @@ window.M_PAGES["scan"] = function () {
     quick.callbackBusy = true;
     M.scanCode(function (code) {
       if (!quick.scanning) { quick.callbackBusy = false; return; }
-      validateQuickBarcode(String(code || "").trim()).then(function (goods) {
-        var key = quickKey(goods.barcode);
-        if (!quick.rows[key]) quick.rows[key] = { barcode: goods.barcode, name: goods.name, quantity: 0 };
+      var location = quick.location;
+      validateQuickBarcode(String(code || "").trim(), location).then(function (goods) {
+        var now = Date.now();
+        if (quick.lastAcceptedCode === goods.barcode && now - quick.lastAcceptedAt < 1500) {
+          throw new Error("请移开上一件货物后再扫描");
+        }
+        quick.lastAcceptedCode = goods.barcode;
+        quick.lastAcceptedAt = now;
+        var key = quickKey(goods.barcode, location);
+        if (!quick.rows[key]) quick.rows[key] = { barcode: goods.barcode, name: goods.name, location: location, quantity: 0 };
         quick.rows[key].quantity += 1;
         feedback(true, goods.name || goods.barcode);
         renderQuickRows();
@@ -154,7 +176,7 @@ window.M_PAGES["scan"] = function () {
       });
     });
   }
-  function validateQuickBarcode(code) {
+  function validateQuickBarcode(code, location) {
     if (!code) return Promise.reject(new Error("未读取到条码"));
     return M.api("GET", "/goods/?keyword=" + encodeURIComponent(code)).then(function (rows) {
       var goods = (rows || []).filter(function (g) { return g.barcode === code; })[0];
@@ -162,8 +184,8 @@ window.M_PAGES["scan"] = function () {
       if (quick.type === "出库") {
         var w = M.AUTH.currentWarehouse();
         return M.api("GET", "/stock/?warehouse_id=" + w.id + "&goods_barcode=" + encodeURIComponent(code)).then(function (stocks) {
-          var available = (stocks || []).filter(function (s) { return s.location_code === quick.location; }).reduce(function (sum, s) { return sum + Number(s.quantity || 0); }, 0);
-          var key = quickKey(code), already = quick.rows[key] ? quick.rows[key].quantity : 0;
+          var available = (stocks || []).filter(function (s) { return s.location_code === location; }).reduce(function (sum, s) { return sum + Number(s.quantity || 0); }, 0);
+          var key = quickKey(code, location), already = quick.rows[key] ? quick.rows[key].quantity : 0;
           if (available <= already) throw new Error("库存不足：" + goods.name + " 当前可出库 " + available);
           return goods;
         });
@@ -172,18 +194,21 @@ window.M_PAGES["scan"] = function () {
     });
   }
   function confirmQuickScan() {
-    if (quick.scanning || !quickLocationReady()) return;
+    if (quick.scanning || quick.submitting || !quickLocationReady()) return;
     var rows = Object.keys(quick.rows).map(function (key) { return quick.rows[key]; });
     if (!rows.length) return feedback(false, "请先扫码添加货物");
-    elQuickConfirm.disabled = true;
-    var w = M.AUTH.currentWarehouse();
-    var items = rows.map(function (row) { return { goods_barcode: row.barcode, location_code: quick.location, quantity: row.quantity }; });
-    M.api("POST", "/inventory/batch", { type: quick.type, items: items }, { headers: { "Idempotency-Key": quick.requestKey || newRequestKey() } })
+    var requestKey = quick.requestKey || newRequestKey();
+    quick.requestKey = requestKey;
+    quick.submitting = true;
+    renderQuickRows();
+    var items = rows.map(function (row) { return { goods_barcode: row.barcode, location_code: row.location, quantity: row.quantity }; });
+    M.api("POST", "/inventory/batch", { type: quick.type, items: items }, { headers: { "Idempotency-Key": requestKey } })
       .then(function (res) {
         elQuickResult.innerHTML = '<div class="m-text-ok">' + M.esc(res.message || "提交成功") + '：' + M.esc(res.order_no || "") + '</div>';
         feedback(true, "整单提交成功");
-        quick.rows = {}; quick.requestKey = null; renderQuickRows();
-      }).catch(function (err) { feedback(false, err.message || "提交失败，整单未提交"); elQuickConfirm.disabled = false; });
+        quick.rows = {}; quick.requestKey = null; quick.lastAcceptedCode = null; quick.lastAcceptedAt = 0;
+      }).catch(function (err) { feedback(false, err.message || "提交失败，整单未提交"); })
+      .then(function () { quick.submitting = false; renderQuickRows(); });
   }
 
   function setType(t) {
@@ -303,6 +328,9 @@ window.M_PAGES["scan"] = function () {
       elLocOptions.innerHTML = "";
       refreshStock();
     } else if (where === "quick-location") {
+      if ((Object.keys(quick.rows).length || quick.submitting) && code !== quick.location) {
+        return feedback(false, "已有扫描清单，不能更换库位；请先清空清单");
+      }
       elQuickLocation.value = code;
       quick.location = code;
       renderQuickRows();
