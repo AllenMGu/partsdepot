@@ -17,10 +17,11 @@ window.M_PAGES["stock"] = function () {
 
   function loadStock() {
     elList.innerHTML = '<div class="m-empty">加载中…</div>';
-    // 按当前仓库查询（API 过滤，不拉全量再前端猜）
+    // 只按当前仓库查询；关键字筛选基于完整快照，便于清空后恢复列表。
     var w = M.AUTH.currentWarehouse();
-    var wh = (w && w.id) ? "?warehouse_id=" + w.id : "";
-    M.api("GET", "/stock/" + wh).then(function (rows) {
+    var params = [];
+    if (w && w.id) params.push("warehouse_id=" + encodeURIComponent(w.id));
+    M.api("GET", "/stock/" + (params.length ? "?" + params.join("&") : "")).then(function (rows) {
       rawList = rows || [];
       elCount.textContent = "共 " + rawList.length + " 条";
       applyFilter();
@@ -28,6 +29,14 @@ window.M_PAGES["stock"] = function () {
       elList.innerHTML = '<div class="m-empty">' + M.esc(err.message || "加载失败") + "</div>";
     });
   }
+
+  window.M_ACTIONS["stockScan"] = function () {
+    M.scanCode(function (code) {
+      elKw.value = String(code || "").trim();
+      // 保留完整库存快照，搜索框清空后才能恢复全量列表。
+      loadStock();
+    });
+  };
 
   function applyFilter() {
     var kw = (elKw.value || "").trim().toLowerCase();
@@ -57,5 +66,6 @@ window.M_PAGES["stock"] = function () {
     }).join("");
   }
 
-  window.M_ACTIONS["stockRefresh"] = loadStock;
+  // 全局 data-act 事件会把按钮 DOM 作为第一个参数传入，不能直接绑定 loadStock。
+  window.M_ACTIONS["stockRefresh"] = function () { loadStock(); };
 };

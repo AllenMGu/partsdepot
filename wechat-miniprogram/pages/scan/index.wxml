@@ -8,6 +8,27 @@
   </view>
 
   <view class="card" wx:if="{{mode==='inventory'}}">
+    <view class="subtitle" style="margin-bottom: 8rpx;">快速连续扫码</view>
+    <view class="row">
+      <button class="{{quickType==='入库' ? 'btn-primary' : 'btn-ghost'}}" size="mini" data-type="入库" bindtap="setQuickType" disabled="{{quickLoading || quickUnknown}}">入库</button>
+      <button class="{{quickType==='出库' ? 'btn-primary' : 'btn-ghost'}}" size="mini" data-type="出库" bindtap="setQuickType" disabled="{{quickLoading || quickUnknown}}">出库</button>
+    </view>
+    <input class="input" placeholder="输入或扫码库位" value="{{quickLocation}}" bindinput="onQuickLocationInput" disabled="{{quickLoading || quickScanning || quickUnknown}}" />
+    <button class="btn-ghost" size="mini" bindtap="scanQuickLocation" disabled="{{quickLoading || quickScanning || quickUnknown || quickRows.length}}">扫码库位</button>
+    <button class="btn-primary" loading="{{quickScanning}}" bindtap="toggleQuickScan" disabled="{{quickLoading || quickUnknown}}">{{quickScanning ? '停止连续扫码' : '开始连续扫码'}}</button>
+    <view class="subtitle" wx:if="{{quickRows.length}}" style="margin-top: 10rpx;">已扫描 {{quickRows.length}} 种货物</view>
+    <view class="order-item" wx:for="{{quickRows}}" wx:key="goods_barcode">
+      <view class="row"><view><view>{{item.goods_name}}</view><view class="subtitle">{{item.goods_barcode}} · {{item.location_code}}</view></view><text>×{{item.quantity}}</text></view>
+      <view class="row" style="margin-top: 6rpx;">
+        <button class="btn-ghost" size="mini" data-index="{{index}}" data-delta="-1" bindtap="changeQuickQuantity" disabled="{{quickLoading || quickUnknown}}">−</button>
+        <button class="btn-ghost" size="mini" data-index="{{index}}" data-delta="1" bindtap="changeQuickQuantity" disabled="{{quickLoading || quickUnknown}}">+</button>
+      </view>
+    </view>
+    <view class="row" style="margin-bottom: 16rpx;" wx:if="{{quickRows.length}}">
+      <button class="btn-ghost" size="mini" bindtap="clearQuickRows" disabled="{{quickScanning || quickLoading || quickUnknown}}">清空</button>
+      <button class="btn-primary" size="mini" loading="{{quickLoading}}" bindtap="confirmQuickScan" disabled="{{quickLoading}}">{{quickUnknown ? '重试原清单' : '确认' + quickType}}</button>
+    </view>
+
     <picker mode="selector" range="{{invTypes}}" range-key="label" bindchange="onTypeChange">
       <view class="type-selector">
         <text>{{labels.type}}</text>

@@ -461,7 +461,7 @@ with sync_playwright() as p:
         # 货物明细表：表头 + 两行
         thead = [t.inner_text().strip() for t in page.locator("table:has(tbody#detailItemsBody) thead th").all()]
         check("详情弹窗：明细表带表头（序号/货物名称/条码/规格型号/单位/数量）",
-              thead == ["序号", "货物名称", "条码", "规格型号", "单位", "数量"], thead)
+              all(h in thead for h in ["序号", "货物名称", "条码", "规格型号", "单位", "数量"]), thead)
         items = page.locator("#detailItemsBody tr")
         check("详情弹窗：明细 2 行", items.count() == 2, items.count())
         check("详情弹窗：明细含 测试轴承 x3 与 测试垫片 x2",

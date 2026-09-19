@@ -166,6 +166,7 @@ function api(method, path, body, opts) {
   opts = opts || {};
   var headers = {};
   if (body != null) headers["content-type"] = "application/json";
+  Object.keys(opts.headers || {}).forEach(function (k) { headers[k] = opts.headers[k]; });
   var url = /^https?:/.test(path) ? path : API_BASE + path;
   return fetch(url, {
     method: method,
@@ -275,7 +276,7 @@ function modal(opts) {
 }
 
 /* 手动输入编码弹窗（扫码回退 / 扫码枪场景） */
-function promptCode(title, placeholder, onCode) {
+function promptCode(title, placeholder, onCode, onCancel) {
   var inp = document.createElement("input");
   inp.type = "text";
   inp.autocomplete = "off";
@@ -284,7 +285,10 @@ function promptCode(title, placeholder, onCode) {
   var m = modal({
     title: title || "输入编码",
     buttons: [
-      { label: "取消", kind: "ghost" },
+      { label: "取消", kind: "ghost", onClick: function (close) {
+          if (onCancel) onCancel();
+          close();
+        } },
       { label: "确定", kind: "primary", onClick: function (close) {
           var v = inp.value.trim();
           if (!v) { toast("请输入编码", "err"); inp.focus(); return; }
@@ -299,16 +303,62 @@ function promptCode(title, placeholder, onCode) {
 }
 
 /* 相机扫码：优先 BarcodeDetector；不可用则回退手动输入 */
-function scanCode(onCode) {
+function scanCode(onCode, options) {
+  options = options || {};
+  var continuous = !!options.continuous;
+  var cancelled = false;
+  var fallbackModal = null;
+  var stream = null, timer = null, mask = null, video = null;
+
+  function cleanupCamera() {
+    if (timer) { clearInterval(timer); timer = null; }
+    if (stream) { stream.getTracks().forEach(function (tr) { tr.stop(); }); stream = null; }
+    if (video && video.srcObject) video.srcObject = null;
+    if (mask && mask.parentNode) mask.parentNode.removeChild(mask);
+    mask = null;
+    video = null;
+  }
+
+  function cancel() {
+    if (cancelled) return;
+    cancelled = true;
+    stopped = true;
+    cleanupCamera();
+    if (fallbackModal) { fallbackModal.close(); fallbackModal = null; }
+    if (options.onCancel) options.onCancel();
+  }
+
+  function openManualInput() {
+    if (cancelled) return;
+    fallbackModal = promptCode(
+      "摄像头不可用，请手工输入条码",
+      "扫码枪扫描或手动输入",
+      function (code) {
+        fallbackModal = null;
+        if (cancelled) return;
+        function deliver() {
+          if (cancelled) return;
+          // 连续扫码页面可能正在等待上一个条码的网络校验；保留本次输入，
+          // 待消费者解除 busy 后再交付，避免手工扫码枪输入被吞掉。
+          var accepted = onCode(code);
+          if (continuous && accepted === false) return setTimeout(deliver, 120);
+          if (continuous && !cancelled) setTimeout(openManualInput, 0);
+        }
+        deliver();
+      },
+      cancel
+    );
+  }
+
   var insecure = !window.isSecureContext;
   var canCamera = !!(window.BarcodeDetector && navigator.mediaDevices &&
     navigator.mediaDevices.getUserMedia) &&
     (!insecure || location.hostname === "localhost" || location.hostname === "127.0.0.1");
   if (!canCamera) {
-    promptCode("扫码", "扫码枪扫描或手动输入", onCode);
-    return;
+    openManualInput();
+    return { cancel: cancel };
   }
-  var mask = document.createElement("div");
+  mask = document.createElement("div");
   mask.className = "m-modal-mask";
   var box = document.createElement("div");
   box.className = "m-modal";
@@ -326,44 +376,69 @@ function scanCode(onCode) {
   mask.appendChild(box);
   document.body.appendChild(mask);
 
-  var video = $("#mScanVideo", box);
-  var stream = null, timer = null, stopped = false;
+  video = $("#mScanVideo", box);
+  var stopped = false;
+  var blockedCode = null;
+  var blockedMisses = 0;
 
-  function stop() {
+  function stopOneShot() {
     if (stopped) return;
     stopped = true;
-    if (timer) clearInterval(timer);
-    if (stream) stream.getTracks().forEach(function (tr) { tr.stop(); });
-    if (video && video.srcObject) video.srcObject = null;
-    if (mask.parentNode) mask.parentNode.removeChild(mask);
+    cleanupCamera();
   }
-  btnCancel.addEventListener("click", stop);
+  btnCancel.addEventListener("click", cancel);
 
   navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })
     .then(function (s) {
+      if (cancelled || stopped) {
+        s.getTracks().forEach(function (tr) { tr.stop(); });
+        return Promise.reject(new Error("scan cancelled"));
+      }
       stream = s;
       video.srcObject = s;
       return video.play();
     })
     .then(function () {
+      if (cancelled || stopped) return;
       var detector = new window.BarcodeDetector({
         formats: ["ean_13", "ean_8", "upc_a", "code_128", "code_39", "qr_code", "data_matrix"]
       });
       timer = setInterval(function () {
         if (stopped || !video.videoWidth) return;
         detector.detect(video).then(function (codes) {
-          if (stopped || !codes || !codes.length) return;
+          if (stopped) return;
+          if (!codes || !codes.length) {
+            if (continuous && blockedCode && ++blockedMisses >= 2) {
+              blockedCode = null;
+              blockedMisses = 0;
+            }
+            return;
+          }
           var code = codes[0].rawValue || "";
           if (!code) return;
-          stop();
+          if (continuous) {
+            if (blockedCode === code) {
+              blockedMisses = 0;
+              return;
+            }
+            // 回调返回 false 表示业务仍在处理，保持相机中的条码未消费，
+            // 避免第二件货物在网络校验期间被吞掉。
+            if (onCode(code) !== false) {
+              blockedCode = code;
+              blockedMisses = 0;
+            }
+            return;
+          }
+          stopOneShot();
           onCode(code);
         }).catch(function () { /* 单帧失败忽略，继续尝试 */ });
       }, 400);
     })
     .catch(function () {
-      stop();
-      promptCode("扫码（相机不可用）", "扫码枪扫描或手动输入", onCode);
+      stopOneShot();
+      openManualInput();
     });
+  return { cancel: cancel };
 }
 
 /* ---------------- 页面 UI 骨架 ---------------- */

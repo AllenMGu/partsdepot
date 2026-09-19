@@ -28,6 +28,22 @@ window.M_PAGES["scan"] = function () {
   var elStock = document.getElementById("mScanStock");
   var elResult = document.getElementById("mScanResult");
 
+  var quick = {
+    type: "入库", location: "", rows: {}, scanning: false,
+    callbackBusy: false, scanner: null, submitting: false, unknown: false,
+    requestKey: null, pendingPayload: null,
+    lastAcceptedCode: null, lastAcceptedAt: 0, scanGeneration: 0
+  };
+  var elQuickTypeIn = document.getElementById("mQuickTypeIn");
+  var elQuickTypeOut = document.getElementById("mQuickTypeOut");
+  var elQuickLocation = document.getElementById("mQuickLocation");
+  var elQuickStart = document.getElementById("mQuickStartBtn");
+  var elQuickClear = document.getElementById("mQuickClearBtn");
+  var elQuickConfirm = document.getElementById("mQuickConfirmBtn");
+  var elQuickList = document.getElementById("mQuickList");
+  var elQuickSummary = document.getElementById("mQuickSummary");
+  var elQuickResult = document.getElementById("mQuickResult");
+
   elType1.addEventListener("click", function () { setType("入库"); });
   elType2.addEventListener("click", function () { setType("出库"); });
   elBarcode.addEventListener("input", function () {
@@ -50,6 +66,200 @@ window.M_PAGES["scan"] = function () {
 
   setType("入库");
   loadLocations();
+  elQuickTypeIn.addEventListener("click", function () { setQuickType("入库"); });
+  elQuickTypeOut.addEventListener("click", function () { setQuickType("出库"); });
+  elQuickLocation.addEventListener("input", function () {
+    var next = elQuickLocation.value.trim();
+    if ((Object.keys(quick.rows).length || quick.submitting || quick.unknown) && next !== quick.location) {
+      elQuickLocation.value = quick.location;
+      return feedback(false, quick.unknown ? "提交结果未知，请先用原清单重试" : "已有扫描清单，不能更换库位；请先清空清单");
+    }
+    quick.location = next;
+  });
+  elQuickStart.addEventListener("click", toggleQuickScan);
+  elQuickClear.addEventListener("click", clearQuickRows);
+  elQuickConfirm.addEventListener("click", confirmQuickScan);
+  elQuickList.addEventListener("click", function (e) {
+    var btn = e.target.closest ? e.target.closest("[data-quick-action]") : null;
+    if (!btn) return;
+    var key = btn.getAttribute("data-key");
+    var row = quick.rows[key];
+    if (!row || quick.submitting || quick.unknown) return;
+    if (btn.getAttribute("data-quick-action") === "plus") row.quantity += 1;
+    if (btn.getAttribute("data-quick-action") === "minus") row.quantity -= 1;
+    if (btn.getAttribute("data-quick-action") === "delete" || row.quantity <= 0) delete quick.rows[key];
+    renderQuickRows();
+  });
+
+  function setQuickType(t) {
+    if (quick.scanning) return M.toast("请先停止连续扫码", "err");
+    if (quick.unknown) return M.toast("提交结果未知，请先用原清单重试", "err");
+    if (quick.submitting || Object.keys(quick.rows).length) return M.toast("已有扫描清单，请先提交或清空", "err");
+    quick.type = t;
+    elQuickTypeIn.classList.toggle("on", t === "入库");
+    elQuickTypeOut.classList.toggle("on", t === "出库");
+    elQuickConfirm.textContent = t === "入库" ? "确认入库" : "确认出库";
+  }
+
+  function quickKey(barcode, location) { return barcode + "|" + location; }
+  function newRequestKey() {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    return "h5-" + Date.now() + "-" + Math.random().toString(16).slice(2);
+  }
+  function renderQuickRows() {
+    var rows = Object.keys(quick.rows).map(function (key) { return quick.rows[key]; });
+    var total = rows.reduce(function (sum, row) { return sum + row.quantity; }, 0);
+    elQuickSummary.textContent = rows.length ? ("已扫描 " + total + " 件 · " + rows.length + " 种") : (quick.scanning ? "等待扫码…" : "尚未开始");
+    elQuickClear.disabled = !rows.length || quick.scanning || quick.submitting || quick.unknown;
+    elQuickConfirm.disabled = !rows.length || quick.scanning || quick.submitting;
+    elQuickConfirm.textContent = quick.unknown ? "重试原清单" : (quick.type === "入库" ? "确认入库" : "确认出库");
+    elQuickStart.disabled = quick.submitting || quick.unknown;
+    elQuickLocation.disabled = quick.scanning || quick.submitting || quick.unknown;
+    elQuickList.innerHTML = rows.map(function (row) {
+      var key = M.esc(quickKey(row.barcode, row.location));
+      var disabled = quick.submitting || quick.unknown ? " disabled" : "";
+      return '<div class="m-item"><div class="m-row between">' +
+        '<div class="m-grow"><div class="m-item-title">' + M.esc(row.name || row.barcode) + '</div>' +
+        '<div class="m-item-sub m-mono">' + M.esc(row.barcode) + ' · ' + M.esc(row.location) + '</div></div>' +
+        '<div class="m-row" style="gap:6px;"><button type="button" class="m-btn m-btn-ghost m-btn-sm" data-quick-action="minus" data-key="' + key + '"' + disabled + '>−</button>' +
+        '<strong class="m-mono">' + M.esc(row.quantity) + '</strong>' +
+        '<button type="button" class="m-btn m-btn-ghost m-btn-sm" data-quick-action="plus" data-key="' + key + '"' + disabled + '>+</button>' +
+        '<button type="button" class="m-btn m-btn-danger m-btn-sm" data-quick-action="delete" data-key="' + key + '"' + disabled + '>删</button></div></div></div>';
+    }).join("");
+  }
+  function clearQuickRows() {
+    if (quick.unknown) return feedback(false, "提交结果未知，请先用原清单重试");
+    if (!quick.scanning && !quick.submitting) {
+      quick.rows = {}; quick.requestKey = null; quick.pendingPayload = null; quick.lastAcceptedCode = null; quick.lastAcceptedAt = 0;
+      elQuickResult.innerHTML = ""; renderQuickRows();
+    }
+  }
+  function feedback(ok, message) {
+    if (navigator.vibrate) navigator.vibrate(ok ? 45 : [40, 50, 40]);
+    M.toast(message, ok ? "ok" : "err");
+  }
+  function quickLocationReady() {
+    var w = M.AUTH.currentWarehouse();
+    if (!w || !w.id) { feedback(false, "请先选择当前仓库"); return false; }
+    if (!quick.location) { feedback(false, "请先填写库位"); return false; }
+    if (state.locationsLoaded && !state.locations.some(function (l) { return l.location_code === quick.location; })) {
+      feedback(false, "库位不属于当前仓库"); return false;
+    }
+    return true;
+  }
+  function toggleQuickScan() {
+    if (quick.submitting) return M.toast("正在提交，请稍候", "err");
+    if (quick.unknown) return M.toast("提交结果未知，请先用原清单重试", "err");
+    if (quick.scanning) {
+      quick.scanning = false;
+      quick.scanGeneration += 1;
+      quick.callbackBusy = false;
+      var scanner = quick.scanner;
+      quick.scanner = null;
+      if (scanner) scanner.cancel();
+      elQuickStart.textContent = "继续连续扫码";
+      renderQuickRows();
+      return;
+    }
+    if (!quickLocationReady()) return;
+    quick.scanGeneration += 1;
+    var generation = quick.scanGeneration;
+    quick.scanning = true;
+    if (!quick.requestKey) quick.requestKey = newRequestKey();
+    elQuickStart.textContent = "停止扫码";
+    renderQuickRows();
+    quickScanNext(generation);
+  }
+  function quickScanNext(generation) {
+    if (!quick.scanning || generation !== quick.scanGeneration || quick.scanner) return;
+    quick.scanner = M.scanCode(function (code) {
+      if (!quick.scanning || generation !== quick.scanGeneration || quick.submitting || quick.unknown || quick.callbackBusy) return false;
+      quick.callbackBusy = true;
+      var location = quick.location;
+      validateQuickBarcode(String(code || "").trim(), location).then(function (goods) {
+        if (!quick.scanning || generation !== quick.scanGeneration || quick.unknown) return;
+        var key = quickKey(goods.barcode, location);
+        if (!quick.rows[key]) quick.rows[key] = { barcode: goods.barcode, name: goods.name, location: location, quantity: 0 };
+        quick.rows[key].quantity += 1;
+        feedback(true, goods.name || goods.barcode);
+        renderQuickRows();
+      }).catch(function (err) {
+        if (!quick.scanning || generation !== quick.scanGeneration) return;
+        feedback(false, err.message || ("未找到该货物：" + code));
+      }).then(function () {
+        if (generation !== quick.scanGeneration) return;
+        quick.callbackBusy = false;
+        renderQuickRows();
+      });
+      return true;
+    }, { continuous: true, onCancel: function () {
+      if (generation !== quick.scanGeneration) return;
+      quick.scanner = null;
+      quick.scanning = false;
+      quick.callbackBusy = false;
+      elQuickStart.textContent = "继续连续扫码";
+      renderQuickRows();
+    } });
+  }
+  function validateQuickBarcode(code, location) {
+    if (!code) return Promise.reject(new Error("未读取到条码"));
+    return M.api("GET", "/goods/?keyword=" + encodeURIComponent(code)).then(function (rows) {
+      var goods = (rows || []).filter(function (g) { return g.barcode === code; })[0];
+      if (!goods) throw new Error("未找到该货物：" + code);
+      if (quick.type === "出库") {
+        var w = M.AUTH.currentWarehouse();
+        return M.api("GET", "/stock/?warehouse_id=" + w.id + "&goods_barcode=" + encodeURIComponent(code)).then(function (stocks) {
+          var available = (stocks || []).filter(function (s) { return s.location_code === location; }).reduce(function (sum, s) { return sum + Number(s.quantity || 0); }, 0);
+          var key = quickKey(code, location), already = quick.rows[key] ? quick.rows[key].quantity : 0;
+          if (available <= already) throw new Error("库存不足：" + goods.name + " 当前可出库 " + available);
+          return goods;
+        });
+      }
+      return goods;
+    });
+  }
+  function confirmQuickScan() {
+    if (quick.scanning || quick.submitting) return;
+    var requestKey, payload;
+    if (quick.unknown) {
+      requestKey = quick.requestKey;
+      payload = quick.pendingPayload;
+      if (!requestKey || !payload) return feedback(false, "原提交信息已丢失，请联系管理员确认库存后再操作");
+    } else {
+      if (!quickLocationReady()) return;
+      var rows = Object.keys(quick.rows).map(function (key) { return quick.rows[key]; });
+      if (!rows.length) return feedback(false, "请先扫码添加货物");
+      requestKey = quick.requestKey || newRequestKey();
+      payload = {
+        type: quick.type,
+        items: rows.map(function (row) { return { goods_barcode: row.barcode, location_code: row.location, quantity: row.quantity }; })
+      };
+      quick.requestKey = requestKey;
+      quick.pendingPayload = payload;
+    }
+    quick.submitting = true;
+    renderQuickRows();
+    M.api("POST", "/inventory/batch", payload, { headers: { "Idempotency-Key": requestKey } })
+      .then(function (res) {
+        elQuickResult.innerHTML = '<div class="m-text-ok">' + M.esc(res.message || "提交成功") + '：' + M.esc(res.order_no || "") + '</div>';
+        feedback(true, "整单提交成功");
+        quick.rows = {}; quick.requestKey = null; quick.pendingPayload = null; quick.unknown = false;
+        quick.lastAcceptedCode = null; quick.lastAcceptedAt = 0;
+      }).catch(function (err) {
+        if (err && (err.status == null || err.status >= 500)) {
+          quick.unknown = true;
+          quick.requestKey = requestKey;
+          quick.pendingPayload = payload;
+          feedback(false, "提交结果未知，请勿清空或修改，使用原清单重试");
+        } else {
+          quick.unknown = false;
+          quick.requestKey = null;
+          quick.pendingPayload = null;
+          feedback(false, err.message || "提交失败，整单未提交");
+        }
+      })
+      .then(function () { quick.submitting = false; renderQuickRows(); });
+  }
 
   function setType(t) {
     state.type = t;
@@ -167,6 +377,13 @@ window.M_PAGES["scan"] = function () {
       state.locationCode = code;
       elLocOptions.innerHTML = "";
       refreshStock();
+    } else if (where === "quick-location") {
+      if ((Object.keys(quick.rows).length || quick.submitting || quick.unknown) && code !== quick.location) {
+        return feedback(false, "已有扫描清单，不能更换库位；请先清空清单");
+      }
+      elQuickLocation.value = code;
+      quick.location = code;
+      renderQuickRows();
     }
   };
 };

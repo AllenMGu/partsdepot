@@ -61,6 +61,16 @@ Page({
     showLocationDropdown: false,
     currentStock: "0.00",
     inventory: { goods_barcode: "", location_code: "", quantity: "", remark: "" },
+    quickType: "入库",
+    quickLocation: "",
+    quickRows: [],
+    quickScanning: false,
+    quickCallbackBusy: false,
+    quickLoading: false,
+    quickUnknown: false,
+    quickPendingPayload: null,
+    quickRequestId: "",
+    quickScanGeneration: 0,
 
     checkOrders: [],
     checkOrder: null,
@@ -135,6 +145,159 @@ Page({
   },
   onQuantityInput(e) { this.setData({ "inventory.quantity": e.detail.value.trim() }); },
   onRemarkInput(e) { this.setData({ "inventory.remark": e.detail.value }); },
+
+  onQuickLocationInput(e) {
+    const location = e.detail.value.trim();
+    if ((this.data.quickScanning || this.data.quickRows.length || this.data.quickUnknown) && location !== this.data.quickLocation) {
+      wx.showToast({ title: this.data.quickUnknown ? "提交结果未知，请先用原清单重试" : "请先清空扫码明细", icon: "none" });
+      return;
+    }
+    if (this.data.quickLoading) return;
+    this.setData({ quickLocation: location });
+  },
+  scanQuickLocation() {
+    if (this.data.quickLoading || this.data.quickScanning || this.data.quickRows.length) {
+      wx.showToast({ title: "请先完成或清空当前明细", icon: "none" });
+      return;
+    }
+    this.scanCode((code) => this.setData({ quickLocation: String(code || "").trim() }));
+  },
+  setQuickType(e) {
+    if (this.data.quickScanning || this.data.quickLoading || this.data.quickRows.length || this.data.quickUnknown) {
+      return wx.showToast({ title: "请先完成或清空当前明细", icon: "none" });
+    }
+    this.setData({ quickType: e.currentTarget.dataset.type });
+  },
+  quickKey(row) { return `${row.goods_barcode}|${row.location_code}`; },
+  newQuickRequestId() { return `wx-${Date.now()}-${Math.random().toString(16).slice(2)}`; },
+  quickFeedback(ok, title) {
+    wx.vibrateShort({ type: ok ? "light" : "heavy" });
+    wx.showToast({ title, icon: ok ? "success" : "none" });
+  },
+  toggleQuickScan() {
+    if (this.data.quickLoading || this.data.quickUnknown) return;
+    if (this.data.quickScanning) {
+      this.setData({
+        quickScanning: false,
+        quickCallbackBusy: false,
+        quickScanGeneration: this.data.quickScanGeneration + 1
+      });
+      return;
+    }
+    const code = this.data.quickLocation;
+    const validLocation = (this.data.warehouseLocations || []).some((l) => l.location_code === code);
+    if (!code || !validLocation) return wx.showToast({ title: "请先选择当前仓库的库位", icon: "none" });
+    const generation = this.data.quickScanGeneration + 1;
+    this.setData({
+      quickScanning: true,
+      quickScanGeneration: generation,
+      quickRequestId: this.data.quickRequestId || this.newQuickRequestId(),
+    }, () => this.scanNextQuick(generation));
+  },
+  scanNextQuick(generation) {
+    if (!this.data.quickScanning || generation !== this.data.quickScanGeneration || this.data.quickCallbackBusy) return;
+    const location = this.data.quickLocation;
+    this.setData({ quickCallbackBusy: true });
+    this.scanCode((code) => {
+      if (!this.data.quickScanning || generation !== this.data.quickScanGeneration) return;
+      this.validateQuickBarcode(code, location).then((goods) => {
+        if (!this.data.quickScanning || generation !== this.data.quickScanGeneration || this.data.quickUnknown) return;
+        const rows = (this.data.quickRows || []).slice();
+        const index = rows.findIndex((row) => row.goods_barcode === goods.barcode && row.location_code === location);
+        if (index >= 0) rows[index].quantity += 1;
+        else rows.push({ goods_barcode: goods.barcode, goods_name: goods.name, location_code: location, quantity: 1 });
+        this.quickFeedback(true, goods.name || goods.barcode);
+        this.setData({ quickRows: rows });
+      }).catch((err) => {
+        if (this.data.quickScanning && generation === this.data.quickScanGeneration) {
+          this.quickFeedback(false, err.message || `未找到该货物：${code}`);
+        }
+      })
+        .then(() => {
+          if (generation !== this.data.quickScanGeneration) return;
+          this.setData({ quickCallbackBusy: false });
+          if (this.data.quickScanning) setTimeout(() => this.scanNextQuick(generation), 80);
+        });
+    }, () => {
+      if (generation !== this.data.quickScanGeneration) return;
+      this.setData({
+        quickCallbackBusy: false,
+        quickScanning: false,
+        quickScanGeneration: generation + 1
+      });
+      wx.showToast({ title: "扫码已取消，连续扫码已停止", icon: "none" });
+    });
+  },
+  async validateQuickBarcode(code, location) {
+    const value = String(code || "").trim();
+    if (!value) throw new Error("未读取到条码");
+    const goodsList = await request({ url: "/goods/", data: { keyword: value } });
+    const goods = (goodsList || []).find((item) => item.barcode === value);
+    if (!goods) throw new Error(`未找到该货物：${value}`);
+    if (this.data.quickType === "出库") {
+      const user = getUser() || {};
+      const stocks = await request({ url: "/stock/", data: { warehouse_id: user.current_warehouse_id, goods_barcode: value } });
+      const available = (stocks || []).filter((row) => row.location_code === location)
+        .reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+      const current = (this.data.quickRows || []).find((row) => row.goods_barcode === value && row.location_code === location);
+      if (available <= Number(current && current.quantity || 0)) throw new Error(`库存不足：${goods.name} 当前可出库 ${available}`);
+    }
+    return goods;
+  },
+  changeQuickQuantity(e) {
+    if (this.data.quickLoading || this.data.quickUnknown) return;
+    const index = Number(e.currentTarget.dataset.index);
+    const delta = Number(e.currentTarget.dataset.delta);
+    const rows = (this.data.quickRows || []).slice();
+    if (!rows[index]) return;
+    rows[index].quantity += delta;
+    if (rows[index].quantity <= 0) rows.splice(index, 1);
+    this.setData({ quickRows: rows });
+  },
+  clearQuickRows() {
+    if (this.data.quickUnknown) {
+      return wx.showToast({ title: "提交结果未知，请先用原清单重试", icon: "none" });
+    }
+    if (!this.data.quickScanning && !this.data.quickLoading) {
+      this.setData({ quickRows: [], quickRequestId: "", quickPendingPayload: null });
+    }
+  },
+  async confirmQuickScan() {
+    if (this.data.quickScanning || this.data.quickLoading) return;
+    let requestId;
+    let payload;
+    if (this.data.quickUnknown) {
+      requestId = this.data.quickRequestId;
+      payload = this.data.quickPendingPayload;
+      if (!requestId || !payload) return wx.showToast({ title: "原提交信息已丢失，请联系管理员确认库存", icon: "none" });
+    } else {
+      const rows = this.data.quickRows || [];
+      if (!rows.length) return wx.showToast({ title: "请先扫码添加货物", icon: "none" });
+      requestId = this.data.quickRequestId || this.newQuickRequestId();
+      payload = {
+        type: this.data.quickType,
+        request_id: requestId,
+        items: rows.map((row) => ({ goods_barcode: row.goods_barcode, location_code: row.location_code, quantity: row.quantity }))
+      };
+    }
+    this.setData({ quickLoading: true, quickRequestId: requestId, quickPendingPayload: payload });
+    try {
+      const res = await request({
+        url: "/inventory/batch", method: "POST",
+        data: payload
+      });
+      this.quickFeedback(true, "整单提交成功");
+      this.setData({ quickRows: [], quickRequestId: "", quickUnknown: false, quickPendingPayload: null, result: `${res.message}：${res.order_no}` });
+    } catch (err) {
+      if (err && (err.status == null || err.status >= 500)) {
+        this.setData({ quickUnknown: true, quickRequestId: requestId, quickPendingPayload: payload });
+        this.quickFeedback(false, "提交结果未知，请勿清空或修改，使用原清单重试");
+      } else {
+        this.setData({ quickUnknown: false, quickRequestId: "", quickPendingPayload: null });
+        this.quickFeedback(false, err.message || "提交失败，整单未提交");
+      }
+    } finally { this.setData({ quickLoading: false }); }
+  },
 
   scanGoodsCode() { this.scanCode((code) => this.setData({ "inventory.goods_barcode": code }, () => this.refreshCurrentStock())); },
   scanLocationCode() { this.scanCode((code) => this.setData({ "inventory.location_code": code }, () => { this.filterLocationOptions(code); this.refreshCurrentStock(); })); },
@@ -250,8 +413,15 @@ Page({
   scanCheckGoodsCode() { this.scanCode((code) => this.setData({ "checkForm.goods_barcode": code }, () => this.validateCheckGoodsAndStock())); },
   scanCheckLocationCode() { this.scanCode((code) => this.setData({ "checkForm.location_code": code }, () => this.validateCheckLocationAndStock())); },
 
-  scanCode(onSuccess) {
-    wx.scanCode({ onlyFromCamera: false, success: (res) => onSuccess(res.result || ""), fail: () => wx.showToast({ title: "\u626b\u7801\u53d6\u6d88/\u5931\u8d25", icon: "none" }) });
+  scanCode(onSuccess, onCancel) {
+    wx.scanCode({
+      onlyFromCamera: false,
+      success: (res) => onSuccess(res.result || ""),
+      fail: () => {
+        if (onCancel) onCancel();
+        else wx.showToast({ title: "\u626b\u7801\u53d6\u6d88/\u5931\u8d25", icon: "none" });
+      }
+    });
   },
 
   validateCheckGoodsAndStock() {

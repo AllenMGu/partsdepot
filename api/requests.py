@@ -19,6 +19,7 @@
 - 上次归档时间记录在 config 表 request_archive_last_run，重启不丢失。
 """
 
+import json
 import logging
 import threading
 import time
@@ -32,13 +33,14 @@ from sqlalchemy.orm import Session
 
 from core.models import (
     Config, Goods, InventoryRecord, InventoryType, Request, RequestArchive,
-    RequestItem, RequestItemArchive, RequestStatus, Stock, User, UserRole, Warehouse,
+    RequestItem, RequestItemArchive, RequestItemAudit, RequestItemAuditArchive, RequestStatus, Stock, User, UserRole, Warehouse,
     OutboundOrderHeader, OutboundOrderItem,
 )
 from core.order_utils import generate_order_no, lock_stock_rows_for_goods
 from core.schemas import (
     PublicStockLookup,
     RequestArchiveResponse,
+    RequestItemEdit,
     RequestItemResponse,
     RequestResponse,
     RequestStatusUpdate,
@@ -392,10 +394,28 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
                 unit=it.unit,
                 quantity=it.quantity,
             ))
+        audits = (
+            db.query(RequestItemAudit)
+            .filter(RequestItemAudit.request_id == r.id)
+            .order_by(RequestItemAudit.id)
+            .all()
+        )
+        for audit in audits:
+            db.add(RequestItemAuditArchive(
+                archive_id=arc.id,
+                original_request_id=r.id,
+                request_item_id=audit.request_item_id,
+                operator_id=audit.operator_id,
+                action=audit.action,
+                before_json=audit.before_json,
+                after_json=audit.after_json,
+                create_time=audit.create_time,
+            ))
     # 只删除本次实际归档的行（按 id 精确删除，避免误伤并发新写入）。
-    # 先删活跃明细再删主表（评审 P1）：明细已复制到 request_items_archive，
-    # 显式删除保证不留孤儿行，不依赖数据库级联（SQLite 默认不启用外键）
+    # 先删活跃审计和明细再删主表：审计已复制到归档表，
+    # 显式删除保证 SQLite（默认不启用外键）不留下活跃孤儿审计行。
     _ids = [r.id for r in rows]
+    db.query(RequestItemAudit).filter(RequestItemAudit.request_id.in_(_ids)).delete(synchronize_session=False)
     db.query(RequestItem).filter(RequestItem.request_id.in_(_ids)).delete(synchronize_session=False)
     db.query(Request).filter(Request.id.in_(_ids)).delete(synchronize_session=False)
     _set_archive_last_run(db)
@@ -524,6 +544,198 @@ def _group_archive_items(db: Session, archive_ids: list) -> dict:
     for it in rows:
         grouped.setdefault(it.archive_id, []).append(it)
     return grouped
+
+def _item_snapshot(item: RequestItem) -> dict:
+    """统一的明细快照格式，供响应和审计使用。"""
+    return {
+        "id": item.id,
+        "barcode": item.barcode,
+        "name": item.name,
+        "spec": item.spec,
+        "unit": item.unit,
+        "quantity": item.quantity,
+    }
+
+def _resolve_request_item(db: Session, payload: RequestItemEdit):
+    barcode = payload.barcode.strip()
+    goods = db.query(Goods).filter(Goods.barcode == barcode).order_by(Goods.id).first()
+    if goods is None:
+        raise HTTPException(status_code=422, detail=f"货物不存在：{barcode}")
+    return goods
+
+def _lock_pending_request(db: Session, request_id: int) -> Request:
+    query = db.query(Request).filter(Request.id == request_id)
+    try:
+        query = query.with_for_update()
+    except Exception:
+        pass
+    req = query.first()
+    if req is None:
+        raise HTTPException(status_code=404, detail="申请单不存在（可能已归档，请到归档列表查看）")
+    if req.status != RequestStatus.PENDING.value:
+        raise HTTPException(status_code=409, detail="仅待处理申请单允许修改货物明细")
+    return req
+
+def _write_item_audit(db: Session, req: Request, item_id: Optional[int], action: str,
+                      before: Optional[dict], after: Optional[dict], current_user: User) -> None:
+    db.add(RequestItemAudit(
+        request_id=req.id,
+        request_item_id=item_id,
+        operator_id=current_user.id,
+        action=action,
+        before_json=json.dumps(before, ensure_ascii=False) if before is not None else None,
+        after_json=json.dumps(after, ensure_ascii=False) if after is not None else None,
+    ))
+
+@router.post("/requests/{id}/items", summary="为待处理申请单添加货物明细")
+def add_request_item(
+    id: int,
+    payload: RequestItemEdit,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    try:
+        req = _lock_pending_request(db, id)
+        goods = _resolve_request_item(db, payload)
+        max_sort = db.query(func.max(RequestItem.sort)).filter(RequestItem.request_id == req.id).scalar()
+        item = RequestItem(
+            request_id=req.id,
+            sort=(max_sort if max_sort is not None else -1) + 1,
+            barcode=goods.barcode,
+            name=goods.name,
+            spec=goods.spec,
+            unit=goods.unit,
+            quantity=payload.quantity,
+        )
+        db.add(item)
+        db.flush()
+        after = _item_snapshot(item)
+        _write_item_audit(db, req, item.id, "ADD_ITEM", None, after, current_user)
+        db.commit()
+        return after
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        logging.exception("添加申请单货物明细失败")
+        raise HTTPException(status_code=500, detail="添加申请单货物明细失败")
+
+@router.put("/requests/{id}/items/{item_id}", summary="修改待处理申请单货物明细")
+def update_request_item(
+    id: int,
+    item_id: int,
+    payload: RequestItemEdit,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    try:
+        req = _lock_pending_request(db, id)
+        item = db.query(RequestItem).filter(RequestItem.id == item_id, RequestItem.request_id == id).first()
+        if item is None:
+            raise HTTPException(status_code=404, detail="申请单货物明细不存在")
+        before = _item_snapshot(item)
+        goods = _resolve_request_item(db, payload)
+        item.barcode = goods.barcode
+        item.name = goods.name
+        item.spec = goods.spec
+        item.unit = goods.unit
+        item.quantity = payload.quantity
+        db.flush()
+        after = _item_snapshot(item)
+        _write_item_audit(db, req, item.id, "UPDATE_ITEM", before, after, current_user)
+        db.commit()
+        return after
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        logging.exception("修改申请单货物明细失败")
+        raise HTTPException(status_code=500, detail="修改申请单货物明细失败")
+
+@router.delete("/requests/{id}/items/{item_id}", summary="删除待处理申请单货物明细")
+def delete_request_item(
+    id: int,
+    item_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    try:
+        req = _lock_pending_request(db, id)
+        item = db.query(RequestItem).filter(RequestItem.id == item_id, RequestItem.request_id == id).first()
+        if item is None:
+            raise HTTPException(status_code=404, detail="申请单货物明细不存在")
+        before = _item_snapshot(item)
+        _write_item_audit(db, req, item.id, "DELETE_ITEM", before, None, current_user)
+        db.delete(item)
+        db.commit()
+        return {"message": "申请单货物明细删除成功"}
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        logging.exception("删除申请单货物明细失败")
+        raise HTTPException(status_code=500, detail="删除申请单货物明细失败")
+
+@router.get("/requests/{id}/item-audits", summary="查询申请单货物修改审计")
+def list_request_item_audits(
+    id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    if not db.query(Request).filter(Request.id == id).first():
+        raise HTTPException(status_code=404, detail="申请单不存在（可能已归档）")
+    rows = db.query(RequestItemAudit).filter(RequestItemAudit.request_id == id).order_by(RequestItemAudit.id.asc()).all()
+    return [
+        {
+            "id": row.id,
+            "request_id": row.request_id,
+            "request_item_id": row.request_item_id,
+            "operator_id": row.operator_id,
+            "action": row.action,
+            "before": json.loads(row.before_json) if row.before_json else None,
+            "after": json.loads(row.after_json) if row.after_json else None,
+            "create_time": row.create_time,
+        }
+        for row in rows
+    ]
+
+@router.get("/requests/archive/{original_id}/item-audits", summary="查询已归档申请单货物修改审计")
+def list_archived_request_item_audits(
+    original_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    archive = db.query(RequestArchive).filter(RequestArchive.original_id == original_id).first()
+    if archive is None:
+        raise HTTPException(status_code=404, detail="归档申请单不存在")
+    rows = (
+        db.query(RequestItemAuditArchive)
+        .filter(RequestItemAuditArchive.archive_id == archive.id)
+        .order_by(RequestItemAuditArchive.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "request_id": row.original_request_id,
+            "archive_id": row.archive_id,
+            "request_item_id": row.request_item_id,
+            "operator_id": row.operator_id,
+            "action": row.action,
+            "before": json.loads(row.before_json) if row.before_json else None,
+            "after": json.loads(row.after_json) if row.after_json else None,
+            "create_time": row.create_time,
+        }
+        for row in rows
+    ]
 
 @router.get("/requests/", response_model=List[RequestResponse], summary="近期申请单列表（管理员）")
 def list_requests(

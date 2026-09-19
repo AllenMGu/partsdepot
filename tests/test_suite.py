@@ -823,7 +823,65 @@ _ka = next((a for a in (arows or []) if isinstance(a, dict) and a.get("original_
 check("出库单：归档行保留 outbound_order_no（归档后详情仍可查）",
       isinstance(_ka, dict) and _ka.get("outbound_order_no") == _k_no, f"row={_ka}")
 
-# 15l. 前端静态守卫：所有页面禁止内联事件处理器（onclick= 等）
+# 15l. 本次需求：pending 申请单货物编辑 + 审计 + 批量连续扫码事务/幂等
+_HF = {"X-Real-IP": "8.8.8.101"}
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "货物编辑测试", "contact": "edit@test.com",
+    "description": "待处理申请单允许管理员补货", "warehouse_id": W1}, headers=_HF)
+_edit_id = (b or {}).get("id")
+check("申请编辑：空明细申请创建成功", s == 201 and _edit_id, f"status={s} body={b}")
+s, b = req("POST", f"/api/requests/{_edit_id}/items", {"barcode": "G001", "quantity": 2}, admin)
+_edit_item_id = (b or {}).get("id")
+check("申请编辑：pending 申请可添加货物", s == 200 and _edit_item_id and b.get("quantity") == 2, f"status={s} body={b}")
+s, b = req("PUT", f"/api/requests/{_edit_id}/items/{_edit_item_id}", {"barcode": "G001", "quantity": 3}, admin)
+check("申请编辑：pending 申请可修改数量/条码", s == 200 and abs((b or {}).get("quantity", 0) - 3) < 1e-6, f"status={s} body={b}")
+s, b = req("GET", f"/api/requests/{_edit_id}/item-audits", token=admin)
+check("申请编辑：新增/修改均生成审计记录", s == 200 and [x.get("action") for x in (b or [])] == ["ADD_ITEM", "UPDATE_ITEM"], f"status={s} body={b}")
+s, b = req("DELETE", f"/api/requests/{_edit_id}/items/{_edit_item_id}", token=admin)
+check("申请编辑：pending 申请可删除货物", s == 200, f"status={s} body={b}")
+s, b = req("POST", f"/api/requests/{_edit_id}/items", {"barcode": "G001", "quantity": 1}, op)
+check("申请编辑：无处理权限用户 → 403", s == 403, f"status={s} body={b}")
+s, b = req("POST", f"/api/requests/{_edit_id}/status", {"status": "approved"}, admin)
+check("申请编辑：空明细 pending 仍兼容通过", s == 200 and (b or {}).get("status") == "approved", f"status={s} body={b}")
+s, b = req("POST", f"/api/requests/{_edit_id}/items", {"barcode": "G001", "quantity": 1}, admin)
+check("申请编辑：approved 申请禁止修改 → 409", s == 409, f"status={s} body={b}")
+db_execute("update requests set create_time = :ts where id = :i", {"ts": _old, "i": _edit_id})
+s, b = req("POST", "/api/requests/archive-now", {}, admin)
+check("申请编辑：归档含审计的申请单成功", s == 200 and (b or {}).get("archived", 0) >= 1, f"status={s} body={b}")
+s, b = req("GET", f"/api/requests/archive/{_edit_id}/item-audits", token=admin)
+check("申请编辑：归档后仍可查询完整货物审计", s == 200 and [x.get("action") for x in (b or [])] == ["ADD_ITEM", "UPDATE_ITEM", "DELETE_ITEM"], f"status={s} body={b}")
+_active_audits = db_execute("SELECT COUNT(*) FROM request_item_audits WHERE request_id = :rid", {"rid": _edit_id})
+check("申请编辑：归档后活跃审计表无孤儿记录", bool(_active_audits) and _active_audits[0][0] == 0, f"active_audits={_active_audits}")
+
+_batch_before = _w1_g001_total()
+_batch_key = "test-batch-idempotency-001"
+_batch_body = {"type": "入库", "items": [{"goods_barcode": "G001", "location_code": "L1", "quantity": 2}], "remark": "连续扫码测试"}
+s, b = req("POST", "/api/inventory/batch", _batch_body, admin, headers={"Idempotency-Key": _batch_key})
+_batch_order_no = (b or {}).get("order_no")
+check("连续扫码：批量入库成功并返回单号", s == 200 and _batch_order_no and len((b or {}).get("items", [])) == 1, f"status={s} body={b}")
+check("连续扫码：批量入库库存增加 2", abs(_w1_g001_total() - _batch_before - 2) < 1e-6, f"before={_batch_before} after={_w1_g001_total()}")
+s, b2 = req("POST", "/api/inventory/batch", _batch_body, admin, headers={"Idempotency-Key": _batch_key})
+check("连续扫码：相同幂等键重试只返回原单", s == 200 and (b2 or {}).get("order_no") == _batch_order_no and abs(_w1_g001_total() - _batch_before - 2) < 1e-6, f"status={s} body={b2}")
+s, b = req("POST", "/api/inventory/batch", _batch_body, op, headers={"Idempotency-Key": _batch_key})
+check("连续扫码：其他操作员复用幂等键 → 409（不泄露原响应）", s == 409, f"status={s} body={b}")
+s, b = req("POST", "/api/inventory/batch", {
+    "type": "入库", "items": [{"goods_barcode": "G001", "location_code": "L1", "quantity": 3}], "remark": "连续扫码测试"
+}, admin, headers={"Idempotency-Key": _batch_key})
+check("连续扫码：同操作员复用幂等键但载荷不同 → 409", s == 409, f"status={s} body={b}")
+_atomic_before = _w1_g001_total()
+s, b = req("POST", "/api/inventory/batch", {
+    "type": "出库", "items": [
+        {"goods_barcode": "G001", "location_code": "L1", "quantity": 1},
+        {"goods_barcode": "G001", "location_code": "L1", "quantity": 999999},
+    ], "request_id": "test-batch-atomic-fail-001"}, admin)
+check("连续扫码：出库任一明细库存不足 → 整单 400", s == 400, f"status={s} body={b}")
+check("连续扫码：整单失败库存不变", abs(_w1_g001_total() - _atomic_before) < 1e-6, f"before={_atomic_before} after={_w1_g001_total()}")
+s, b = req("POST", "/api/inventory/batch", {
+    "type": "入库", "items": [{"goods_barcode": "NO-SUCH", "location_code": "L1", "quantity": 1}],
+    "request_id": "test-batch-unknown-001"}, admin)
+check("连续扫码：未知条码 → 404 且不产生单据", s == 404, f"status={s} body={b}")
+
+# 15m. 前端静态守卫：所有页面禁止内联事件处理器（onclick= 等）
 # 背景：页面 CSP 仅放行 self/CDN/内联脚本哈希，浏览器会直接拦截内联事件处理器
 # （点击无反应、无任何报错，见出库单/入库单"查看"失效故障）。动态按钮一律
 # data-act 属性 + 容器事件委托（addEventListener），此守卫防止回归。
@@ -838,7 +896,7 @@ for _pf in sorted(_glob.glob(os.path.join(os.path.dirname(os.path.abspath(__file
 check("前端：所有页面零内联事件处理器（CSP 会静默拦截 onclick= 等，动态按钮须用事件委托）",
       not _bad_inline, f"offenders={_bad_inline}")
 
-# 15m. 小程序申请页必须与 Web 多仓契约同步：加载仓库、按仓搜索、提交 warehouse_id，
+# 15n. 小程序申请页必须与 Web 多仓契约同步：加载仓库、按仓搜索、提交 warehouse_id，
 # 切仓时使用 POST JSON 批量刷新库存。防止后续只改 Web 又让小程序退回“可提交但无法审批”。
 _mini_apply = open(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wechat-miniprogram", "pages", "apply", "index.js"),

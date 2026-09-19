@@ -348,6 +348,55 @@ class RequestItemArchive(Base):
     unit = Column(String(20), comment="单位")
     quantity = Column(Float, nullable=False, comment="数量")
 
+# 12.5 申请单货物修改审计：仅记录管理员在 pending 状态下对明细的变更。
+# before/after 使用 JSON 文本保存，避免改变现有 request_items 结构并兼容 SQLite/PostgreSQL。
+class RequestItemAudit(Base):
+    __tablename__ = "request_item_audits"
+    id = Column(Integer, primary_key=True, index=True)
+    request_id = Column(Integer, ForeignKey("requests.id", ondelete="CASCADE"), index=True, nullable=False)
+    request_item_id = Column(Integer, ForeignKey("request_items.id", ondelete="SET NULL"), nullable=True, index=True)
+    operator_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    action = Column(String(30), nullable=False, comment="ADD_ITEM/UPDATE_ITEM/DELETE_ITEM")
+    before_json = Column(Text, nullable=True)
+    after_json = Column(Text, nullable=True)
+    create_time = Column(DateTime, default=datetime.now, nullable=False, index=True)
+
+    request = relationship("Request")
+    operator = relationship("User")
+
+# 12.6 归档后的申请单货物修改审计。归档时从 request_item_audits 搬移，保留完整历史。
+class RequestItemAuditArchive(Base):
+    __tablename__ = "request_item_audits_archive"
+    id = Column(Integer, primary_key=True, index=True)
+    archive_id = Column(Integer, ForeignKey("requests_archive.id", ondelete="CASCADE"), index=True, nullable=False)
+    original_request_id = Column(Integer, index=True, nullable=False)
+    request_item_id = Column(Integer, nullable=True, index=True)
+    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    action = Column(String(30), nullable=False)
+    before_json = Column(Text, nullable=True)
+    after_json = Column(Text, nullable=True)
+    create_time = Column(DateTime, default=datetime.now, nullable=False, index=True)
+
+    archive = relationship("RequestArchive")
+    operator = relationship("User")
+
+# 12.7 批量扫码业务幂等记录。业务提交成功后保存响应，重试同一 key 直接返回原结果。
+class IdempotencyRecord(Base):
+    __tablename__ = "idempotency_records"
+    __table_args__ = (
+        UniqueConstraint("operation", "idempotency_key", name="uq_idempotency_operation_key"),
+    )
+    id = Column(Integer, primary_key=True, index=True)
+    operation = Column(String(50), nullable=False)
+    idempotency_key = Column(String(200), nullable=False)
+    # nullable 兼容已存在的历史记录；新写入记录始终填充这两个字段。
+    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    request_hash = Column(String(64), nullable=True, index=True)
+    response_json = Column(Text, nullable=False)
+    create_time = Column(DateTime, default=datetime.now, nullable=False, index=True)
+
+    operator = relationship("User")
+
 # 创建所有表
 Base.metadata.create_all(bind=engine)
 

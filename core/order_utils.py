@@ -142,6 +142,16 @@ def advisory_lock_stock_key(db: Session, warehouse_id: int, goods_id: int, locat
     except Exception:
         pass
 
+def advisory_lock_idempotency_key(db: Session, operation: str, key: str):
+    """串行化同一幂等键的首次提交，避免并发重试各自创建业务单据。"""
+    try:
+        if engine.dialect.name == "postgresql":
+            from sqlalchemy import text as _sa_text
+            lock_key = int(zlib.crc32(f"idempotency-{operation}-{key}".encode("utf-8")))
+            db.execute(_sa_text("SELECT pg_advisory_xact_lock(:k)"), {"k": lock_key})
+    except Exception:
+        pass
+
 def generate_order_no(prefix: str, db: Session) -> str:
     """生成单据编号（PostgreSQL 下用事务咨询锁串行化编号生成，防止并发撞号）"""
     today = datetime.now().strftime("%Y%m%d")
