@@ -845,6 +845,11 @@ s, b = req("POST", f"/api/requests/{_edit_id}/status", {"status": "approved"}, a
 check("申请编辑：空明细 pending 仍兼容通过", s == 200 and (b or {}).get("status") == "approved", f"status={s} body={b}")
 s, b = req("POST", f"/api/requests/{_edit_id}/items", {"barcode": "G001", "quantity": 1}, admin)
 check("申请编辑：approved 申请禁止修改 → 409", s == 409, f"status={s} body={b}")
+db_execute("update requests set create_time = :ts where id = :i", {"ts": _old, "i": _edit_id})
+s, b = req("POST", "/api/requests/archive-now", {}, admin)
+check("申请编辑：归档含审计的申请单成功", s == 200 and (b or {}).get("archived", 0) >= 1, f"status={s} body={b}")
+s, b = req("GET", f"/api/requests/archive/{_edit_id}/item-audits", token=admin)
+check("申请编辑：归档后仍可查询完整货物审计", s == 200 and [x.get("action") for x in (b or [])] == ["ADD_ITEM", "UPDATE_ITEM", "DELETE_ITEM"], f"status={s} body={b}")
 
 _batch_before = _w1_g001_total()
 _batch_key = "test-batch-idempotency-001"
@@ -855,6 +860,12 @@ check("连续扫码：批量入库成功并返回单号", s == 200 and _batch_or
 check("连续扫码：批量入库库存增加 2", abs(_w1_g001_total() - _batch_before - 2) < 1e-6, f"before={_batch_before} after={_w1_g001_total()}")
 s, b2 = req("POST", "/api/inventory/batch", _batch_body, admin, headers={"Idempotency-Key": _batch_key})
 check("连续扫码：相同幂等键重试只返回原单", s == 200 and (b2 or {}).get("order_no") == _batch_order_no and abs(_w1_g001_total() - _batch_before - 2) < 1e-6, f"status={s} body={b2}")
+s, b = req("POST", "/api/inventory/batch", _batch_body, op, headers={"Idempotency-Key": _batch_key})
+check("连续扫码：其他操作员复用幂等键 → 409（不泄露原响应）", s == 409, f"status={s} body={b}")
+s, b = req("POST", "/api/inventory/batch", {
+    "type": "入库", "items": [{"goods_barcode": "G001", "location_code": "L1", "quantity": 3}], "remark": "连续扫码测试"
+}, admin, headers={"Idempotency-Key": _batch_key})
+check("连续扫码：同操作员复用幂等键但载荷不同 → 409", s == 409, f"status={s} body={b}")
 _atomic_before = _w1_g001_total()
 s, b = req("POST", "/api/inventory/batch", {
     "type": "出库", "items": [
