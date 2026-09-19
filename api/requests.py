@@ -412,9 +412,10 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
                 create_time=audit.create_time,
             ))
     # 只删除本次实际归档的行（按 id 精确删除，避免误伤并发新写入）。
-    # 先删活跃明细再删主表（评审 P1）：明细已复制到 request_items_archive，
-    # 显式删除保证不留孤儿行，不依赖数据库级联（SQLite 默认不启用外键）
+    # 先删活跃审计和明细再删主表：审计已复制到归档表，
+    # 显式删除保证 SQLite（默认不启用外键）不留下活跃孤儿审计行。
     _ids = [r.id for r in rows]
+    db.query(RequestItemAudit).filter(RequestItemAudit.request_id.in_(_ids)).delete(synchronize_session=False)
     db.query(RequestItem).filter(RequestItem.request_id.in_(_ids)).delete(synchronize_session=False)
     db.query(Request).filter(Request.id.in_(_ids)).delete(synchronize_session=False)
     _set_archive_last_run(db)
