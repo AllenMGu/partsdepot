@@ -32,7 +32,9 @@ function request({ url, method = "GET", data = {}, headers = {}, withToken = tru
         }
 
         const detail = (res.data && res.data.detail) || "请求失败";
-        reject(new Error(detail));
+        const error = new Error(detail);
+        error.status = res.statusCode;
+        reject(error);
       },
       fail(err) {
         reject(new Error(err.errMsg || "网络错误"));
