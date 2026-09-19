@@ -379,7 +379,7 @@ function scanCode(onCode, options) {
   video = $("#mScanVideo", box);
   var stopped = false;
   var blockedCode = null;
-  var blockedSeenAt = 0;
+  var blockedMisses = 0;
 
   function stopOneShot() {
     if (stopped) return;
@@ -408,25 +408,24 @@ function scanCode(onCode, options) {
         detector.detect(video).then(function (codes) {
           if (stopped) return;
           if (!codes || !codes.length) {
-            if (continuous && blockedCode && Date.now() - blockedSeenAt >= 250) {
+            if (continuous && blockedCode && ++blockedMisses >= 2) {
               blockedCode = null;
-              blockedSeenAt = 0;
+              blockedMisses = 0;
             }
             return;
           }
           var code = codes[0].rawValue || "";
           if (!code) return;
           if (continuous) {
-            var now = Date.now();
             if (blockedCode === code) {
-              blockedSeenAt = now;
+              blockedMisses = 0;
               return;
             }
             // 回调返回 false 表示业务仍在处理，保持相机中的条码未消费，
             // 避免第二件货物在网络校验期间被吞掉。
             if (onCode(code) !== false) {
               blockedCode = code;
-              blockedSeenAt = now;
+              blockedMisses = 0;
             }
             return;
           }
