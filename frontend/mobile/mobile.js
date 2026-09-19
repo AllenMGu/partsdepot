@@ -166,6 +166,7 @@ function api(method, path, body, opts) {
   opts = opts || {};
   var headers = {};
   if (body != null) headers["content-type"] = "application/json";
+  Object.keys(opts.headers || {}).forEach(function (k) { headers[k] = opts.headers[k]; });
   var url = /^https?:/.test(path) ? path : API_BASE + path;
   return fetch(url, {
     method: method,
@@ -305,7 +306,7 @@ function scanCode(onCode) {
     navigator.mediaDevices.getUserMedia) &&
     (!insecure || location.hostname === "localhost" || location.hostname === "127.0.0.1");
   if (!canCamera) {
-    promptCode("扫码", "扫码枪扫描或手动输入", onCode);
+    promptCode("当前浏览器不支持摄像头扫码，请手工输入条码", "扫码枪扫描或手动输入", onCode);
     return;
   }
   var mask = document.createElement("div");
@@ -362,7 +363,7 @@ function scanCode(onCode) {
     })
     .catch(function () {
       stop();
-      promptCode("扫码（相机不可用）", "扫码枪扫描或手动输入", onCode);
+      promptCode("摄像头不可用，请手工输入条码", "扫码枪扫描或手动输入", onCode);
     });
 }
 
