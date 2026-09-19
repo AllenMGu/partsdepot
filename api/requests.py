@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from core.models import (
     Config, Goods, InventoryRecord, InventoryType, Request, RequestArchive,
-    RequestItem, RequestItemArchive, RequestItemAudit, RequestStatus, Stock, User, UserRole, Warehouse,
+    RequestItem, RequestItemArchive, RequestItemAudit, RequestItemAuditArchive, RequestStatus, Stock, User, UserRole, Warehouse,
     OutboundOrderHeader, OutboundOrderItem,
 )
 from core.order_utils import generate_order_no, lock_stock_rows_for_goods
@@ -394,6 +394,23 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
                 unit=it.unit,
                 quantity=it.quantity,
             ))
+        audits = (
+            db.query(RequestItemAudit)
+            .filter(RequestItemAudit.request_id == r.id)
+            .order_by(RequestItemAudit.id)
+            .all()
+        )
+        for audit in audits:
+            db.add(RequestItemAuditArchive(
+                archive_id=arc.id,
+                original_request_id=r.id,
+                request_item_id=audit.request_item_id,
+                operator_id=audit.operator_id,
+                action=audit.action,
+                before_json=audit.before_json,
+                after_json=audit.after_json,
+                create_time=audit.create_time,
+            ))
     # 只删除本次实际归档的行（按 id 精确删除，避免误伤并发新写入）。
     # 先删活跃明细再删主表（评审 P1）：明细已复制到 request_items_archive，
     # 显式删除保证不留孤儿行，不依赖数据库级联（SQLite 默认不启用外键）
@@ -678,6 +695,37 @@ def list_request_item_audits(
         {
             "id": row.id,
             "request_id": row.request_id,
+            "request_item_id": row.request_item_id,
+            "operator_id": row.operator_id,
+            "action": row.action,
+            "before": json.loads(row.before_json) if row.before_json else None,
+            "after": json.loads(row.after_json) if row.after_json else None,
+            "create_time": row.create_time,
+        }
+        for row in rows
+    ]
+
+@router.get("/requests/archive/{original_id}/item-audits", summary="查询已归档申请单货物修改审计")
+def list_archived_request_item_audits(
+    original_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    _require_admin(current_user)
+    archive = db.query(RequestArchive).filter(RequestArchive.original_id == original_id).first()
+    if archive is None:
+        raise HTTPException(status_code=404, detail="归档申请单不存在")
+    rows = (
+        db.query(RequestItemAuditArchive)
+        .filter(RequestItemAuditArchive.archive_id == archive.id)
+        .order_by(RequestItemAuditArchive.id.asc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "request_id": row.original_request_id,
+            "archive_id": row.archive_id,
             "request_item_id": row.request_item_id,
             "operator_id": row.operator_id,
             "action": row.action,
