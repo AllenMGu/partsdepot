@@ -503,7 +503,7 @@ with sync_playwright() as p:
               any("goods_barcode=8888002" in url for url in _new_goods_stock_urls),
               _new_goods_stock_urls)
         page.click("#detailItemCancelBtn")
-        page.off("request", _capture_new_goods_stock)
+        page.remove_listener("request", _capture_new_goods_stock)
 
         # 弹窗内通过处理（v2：通过后扣减库存）
         page.click("#detailApproveBtn")
