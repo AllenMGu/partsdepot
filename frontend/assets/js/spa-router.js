@@ -137,8 +137,13 @@ main.flex-1 { height: 100vh !important; overflow-y: auto !important; }
             doc.addEventListener('click', (event) => {
                 const link = event.target.closest('a[href]');
                 if (!link) return;
+                // 下载型链接（带 download 属性，或 blob:/data: 动态地址，如各页面
+                // 的 Excel 导出）必须交给浏览器执行原生下载行为：拦截它们会导致
+                // 下载失败，并被误当作站内路由跳回默认页（主页）。
+                if (link.hasAttribute('download')) return;
                 const href = link.getAttribute('href');
                 if (!href || href.startsWith('#') || href.startsWith('javascript:')) return;
+                if (href.startsWith('blob:') || href.startsWith('data:')) return;
                 if (link.target && link.target !== '_self') return;
 
                 const nextRoute = normalizeRoute(href);
