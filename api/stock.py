@@ -34,7 +34,11 @@ def _batch_operation_response(order_no: str, inventory_type: InventoryType, ware
         "items": rows,
     }
 
-def _batch_request_hash(payload: InventoryBatchCreate, include_warehouse: bool = True) -> str:
+def _batch_request_hash(
+    payload: InventoryBatchCreate,
+    warehouse_id: Optional[int] = None,
+    include_warehouse: bool = True,
+) -> str:
     canonical_items = sorted([
         {
             "goods_barcode": item.goods_barcode.strip(),
@@ -49,7 +53,7 @@ def _batch_request_hash(payload: InventoryBatchCreate, include_warehouse: bool =
         "remark": payload.remark or "",
     }
     if include_warehouse:
-        canonical_data["warehouse_id"] = payload.warehouse_id
+        canonical_data["warehouse_id"] = warehouse_id if warehouse_id is not None else payload.warehouse_id
     canonical = json.dumps(canonical_data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
@@ -67,7 +71,6 @@ async def batch_inventory(
     """
     key = _batch_idempotency_key(idempotency_key, payload.request_id)
     operation = "inventory-batch"
-    request_hash = _batch_request_hash(payload)
     legacy_request_hash = _batch_request_hash(payload, include_warehouse=False)
     try:
         advisory_lock_idempotency_key(db, operation, key)
@@ -84,6 +87,13 @@ async def batch_inventory(
         warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
         if warehouse is None or not warehouse.is_active:
             raise HTTPException(status_code=400, detail="当前仓库不存在或已停用")
+        # Hash the effective server-side warehouse, not the optional client
+        # field. Omitting warehouse_id and explicitly sending the current ID
+        # must represent the same idempotent request.
+        request_hash = _batch_request_hash(payload, warehouse_id=warehouse_id)
+        # Transitional compatibility for records created by the immediately
+        # previous implementation, which hashed payload.warehouse_id directly.
+        omitted_warehouse_hash = _batch_request_hash(payload, warehouse_id=None)
 
         # 先按条码/库位解析全部明细并汇总，拒绝跨仓批量请求。
         resolved = {}
@@ -138,7 +148,7 @@ async def batch_inventory(
             # compatibility path to the response warehouse so a same-user key
             # cannot replay a result from another warehouse.
             legacy_hash_matches = (
-                previous.request_hash == legacy_request_hash
+                previous.request_hash in {legacy_request_hash, omitted_warehouse_hash}
                 and isinstance(cached_response, dict)
                 and cached_response.get("warehouse_id") == warehouse_id
             )
