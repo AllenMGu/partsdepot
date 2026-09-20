@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-4WxZWKEYoFhnoht4uezT1gERL6HpMldD5NbLk2wTOxw='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-5yr/1boe2Vu9P9eZViaGaAPkWvi1opQLxsPOwB1PUHM='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -493,7 +493,6 @@
                 el('detailGoodsSearchStatus').textContent = item ? '可重新搜索并替换货物，或直接修改数量。' : '输入条码、名称或规格进行模糊查询。';
                 el('detailGoodsResults').innerHTML = '';
                 renderSelectedGoods();
-                if (item) searchDetailGoods(item.barcode);
                 el('detailGoodsKw').focus();
             }
 
@@ -645,9 +644,14 @@
                         renderSelectedGoods();
                         return;
                     }
-                    const stock = await apiFetch('api/stock/?warehouse_id=' + encodeURIComponent(warehouseId) + '&limit=5000');
+                    const items = Array.isArray(row.items) ? row.items : [];
+                    const barcodes = Array.from(new Set(items.map(function (item) { return item.barcode; }).filter(Boolean)));
+                    const stockLists = await Promise.all(barcodes.map(function (barcode) {
+                        return apiFetch('api/stock/?warehouse_id=' + encodeURIComponent(warehouseId) +
+                            '&goods_barcode=' + encodeURIComponent(barcode));
+                    }));
                     if (seq !== detailStockSeq) return;
-                    detailStockRows = stock || [];
+                    detailStockRows = [].concat.apply([], stockLists);
                     detailStockState = 'ready';
                     renderDetailItems(Array.isArray(row.items) ? row.items : []);
                     renderSelectedGoods();
