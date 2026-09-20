@@ -185,8 +185,9 @@ Page({
       return;
     }
     const code = this.data.quickLocation;
-    const validLocation = (this.data.warehouseLocations || []).some((l) => l.location_code === code);
-    if (!code || !validLocation) return wx.showToast({ title: "请先选择当前仓库的库位", icon: "none" });
+    if (code && !(this.data.warehouseLocations || []).some((l) => l.location_code === code)) {
+      return wx.showToast({ title: "指定库位不属于当前仓库", icon: "none" });
+    }
     const generation = this.data.quickScanGeneration + 1;
     this.setData({
       quickScanning: true,
@@ -200,12 +201,14 @@ Page({
     this.setData({ quickCallbackBusy: true });
     this.scanCode((code) => {
       if (!this.data.quickScanning || generation !== this.data.quickScanGeneration) return;
-      this.validateQuickBarcode(code, location).then((goods) => {
+      this.validateQuickBarcode(code, location).then((resolved) => {
         if (!this.data.quickScanning || generation !== this.data.quickScanGeneration || this.data.quickUnknown) return;
+        const goods = resolved.goods;
+        const resolvedLocation = resolved.location;
         const rows = (this.data.quickRows || []).slice();
-        const index = rows.findIndex((row) => row.goods_barcode === goods.barcode && row.location_code === location);
+        const index = rows.findIndex((row) => row.goods_barcode === goods.barcode && row.location_code === resolvedLocation);
         if (index >= 0) rows[index].quantity += 1;
-        else rows.push({ goods_barcode: goods.barcode, goods_name: goods.name, location_code: location, quantity: 1 });
+        else rows.push({ goods_barcode: goods.barcode, goods_name: goods.name, location_code: resolvedLocation, quantity: 1 });
         this.quickFeedback(true, goods.name || goods.barcode);
         this.setData({ quickRows: rows });
       }).catch((err) => {
@@ -234,15 +237,35 @@ Page({
     const goodsList = await request({ url: "/goods/", data: { keyword: value } });
     const goods = (goodsList || []).find((item) => item.barcode === value);
     if (!goods) throw new Error(`未找到该货物：${value}`);
-    if (this.data.quickType === "出库") {
-      const user = getUser() || {};
-      const stocks = await request({ url: "/stock/", data: { warehouse_id: user.current_warehouse_id, goods_barcode: value } });
-      const available = (stocks || []).filter((row) => row.location_code === location)
-        .reduce((sum, row) => sum + Number(row.quantity || 0), 0);
+    const user = getUser() || {};
+    const warehouseId = user.current_warehouse_id;
+    if (!warehouseId) throw new Error("请先选择当前仓库");
+    if (location) {
+      if (this.data.quickType !== "出库") return { goods, location };
+      const stocks = await request({ url: "/stock/", data: { warehouse_id: warehouseId, goods_barcode: value } });
+      const matched = (stocks || []).find((row) => row.location_code === location);
+      const available = Number(matched && matched.quantity || 0);
       const current = (this.data.quickRows || []).find((row) => row.goods_barcode === value && row.location_code === location);
-      if (available <= Number(current && current.quantity || 0)) throw new Error(`库存不足：${goods.name} 当前可出库 ${available}`);
+      if (available <= Number(current && current.quantity || 0)) throw new Error(`库存不足：${goods.name} 在库位 ${location} 当前可出库 ${available}`);
+      return { goods, location };
     }
-    return goods;
+    const stocks = await request({ url: "/stock/", data: { warehouse_id: warehouseId, goods_barcode: value } });
+    let candidates = (stocks || []).map((stock) => {
+      const current = (this.data.quickRows || []).find((row) => row.goods_barcode === value && row.location_code === stock.location_code);
+      return { stock, remaining: Number(stock.quantity || 0) - Number(current && current.quantity || 0) };
+    });
+    if (this.data.quickType === "出库") {
+      candidates = candidates.filter((item) => item.remaining > 0).sort((a, b) =>
+        b.remaining - a.remaining || Number(a.stock.location_id || 0) - Number(b.stock.location_id || 0));
+      if (!candidates.length) throw new Error(`库存不足：${goods.name}，无法自动确定可出库库位`);
+      return { goods, location: candidates[0].stock.location_code };
+    }
+    candidates.sort((a, b) => Number(b.stock.quantity || 0) - Number(a.stock.quantity || 0) ||
+      Number(a.stock.location_id || 0) - Number(b.stock.location_id || 0));
+    if (candidates.length) return { goods, location: candidates[0].stock.location_code };
+    const locations = (this.data.warehouseLocations || []).filter((item) => item.is_active !== false);
+    if (locations.length === 1) return { goods, location: locations[0].location_code };
+    throw new Error("该货物没有现有库存，无法自动确定入库库位，请先填写或扫码库位");
   },
   changeQuickQuantity(e) {
     if (this.data.quickLoading || this.data.quickUnknown) return;
