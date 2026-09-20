@@ -45,6 +45,7 @@ def _batch_request_hash(payload: InventoryBatchCreate) -> str:
     ], key=lambda item: (item["goods_barcode"], item["location_code"], item["quantity"]))
     canonical = json.dumps({
         "type": payload.type.value,
+        "warehouse_id": payload.warehouse_id,
         "items": canonical_items,
         "remark": payload.remark or "",
     }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -68,6 +69,19 @@ async def batch_inventory(
     try:
         advisory_lock_idempotency_key(db, operation, key)
 
+        # 批量操作绑定服务端会话的当前仓库，防止多仓用户在仓库 A 页面
+        # 携带仓库 B 库位完成真实入库/出库。warehouse_id 兼容旧客户端省略，
+        # 但最终仍以 current_warehouse_id 作为安全边界。
+        session_warehouse_id = current_user.current_warehouse_id
+        if payload.warehouse_id is not None and payload.warehouse_id != session_warehouse_id:
+            raise HTTPException(status_code=400, detail="批量操作仓库必须是当前选择的仓库")
+        warehouse_id = payload.warehouse_id or session_warehouse_id
+        if not warehouse_id:
+            raise HTTPException(status_code=400, detail="请先选择当前仓库")
+        warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+        if warehouse is None or not warehouse.is_active:
+            raise HTTPException(status_code=400, detail="当前仓库不存在或已停用")
+
         # 先按条码/库位解析全部明细并汇总，拒绝跨仓批量请求。
         resolved = {}
         warehouse_ids = set()
@@ -80,9 +94,10 @@ async def batch_inventory(
             location = db.query(Location).filter(Location.location_code == location_code).first()
             if location is None:
                 raise HTTPException(status_code=404, detail=f"未找到该库位：{location_code}")
-            wh = db.query(Warehouse).filter(Warehouse.id == location.warehouse_id).first()
-            if wh is None or not wh.is_active:
-                raise HTTPException(status_code=400, detail="库位所属仓库不存在或已停用")
+            if location.warehouse_id != warehouse_id:
+                raise HTTPException(status_code=400, detail="库位不属于当前仓库")
+            if not location.is_active:
+                raise HTTPException(status_code=400, detail=f"库位已停用：{location_code}")
             if current_user.role != UserRole.ADMIN and not db.query(UserWarehouse).filter(
                 UserWarehouse.user_id == current_user.id,
                 UserWarehouse.warehouse_id == location.warehouse_id,
@@ -100,7 +115,8 @@ async def batch_inventory(
 
         if len(warehouse_ids) != 1:
             raise HTTPException(status_code=400, detail="一次连续扫码只能操作同一仓库")
-        warehouse_id = next(iter(warehouse_ids))
+        if next(iter(warehouse_ids)) != warehouse_id:
+            raise HTTPException(status_code=400, detail="库位不属于当前仓库")
 
         # 缓存响应必须在权限与请求合法性校验之后返回，避免另一个用户通过猜测
         # 幂等键读取单号/货物/库位响应；同一用户复用 key 发送不同载荷也必须报冲突。
@@ -257,6 +273,9 @@ async def scan_inventory(
     location = db.query(Location).filter(Location.location_code == inventory.location_code).first()
     if not location:
         raise HTTPException(status_code=404, detail="库位不存在")
+
+    if not location.is_active:
+        raise HTTPException(status_code=400, detail=f"库位已停用：{inventory.location_code}")
 
     # 检查用户是否有权限操作这个仓库
     user_warehouse = db.query(UserWarehouse).filter(
