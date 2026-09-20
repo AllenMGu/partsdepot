@@ -969,6 +969,10 @@ _mini_scan = open(
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wechat-miniprogram", "pages", "scan", "index.js"),
     encoding="utf-8",
 ).read()
+_h5_mobile = open(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "mobile", "mobile.js"),
+    encoding="utf-8",
+).read()
 check("连续扫码：入库自动匹配忽略历史 0 库存行",
       "Number(item.stock.quantity || 0) > 0" in _h5_scan
       and "Number(item.stock.quantity || 0) > 0" in _mini_scan)
@@ -979,6 +983,10 @@ check("连续扫码：成功时 H5 有声音或震动反馈",
 check("单次扫码：货物和库位填充后也有成功反馈",
       'feedback(true, "扫码成功")' in _h5_scan
       and 'return false;' in _h5_scan)
+check("单次扫码：点击时预激活音频并恢复 interrupted 状态",
+      "M.prepareScanAudio = prepareScanAudio" in _h5_scan
+      and 'scanAudioContext.state === "interrupted"' in _h5_scan
+      and "window.M.prepareScanAudio()" in _h5_mobile)
 check("连续扫码：小程序成功时有轻震动和成功提示",
       "wx.vibrateShort({ type: ok ? \"light\" : \"heavy\" })" in _mini_scan
       and 'icon: ok ? "success" : "none"' in _mini_scan)
