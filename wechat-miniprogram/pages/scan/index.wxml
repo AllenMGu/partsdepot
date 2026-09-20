@@ -13,8 +13,8 @@
       <button class="{{quickType==='入库' ? 'btn-primary' : 'btn-ghost'}}" size="mini" data-type="入库" bindtap="setQuickType" disabled="{{quickLoading || quickUnknown}}">入库</button>
       <button class="{{quickType==='出库' ? 'btn-primary' : 'btn-ghost'}}" size="mini" data-type="出库" bindtap="setQuickType" disabled="{{quickLoading || quickUnknown}}">出库</button>
     </view>
-    <input class="input" placeholder="输入或扫码库位" value="{{quickLocation}}" bindinput="onQuickLocationInput" disabled="{{quickLoading || quickScanning || quickUnknown}}" />
-    <button class="btn-ghost" size="mini" bindtap="scanQuickLocation" disabled="{{quickLoading || quickScanning || quickUnknown || quickRows.length}}">扫码库位</button>
+    <input class="input" placeholder="异常时输入或扫码库位（可选）" value="{{quickLocation}}" bindinput="onQuickLocationInput" disabled="{{quickLoading || quickScanning || quickUnknown}}" />
+    <button class="btn-ghost" size="mini" bindtap="scanQuickLocation" disabled="{{quickLoading || quickScanning || quickUnknown || quickRows.length}}">异常指定库位</button>
     <button class="btn-primary" loading="{{quickScanning}}" bindtap="toggleQuickScan" disabled="{{quickLoading || quickUnknown}}">{{quickScanning ? '停止连续扫码' : '开始连续扫码'}}</button>
     <view class="subtitle" wx:if="{{quickRows.length}}" style="margin-top: 10rpx;">已扫描 {{quickRows.length}} 种货物</view>
     <view class="order-item" wx:for="{{quickRows}}" wx:key="goods_barcode">
