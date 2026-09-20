@@ -979,7 +979,9 @@ check("连续扫码：入库自动匹配忽略历史 0 库存行",
 check("连续扫码：成功时 H5 有声音或震动反馈",
       "navigator.vibrate" in _h5_scan
       and "playScanSuccessTone" in _h5_scan
-      and "createOscillator" in _h5_scan)
+      and "createOscillator" in _h5_scan
+      and "createBufferSource" in _h5_scan
+      and "unlockSource.start(0)" in _h5_scan)
 check("单次扫码：货物和库位填充后也有成功反馈",
       'feedback(true, "扫码成功")' in _h5_scan
       and 'return false;' in _h5_scan)
