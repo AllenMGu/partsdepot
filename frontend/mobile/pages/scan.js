@@ -15,6 +15,7 @@ window.M_PAGES["scan"] = function () {
     remark: "",
     locations: [],
     locationsLoaded: false,
+    locationsWarehouseId: null,
     currentStock: null
   };
 
@@ -141,8 +142,19 @@ window.M_PAGES["scan"] = function () {
   function quickLocationReady() {
     var w = M.AUTH.currentWarehouse();
     if (!w || !w.id) { feedback(false, "请先选择当前仓库"); return false; }
-    if (quick.location && state.locationsLoaded && !state.locations.some(function (l) { return l.location_code === quick.location; })) {
-      feedback(false, "库位不属于当前仓库"); return false;
+    if (!state.locationsLoaded || state.locationsWarehouseId !== w.id) {
+      feedback(false, "库位列表尚未加载完成，请稍后重试");
+      loadLocations();
+      return false;
+    }
+    if (quick.location) {
+      var selected = state.locations.filter(function (l) { return l.location_code === quick.location; })[0];
+      if (!selected || selected.warehouse_id !== w.id) {
+        feedback(false, "库位不属于当前仓库"); return false;
+      }
+      if (selected.is_active === false) {
+        feedback(false, "库位已停用，不能出入库"); return false;
+      }
     }
     return true;
   }
@@ -219,11 +231,16 @@ window.M_PAGES["scan"] = function () {
         });
       }
       return M.api("GET", "/stock/?warehouse_id=" + w.id + "&goods_barcode=" + encodeURIComponent(code)).then(function (stocks) {
+        var activeCodes = {};
+        state.locations.forEach(function (item) {
+          if (item.warehouse_id === w.id && item.is_active !== false) activeCodes[item.location_code] = true;
+        });
         var candidates = (stocks || []).map(function (stock) {
           var key = quickKey(code, stock.location_code);
           var already = quick.rows[key] ? quick.rows[key].quantity : 0;
           return { stock: stock, remaining: Number(stock.quantity || 0) - already };
         });
+        candidates = candidates.filter(function (item) { return activeCodes[item.stock.location_code]; });
         if (quick.type === "出库") {
           candidates = candidates.filter(function (item) { return item.remaining > 0; }).sort(function (a, b) {
             return b.remaining - a.remaining || Number(a.stock.location_id || 0) - Number(b.stock.location_id || 0);
@@ -243,7 +260,9 @@ window.M_PAGES["scan"] = function () {
             return state.locations;
           });
         return locationsPromise.then(function (locations) {
-          locations = (locations || []).filter(function (item) { return item.is_active !== false; });
+          locations = (locations || []).filter(function (item) {
+            return item.warehouse_id === w.id && item.is_active !== false;
+          });
           if (locations.length === 1) return { goods: goods, location: locations[0].location_code };
           throw new Error("该货物没有现有库存，无法自动确定入库库位，请先填写或扫码库位");
         });
@@ -264,6 +283,7 @@ window.M_PAGES["scan"] = function () {
       requestKey = quick.requestKey || newRequestKey();
       payload = {
         type: quick.type,
+        warehouse_id: M.AUTH.currentWarehouse().id,
         items: rows.map(function (row) { return { goods_barcode: row.barcode, location_code: row.location, quantity: row.quantity }; })
       };
       quick.requestKey = requestKey;
@@ -302,11 +322,13 @@ window.M_PAGES["scan"] = function () {
 
   function loadLocations() {
     var w = M.AUTH.currentWarehouse();
+    state.locationsLoaded = false;
+    state.locationsWarehouseId = w && w.id ? w.id : null;
     if (!w || !w.id) { state.locations = []; return; }
     M.api("GET", "/locations/?warehouse_id=" + w.id).then(function (rows) {
       state.locations = rows || [];
       state.locationsLoaded = true;
-    }).catch(function () { state.locations = []; });
+    }).catch(function () { state.locations = []; state.locationsLoaded = false; });
   }
 
   function renderLocOptions() {
