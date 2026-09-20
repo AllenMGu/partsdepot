@@ -785,6 +785,62 @@ with sync_playwright() as p:
     finally:
         page.remove_listener("console", _on_console)
 
+    # ================= N. dashboard 嵌入模式：货物 Excel 导出（回归） =================
+    # 线上 bug：iframe 内点"导出货物"后下载被 SPA 钩子拦截、页面跳回主页（dashboard-view）。
+    page.goto(BASE + "/dashboard.html?view=goods.html")
+    frame = page.frame(name="spaViewFrame")
+    frame.wait_for_selector("#exportGoodsBtn", timeout=20000)
+    with page.expect_download(timeout=30000) as dl_info:
+        frame.locator("#exportGoodsBtn").click()
+    download = dl_info.value
+    check("嵌入导出：下载事件触发且文件名为 goods_export.xlsx",
+          download.suggested_filename == "goods_export.xlsx", download.suggested_filename)
+    page.wait_for_timeout(300)
+    _frame_url = frame.evaluate("() => location.href")
+    check("嵌入导出：导出后仍停留在 goods.html（未跳回主页）",
+          "goods.html" in _frame_url, _frame_url)
+
+    # ================= N2. dashboard 嵌入模式：库存 Excel 导出（回归，同根因） =================
+    page.goto(BASE + "/dashboard.html?view=stock.html")
+    frame = page.frame(name="spaViewFrame")
+    frame.wait_for_selector("#stockTableBody tr", timeout=20000)
+    with page.expect_download(timeout=30000) as dl_info:
+        frame.locator("#exportStockBtn").click()
+    download = dl_info.value
+    check("嵌入导出：库存导出下载事件触发（库存导出_*.xlsx/csv）",
+          download.suggested_filename.startswith("库存导出_"), download.suggested_filename)
+    page.wait_for_timeout(300)
+    _frame_url = frame.evaluate("() => location.href")
+    check("嵌入导出：库存导出后仍停留在 stock.html（未跳回主页）",
+          "stock.html" in _frame_url, _frame_url)
+
+    # ================= N3. dashboard 嵌入模式：货物 Excel 导入（file input 路径回归） =================
+    # 导入走 input[type=file] + FormData，不经锚点点击，理论上不受 SPA 钩子影响，实测确认。
+    import openpyxl
+    _imp_barcode = "IMP-E2E-%s" % time.strftime("%Y%m%d%H%M%S")
+    _imp_path = os.path.join(tempfile.gettempdir(), "wms_import_e2e.xlsx")
+    _wb = openpyxl.Workbook()
+    _ws = _wb.active
+    _ws.append(["条码", "货物名称", "规格型号", "单位", "单价"])
+    _ws.append([_imp_barcode, "E2E导入货物", "测试规格", "个", 12.5])
+    _wb.save(_imp_path)
+
+    page.goto(BASE + "/dashboard.html?view=goods.html")
+    frame = page.frame(name="spaViewFrame")
+    frame.wait_for_selector("#exportGoodsBtn", timeout=20000)
+    frame.locator("#importGoodsBtn").click()
+    frame.wait_for_selector("#importFile", state="visible", timeout=5000)
+    frame.locator("#importFile").set_input_files(_imp_path)
+    frame.locator("#confirmImportBtn").click()
+    frame.wait_for_selector("#importResult:not(.hidden)", timeout=20000)
+    _imp_txt = frame.locator("#importResult").inner_text()
+    check("嵌入导入：导入结果提示成功且含 1 条", "成功导入 1 条" in _imp_txt, _imp_txt[:120])
+    frame.wait_for_selector(f"#goodsTableBody tr:has-text('{_imp_barcode}')", timeout=10000)
+    check("嵌入导入：新货物行出现在列表", True)
+    _frame_url = frame.evaluate("() => location.href")
+    check("嵌入导入：导入后仍停留在 goods.html（未跳回主页）",
+          "goods.html" in _frame_url, _frame_url)
+
     browser.close()
 
 fails = [n for n, ok in results if not ok]
