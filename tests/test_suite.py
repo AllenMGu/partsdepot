@@ -879,6 +879,16 @@ check("连续扫码：PR19 旧 hash 携带 warehouse_id 重试仍返回原单",
       s == 200 and (b3 or {}).get("order_no") == _batch_order_no
       and abs(_w1_g001_total() - _batch_before - 2) < 1e-6,
       f"status={s} body={b3}")
+# P1 回归：首次请求省略 warehouse_id，升级/重试时显式携带当前仓库 ID，必须共用同一 hash。
+_effective_key = "test-batch-effective-warehouse-hash-001"
+_effective_before = _w1_g001_total()
+s, b4 = req("POST", "/api/inventory/batch", _batch_body, admin, headers={"Idempotency-Key": _effective_key})
+_effective_order_no = (b4 or {}).get("order_no")
+s, b5 = req("POST", "/api/inventory/batch", dict(_batch_body, warehouse_id=W1), admin, headers={"Idempotency-Key": _effective_key})
+check("连续扫码：省略/显式当前仓库同 key 只执行一次",
+      s == 200 and (b5 or {}).get("order_no") == _effective_order_no
+      and abs(_w1_g001_total() - _effective_before - 2) < 1e-6,
+      f"first={b4} retry_status={s} retry={b5}")
 s, b = req("POST", "/api/inventory/batch", _batch_body, op, headers={"Idempotency-Key": _batch_key})
 check("连续扫码：其他操作员复用幂等键 → 409（不泄露原响应）", s == 409, f"status={s} body={b}")
 s, b = req("POST", "/api/inventory/batch", {
