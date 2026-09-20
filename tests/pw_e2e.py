@@ -471,6 +471,40 @@ with sync_playwright() as p:
         check("详情弹窗：待处理单显示通过/驳回按钮",
               page.is_visible("#detailApproveBtn") and page.is_visible("#detailRejectBtn"))
 
+        # P2 回归：编辑已有明细时，原货物必须保持选中，允许只改数量后直接保存。
+        items.nth(0).locator("button[data-item-action=edit]").click()
+        page.fill("#detailItemQty", "4")
+        page.click("#detailItemSaveBtn")
+        wait_js(page, "document.querySelector('#detailItemsBody tr').innerText.includes('4 个')")
+        check("详情弹窗：已有货物只改数量可直接保存（3→4）",
+              "4 个" in page.locator("#detailItemsBody tr").first.inner_text(),
+              page.locator("#detailItemsBody tr").first.inner_text())
+        page.locator("#detailItemsBody tr").first.locator("button[data-item-action=edit]").click()
+        page.fill("#detailItemQty", "3")
+        page.click("#detailItemSaveBtn")
+        wait_js(page, "document.querySelector('#detailItemsBody tr').innerText.includes('3 个')")
+        check("详情弹窗：数量恢复为原值，后续审批基线不变",
+              "3 个" in page.locator("#detailItemsBody tr").first.inner_text(),
+              page.locator("#detailItemsBody tr").first.inner_text())
+
+        # P2 回归：选择原申请中没有的新货物时，详情内立即按新条码查询库存。
+        _new_goods_stock_urls = []
+        def _capture_new_goods_stock(request):
+            if "/api/stock/" in request.url:
+                _new_goods_stock_urls.append(request.url)
+        page.on("request", _capture_new_goods_stock)
+        page.click("#detailAddItemBtn")
+        page.fill("#detailGoodsKw", "8888002")
+        page.wait_for_selector("#detailGoodsResults button")
+        page.locator("#detailGoodsResults button").first.click()
+        wait_js(page, "() => Array.from(document.querySelectorAll('#detailSelectedGoods')).some(el => el.innerText.includes('8888002'))")
+        page.wait_for_timeout(300)
+        check("详情弹窗：新货物选择后立即查询对应条码库存",
+              any("goods_barcode=8888002" in url for url in _new_goods_stock_urls),
+              _new_goods_stock_urls)
+        page.click("#detailItemCancelBtn")
+        page.remove_listener("request", _capture_new_goods_stock)
+
         # 弹窗内通过处理（v2：通过后扣减库存）
         page.click("#detailApproveBtn")
         page.wait_for_selector("#detailModal", state="hidden", timeout=5000)

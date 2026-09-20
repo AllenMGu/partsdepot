@@ -20,13 +20,13 @@
   <main class="m-main">
     <div class="m-card">
       <div class="m-card-title">快速连续扫码</div>
-      <div class="m-muted m-mt8">选择库位后开始扫码，每次真实扫描自动累加；最后统一确认，整单事务提交。</div>
+      <div class="m-muted m-mt8">选择入库/出库后直接扫描货物，系统按当前仓库库存自动对应库位；异常时再指定库位，最后统一确认。</div>
       <div class="m-seg m-mt8">
         <button type="button" id="mQuickTypeIn" class="on">入库</button>
         <button type="button" id="mQuickTypeOut">出库</button>
       </div>
       <div class="m-field m-mt8">
-        <div class="m-label">库位编码</div>
+        <div class="m-label">异常指定库位（可选）</div>
         <div class="m-row" style="gap:8px;">
           <input class="m-input m-grow" id="mQuickLocation" placeholder="输入或扫码库位" autocomplete="off">
           <button type="button" class="m-btn m-btn-ghost m-btn-sm" data-scan="quick-location"><i class="fa fa-camera"></i> 扫码库位</button>

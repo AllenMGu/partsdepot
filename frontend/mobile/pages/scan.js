@@ -15,6 +15,7 @@ window.M_PAGES["scan"] = function () {
     remark: "",
     locations: [],
     locationsLoaded: false,
+    locationsWarehouseId: null,
     currentStock: null
   };
 
@@ -141,9 +142,19 @@ window.M_PAGES["scan"] = function () {
   function quickLocationReady() {
     var w = M.AUTH.currentWarehouse();
     if (!w || !w.id) { feedback(false, "请先选择当前仓库"); return false; }
-    if (!quick.location) { feedback(false, "请先填写库位"); return false; }
-    if (state.locationsLoaded && !state.locations.some(function (l) { return l.location_code === quick.location; })) {
-      feedback(false, "库位不属于当前仓库"); return false;
+    if (!state.locationsLoaded || state.locationsWarehouseId !== w.id) {
+      feedback(false, "库位列表尚未加载完成，请稍后重试");
+      loadLocations();
+      return false;
+    }
+    if (quick.location) {
+      var selected = state.locations.filter(function (l) { return l.location_code === quick.location; })[0];
+      if (!selected || selected.warehouse_id !== w.id) {
+        feedback(false, "库位不属于当前仓库"); return false;
+      }
+      if (selected.is_active === false) {
+        feedback(false, "库位已停用，不能出入库"); return false;
+      }
     }
     return true;
   }
@@ -175,9 +186,10 @@ window.M_PAGES["scan"] = function () {
     quick.scanner = M.scanCode(function (code) {
       if (!quick.scanning || generation !== quick.scanGeneration || quick.submitting || quick.unknown || quick.callbackBusy) return false;
       quick.callbackBusy = true;
-      var location = quick.location;
-      validateQuickBarcode(String(code || "").trim(), location).then(function (goods) {
+      validateQuickBarcode(String(code || "").trim(), quick.location).then(function (resolved) {
         if (!quick.scanning || generation !== quick.scanGeneration || quick.unknown) return;
+        var goods = resolved.goods;
+        var location = resolved.location;
         var key = quickKey(goods.barcode, location);
         if (!quick.rows[key]) quick.rows[key] = { barcode: goods.barcode, name: goods.name, location: location, quantity: 0 };
         quick.rows[key].quantity += 1;
@@ -201,21 +213,63 @@ window.M_PAGES["scan"] = function () {
       renderQuickRows();
     } });
   }
-  function validateQuickBarcode(code, location) {
+  function validateQuickBarcode(code, locationOverride) {
     if (!code) return Promise.reject(new Error("未读取到条码"));
     return M.api("GET", "/goods/?keyword=" + encodeURIComponent(code)).then(function (rows) {
       var goods = (rows || []).filter(function (g) { return g.barcode === code; })[0];
       if (!goods) throw new Error("未找到该货物：" + code);
-      if (quick.type === "出库") {
-        var w = M.AUTH.currentWarehouse();
+      var w = M.AUTH.currentWarehouse();
+      if (!w || !w.id) throw new Error("请先选择当前仓库");
+      if (locationOverride) {
+        if (quick.type !== "出库") return { goods: goods, location: locationOverride };
         return M.api("GET", "/stock/?warehouse_id=" + w.id + "&goods_barcode=" + encodeURIComponent(code)).then(function (stocks) {
-          var available = (stocks || []).filter(function (s) { return s.location_code === location; }).reduce(function (sum, s) { return sum + Number(s.quantity || 0); }, 0);
-          var key = quickKey(code, location), already = quick.rows[key] ? quick.rows[key].quantity : 0;
-          if (available <= already) throw new Error("库存不足：" + goods.name + " 当前可出库 " + available);
-          return goods;
+          var matched = (stocks || []).filter(function (s) { return s.location_code === locationOverride; })[0];
+          var available = matched ? Number(matched.quantity || 0) : 0;
+          var key = quickKey(code, locationOverride), already = quick.rows[key] ? quick.rows[key].quantity : 0;
+          if (available <= already) throw new Error("库存不足：" + goods.name + " 在库位 " + locationOverride + " 当前可出库 " + available);
+          return { goods: goods, location: locationOverride };
         });
       }
-      return goods;
+      return M.api("GET", "/stock/?warehouse_id=" + w.id + "&goods_barcode=" + encodeURIComponent(code)).then(function (stocks) {
+        var activeCodes = {};
+        state.locations.forEach(function (item) {
+          if (item.warehouse_id === w.id && item.is_active !== false) activeCodes[item.location_code] = true;
+        });
+        var candidates = (stocks || []).map(function (stock) {
+          var key = quickKey(code, stock.location_code);
+          var already = quick.rows[key] ? quick.rows[key].quantity : 0;
+          return { stock: stock, remaining: Number(stock.quantity || 0) - already };
+        });
+        candidates = candidates.filter(function (item) { return activeCodes[item.stock.location_code]; });
+        if (quick.type === "出库") {
+          candidates = candidates.filter(function (item) { return item.remaining > 0; }).sort(function (a, b) {
+            return b.remaining - a.remaining || Number(a.stock.location_id || 0) - Number(b.stock.location_id || 0);
+          });
+          if (!candidates.length) throw new Error("库存不足：" + goods.name + "，无法自动确定可出库库位");
+          return { goods: goods, location: candidates[0].stock.location_code };
+        }
+        candidates = candidates.filter(function (item) {
+          return Number(item.stock.quantity || 0) > 0;
+        });
+        candidates.sort(function (a, b) {
+          return Number(b.stock.quantity || 0) - Number(a.stock.quantity || 0) ||
+            Number(a.stock.location_id || 0) - Number(b.stock.location_id || 0);
+        });
+        if (candidates.length) return { goods: goods, location: candidates[0].stock.location_code };
+        var locationsPromise = state.locationsLoaded ? Promise.resolve(state.locations) :
+          M.api("GET", "/locations/?warehouse_id=" + w.id).then(function (rows) {
+            state.locations = rows || [];
+            state.locationsLoaded = true;
+            return state.locations;
+          });
+        return locationsPromise.then(function (locations) {
+          locations = (locations || []).filter(function (item) {
+            return item.warehouse_id === w.id && item.is_active !== false;
+          });
+          if (locations.length === 1) return { goods: goods, location: locations[0].location_code };
+          throw new Error("该货物没有现有库存，无法自动确定入库库位，请先填写或扫码库位");
+        });
+      });
     });
   }
   function confirmQuickScan() {
@@ -232,6 +286,7 @@ window.M_PAGES["scan"] = function () {
       requestKey = quick.requestKey || newRequestKey();
       payload = {
         type: quick.type,
+        warehouse_id: M.AUTH.currentWarehouse().id,
         items: rows.map(function (row) { return { goods_barcode: row.barcode, location_code: row.location, quantity: row.quantity }; })
       };
       quick.requestKey = requestKey;
@@ -270,11 +325,13 @@ window.M_PAGES["scan"] = function () {
 
   function loadLocations() {
     var w = M.AUTH.currentWarehouse();
+    state.locationsLoaded = false;
+    state.locationsWarehouseId = w && w.id ? w.id : null;
     if (!w || !w.id) { state.locations = []; return; }
     M.api("GET", "/locations/?warehouse_id=" + w.id).then(function (rows) {
       state.locations = rows || [];
       state.locationsLoaded = true;
-    }).catch(function () { state.locations = []; });
+    }).catch(function () { state.locations = []; state.locationsLoaded = false; });
   }
 
   function renderLocOptions() {

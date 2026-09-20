@@ -4,7 +4,7 @@
 #      P1-4 LDAP 未配置降级 | P1-5 零仓库新用户 | P1-6 库位管理员专属
 #      P1-7 入库编辑 500 | P1-8 单号撞号 | JWT 30min | 管理员自举 | 静态托管
 #      五轮：终态单据(已提交/已完成)拒绝一切明细写入(顺序不变量) | 测试库安全护栏
-import base64, json, os, re, sqlite3, sys, threading, time, urllib.parse, urllib.request, urllib.error
+import base64, hashlib, json, os, re, sqlite3, sys, threading, time, urllib.parse, urllib.request, urllib.error
 
 BASE = os.environ.get("WMS_TEST_BASE", "http://127.0.0.1:8091")
 DB = os.environ.get("WMS_TEST_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "test.db"))
@@ -862,6 +862,33 @@ check("连续扫码：批量入库成功并返回单号", s == 200 and _batch_or
 check("连续扫码：批量入库库存增加 2", abs(_w1_g001_total() - _batch_before - 2) < 1e-6, f"before={_batch_before} after={_w1_g001_total()}")
 s, b2 = req("POST", "/api/inventory/batch", _batch_body, admin, headers={"Idempotency-Key": _batch_key})
 check("连续扫码：相同幂等键重试只返回原单", s == 200 and (b2 or {}).get("order_no") == _batch_order_no and abs(_w1_g001_total() - _batch_before - 2) < 1e-6, f"status={s} body={b2}")
+# PR19 兼容回归：旧版本 hash 未包含 warehouse_id，升级后携带新字段重试仍须返回原单，不能触发 409 后让客户端换新 key。
+_legacy_canonical = json.dumps({
+    "type": "入库",
+    "items": [{"goods_barcode": "G001", "location_code": "L1", "quantity": 2.0}],
+    "remark": "连续扫码测试",
+}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+_legacy_hash = hashlib.sha256(_legacy_canonical.encode("utf-8")).hexdigest()
+db_execute(
+    "UPDATE idempotency_records SET request_hash = :h WHERE operation = 'inventory-batch' AND idempotency_key = :k",
+    {"h": _legacy_hash, "k": _batch_key},
+)
+_batch_retry_with_warehouse = dict(_batch_body, warehouse_id=W1)
+s, b3 = req("POST", "/api/inventory/batch", _batch_retry_with_warehouse, admin, headers={"Idempotency-Key": _batch_key})
+check("连续扫码：PR19 旧 hash 携带 warehouse_id 重试仍返回原单",
+      s == 200 and (b3 or {}).get("order_no") == _batch_order_no
+      and abs(_w1_g001_total() - _batch_before - 2) < 1e-6,
+      f"status={s} body={b3}")
+# P1 回归：首次请求省略 warehouse_id，升级/重试时显式携带当前仓库 ID，必须共用同一 hash。
+_effective_key = "test-batch-effective-warehouse-hash-001"
+_effective_before = _w1_g001_total()
+s, b4 = req("POST", "/api/inventory/batch", _batch_body, admin, headers={"Idempotency-Key": _effective_key})
+_effective_order_no = (b4 or {}).get("order_no")
+s, b5 = req("POST", "/api/inventory/batch", dict(_batch_body, warehouse_id=W1), admin, headers={"Idempotency-Key": _effective_key})
+check("连续扫码：省略/显式当前仓库同 key 只执行一次",
+      s == 200 and (b5 or {}).get("order_no") == _effective_order_no
+      and abs(_w1_g001_total() - _effective_before - 2) < 1e-6,
+      f"first={b4} retry_status={s} retry={b5}")
 s, b = req("POST", "/api/inventory/batch", _batch_body, op, headers={"Idempotency-Key": _batch_key})
 check("连续扫码：其他操作员复用幂等键 → 409（不泄露原响应）", s == 409, f"status={s} body={b}")
 s, b = req("POST", "/api/inventory/batch", {
@@ -880,6 +907,77 @@ s, b = req("POST", "/api/inventory/batch", {
     "type": "入库", "items": [{"goods_barcode": "NO-SUCH", "location_code": "L1", "quantity": 1}],
     "request_id": "test-batch-unknown-001"}, admin)
 check("连续扫码：未知条码 → 404 且不产生单据", s == 404, f"status={s} body={b}")
+
+# 15m.1. 连续扫码安全边界：当前仓库与启用库位必须由服务端兜底校验。
+s, b = req("POST", "/api/inventory/batch", {
+    "type": "入库", "warehouse_id": W1,
+    "items": [{"goods_barcode": "G001", "location_code": "L2", "quantity": 1}],
+    "request_id": "test-batch-cross-warehouse-001"}, admin)
+check("连续扫码：仓库 W1 页面携带 W2 库位 → 400", s == 400 and "当前仓库" in str(b), f"status={s} body={b}")
+s, disabled = req("POST", "/api/locations/", {
+    "warehouse_id": W1, "location_code": "L-DISABLED", "name": "停用测试库位"}, admin)
+_disabled_id = (disabled or {}).get("id")
+if _disabled_id:
+    req("PUT", f"/api/locations/{_disabled_id}", {"is_active": False}, admin)
+s, b = req("POST", "/api/inventory/batch", {
+    "type": "入库", "warehouse_id": W1,
+    "items": [{"goods_barcode": "G001", "location_code": "L-DISABLED", "quantity": 1}],
+    "request_id": "test-batch-disabled-location-001"}, admin)
+check("连续扫码：禁用库位 → 400 且不入库", s == 400 and "停用" in str(b), f"status={s} body={b}")
+if _disabled_id:
+    req("PUT", f"/api/locations/{_disabled_id}", {"is_active": True}, admin)
+
+# 15m.2. 大库存详情数据：目标货物超过 5000 个库位时，按货物查询不能被 LIMIT 截断。
+from datetime import datetime as _dt_rows
+_limit_now = _dt_rows.now().strftime("%Y-%m-%d %H:%M:%S")
+_limit_locations = [
+    {"warehouse_id": W1, "location_code": f"LMT-{i:04d}", "name": f"大库存测试{i}",
+     "is_active": True, "create_time": _limit_now}
+    for i in range(5001)
+]
+db_execute(
+    "INSERT INTO locations (warehouse_id, location_code, name, is_active, create_time) "
+    "VALUES (:warehouse_id, :location_code, :name, :is_active, :create_time)",
+    _limit_locations,
+)
+_limit_rows = db_execute(
+    "SELECT id, location_code FROM locations WHERE warehouse_id = :w AND location_code LIKE 'LMT-%' "
+    "ORDER BY id", {"w": W1})
+db_execute(
+    "INSERT INTO stock (warehouse_id, goods_id, location_id, quantity, update_time) "
+    "VALUES (:warehouse_id, :goods_id, :location_id, :quantity, :update_time)",
+    [{"warehouse_id": W1, "goods_id": (g or {}).get("id"), "location_id": row[0],
+      "quantity": 7 if row[1] == "LMT-5000" else 1, "update_time": _limit_now}
+     for row in _limit_rows],
+)
+s, _limit_stock = req("GET", f"/api/stock/?warehouse_id={W1}&goods_barcode=G001", token=admin)
+check("库存详情：目标货物超过 5000 个库位时查询不截断",
+      s == 200 and len(_limit_stock or []) >= 5001
+      and any(row.get("location_code") == "LMT-5000" and row.get("quantity") == 7 for row in (_limit_stock or [])),
+      f"status={s} rows={len(_limit_stock or [])}")
+_detail_html = open(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "request-admin.html"),
+    encoding="utf-8",
+).read()
+check("申请详情：库存查询按货物过滤且不使用 limit=5000 截断",
+      "goods_barcode=" in _detail_html and "limit=5000" not in _detail_html)
+_h5_scan = open(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "mobile", "pages", "scan.js"),
+    encoding="utf-8",
+).read()
+_mini_scan = open(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wechat-miniprogram", "pages", "scan", "index.js"),
+    encoding="utf-8",
+).read()
+check("连续扫码：入库自动匹配忽略历史 0 库存行",
+      "Number(item.stock.quantity || 0) > 0" in _h5_scan
+      and "Number(item.stock.quantity || 0) > 0" in _mini_scan)
+check("申请详情：新选货物立即按条码加载库存",
+      "loadDetailGoodsStock(goods.barcode)" in _detail_html
+      and "function loadDetailGoodsStock(barcode)" in _detail_html)
+check("申请详情：快速切换货物会清理过期库存 loading 状态",
+      "finally" in _detail_html
+      and "detailStockLoading[barcode] === seq" in _detail_html)
 
 # 15m. 前端静态守卫：所有页面禁止内联事件处理器（onclick= 等）
 # 背景：页面 CSP 仅放行 self/CDN/内联脚本哈希，浏览器会直接拦截内联事件处理器
