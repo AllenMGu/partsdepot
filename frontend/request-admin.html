@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-5yr/1boe2Vu9P9eZViaGaAPkWvi1opQLxsPOwB1PUHM='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-T20qiz5N3sEmfVWvgremd1akeZSrs6cL8oDHc96oVRA='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -319,6 +319,11 @@
             let detailStockRows = null;
             let detailStockState = 'idle';
             let detailStockSeq = 0;
+            let detailGoodsStockSeq = 0;
+            let detailStockWarehouseId = null;
+            let detailStockKnown = {};
+            let detailStockLoading = {};
+            let detailStockErrors = {};
 
             const el = function (id) { return document.getElementById(id); };
             const esc = window.escapeHTML || function (v) { return String(v); };
@@ -404,9 +409,10 @@
             }
 
             function stockSummary(barcode) {
-                if (detailStockState === 'loading') return '库存加载中…';
                 if (detailStockState === 'unavailable') return '未指定唯一仓库，无法自动识别';
-                if (detailStockState === 'error') return '库存读取失败';
+                if (detailStockErrors[barcode]) return '库存读取失败';
+                if (detailStockState === 'error' && !detailStockKnown[barcode]) return '库存读取失败';
+                if (!detailStockKnown[barcode]) return '库存加载中…';
                 const rows = (detailStockRows || []).filter(function (row) { return row.goods_barcode === barcode; });
                 if (!rows.length) return '无库存';
                 const total = rows.reduce(function (sum, row) { return sum + Number(row.quantity || 0); }, 0);
@@ -443,6 +449,30 @@
                 el('detailGoodsResults').innerHTML = '';
                 el('detailGoodsSearchStatus').textContent = '已选择货物，可修改数量后保存。';
                 renderSelectedGoods();
+                loadDetailGoodsStock(goods.barcode);
+            }
+
+            async function loadDetailGoodsStock(barcode) {
+                if (!detailCtx || !detailStockWarehouseId || !barcode || detailStockKnown[barcode] || detailStockLoading[barcode]) return;
+                const seq = ++detailGoodsStockSeq;
+                detailStockLoading[barcode] = true;
+                delete detailStockErrors[barcode];
+                renderSelectedGoods();
+                try {
+                    const rows = await apiFetch('api/stock/?warehouse_id=' + encodeURIComponent(detailStockWarehouseId) +
+                        '&goods_barcode=' + encodeURIComponent(barcode));
+                    if (seq !== detailGoodsStockSeq || !detailCtx) return;
+                    detailStockRows = (detailStockRows || []).filter(function (row) { return row.goods_barcode !== barcode; }).concat(rows || []);
+                    detailStockKnown[barcode] = true;
+                    delete detailStockLoading[barcode];
+                    detailStockState = 'ready';
+                    renderSelectedGoods();
+                } catch (error) {
+                    if (seq !== detailGoodsStockSeq || !detailCtx) return;
+                    delete detailStockLoading[barcode];
+                    detailStockErrors[barcode] = true;
+                    renderSelectedGoods();
+                }
             }
 
             async function searchDetailGoods(keyword) {
@@ -627,8 +657,13 @@
 
             async function loadDetailStock(row) {
                 const seq = ++detailStockSeq;
+                detailGoodsStockSeq += 1;
                 detailStockRows = null;
                 detailStockState = 'loading';
+                detailStockWarehouseId = null;
+                detailStockKnown = {};
+                detailStockLoading = {};
+                detailStockErrors = {};
                 renderDetailItems(Array.isArray(row.items) ? row.items : []);
                 let warehouseId = row.warehouse_id;
                 try {
@@ -644,6 +679,7 @@
                         renderSelectedGoods();
                         return;
                     }
+                    detailStockWarehouseId = warehouseId;
                     const items = Array.isArray(row.items) ? row.items : [];
                     const barcodes = Array.from(new Set(items.map(function (item) { return item.barcode; }).filter(Boolean)));
                     const stockLists = await Promise.all(barcodes.map(function (barcode) {
@@ -652,9 +688,13 @@
                     }));
                     if (seq !== detailStockSeq) return;
                     detailStockRows = [].concat.apply([], stockLists);
+                    barcodes.forEach(function (barcode) { detailStockKnown[barcode] = true; });
                     detailStockState = 'ready';
                     renderDetailItems(Array.isArray(row.items) ? row.items : []);
                     renderSelectedGoods();
+                    if (detailSelectedGoods && !detailStockKnown[detailSelectedGoods.barcode]) {
+                        loadDetailGoodsStock(detailSelectedGoods.barcode);
+                    }
                 } catch (error) {
                     if (seq !== detailStockSeq) return;
                     detailStockState = 'error';
@@ -669,6 +709,7 @@
                 document.body.style.overflow = '';
                 closeItemEditor();
                 detailStockSeq += 1;
+                detailGoodsStockSeq += 1;
                 detailCtx = null;
             }
 
