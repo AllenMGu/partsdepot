@@ -1,224 +1,320 @@
-# 多仓库管理系统
+# 办公用品申请系统
 
-## 项目简介
+面向公司内部办公用品申请、库存与仓库管理的一体化系统，支持桌面 Web、手机 H5 和微信小程序。
 
-多仓库管理系统是一个专业的库存管理解决方案，支持多仓库、多用户、货物、库位、库存、出入库、盘点等全流程管理。
+系统以“申请 → 审批/处理 → 库存 → 出入库 → 盘点 → 查询追溯”为主线，同时保留多仓库、多库位、多用户和 LDAP 等后台管理能力。
 
-### 主要功能
+> 仓库历史上由 WMS / 备件管理项目演进而来，因此部分数据库名、环境变量名、内部模块名和测试脚本仍保留 `WMS` / `warehouse` 命名；用户界面统一使用“办公用品申请系统”。
 
-- **仪表盘**：展示库存概况、出入库统计、库存预警
-- **仓库管理**：多仓库创建与配置
-- **库位管理**：库位创建、编辑、禁用
-- **货物管理**：货物信息维护
-- **库存查询**：多维度库存查询
-- **扫码出入库**：快速扫码出入库操作
-- **入库单管理**：入库单创建、提交、查询
-- **出库单管理**：入库/出库单据全生命周期管理
-- **盘点管理**：库存盘点记录
-- **用户管理**：用户创建、权限分配
-- **LDAP 登录**：支持 LDAP 绑定认证与批量导入
-- **微信小程序**：独立的移动端接口客户端（`wechat-miniprogram/`）
-- **手机端网页版（H5）**：手机浏览器直接访问的功能完整移动端（`frontend/mobile/`，见下文）
+## 主要功能
+
+### 办公用品申请
+
+- **免登录申请**：员工无需系统账号即可提交办公用品申请。
+- **仓库选择**：申请时明确所属仓库，库存展示与后续处理仓库保持一致。
+- **货物搜索与库存提示**：支持按名称/条码搜索，并展示申请仓库当前可用库存。
+- **多行申请**：一张申请单可添加多个货物并分别填写数量。
+- **申请单编辑**：管理端可对申请货物进行增加、删除和修改。
+- **申请处理**：管理员可查看、通过或驳回申请；处理过程保留状态与操作记录。
+- **自动归档**：已处理申请按配置周期自动归档，也支持管理员手动归档。
+
+### 库存与仓库
+
+- **仪表盘**：库存概况、出入库统计和库存预警。
+- **仓库管理**：多仓库创建与配置。
+- **库位管理**：库位创建、编辑、禁用及仓库归属校验。
+- **货物管理**：货物信息维护、Excel 导入/导出。
+- **库存查询**：按仓库、货物、库位和关键字查询，可导出库存数据。
+- **扫码出入库**：支持摄像头扫码、扫码枪/手动输入；移动端支持连续扫码工作流。
+- **入库单管理**：创建、编辑、提交、查询和导出。
+- **出库单管理**：创建、编辑、提交、库存校验、查询和导出。
+- **盘点管理**：创建盘点单、扫码盘点、差异确认、完成及报告导出。
+- **库存日志**：记录库存变化与出入库流水。
+
+### 用户与终端
+
+- **用户管理**：用户创建、启停、角色和仓库权限分配。
+- **LDAP 登录**：支持 LDAP 绑定认证、配置管理和用户批量导入。
+- **桌面 Web**：SPA 外壳 + iframe 嵌入视图，支持桌面管理操作。
+- **手机端 H5**：手机浏览器直接访问，无需安装 App。
+- **微信小程序**：提供移动端登录、申请、库存和业务操作入口。
 
 ## 技术栈
 
-- 后端：FastAPI + SQLAlchemy 1.x + PostgreSQL（兼容 SQLite）
-- 前端：HTML5/CSS3/原生 JavaScript + Tailwind CSS v3 + Font Awesome + Chart.js
-- 认证：JWT（HS256）+ bcrypt 密码哈希 + 可选 LDAP 绑定认证
+- **后端**：FastAPI + SQLAlchemy + PostgreSQL（兼容 SQLite 测试）
+- **前端**：HTML5 / CSS3 / 原生 JavaScript + Tailwind CSS v3 + Font Awesome + Chart.js
+- **认证**：JWT（HS256）+ bcrypt + HttpOnly Cookie / Bearer Token + 可选 LDAP
+- **测试**：HTTP 回归 + PostgreSQL 并发专项 + Playwright E2E + 小程序单元测试
+- **CI**：GitHub Actions
 
 ## 项目结构
 
-```
+```text
 partsdepot/
-├── main.py             # 后端入口（FastAPI 单文件应用）
-├── requirements.txt    # Python 依赖
-├── .env.example        # 环境变量示例
-├── frontend/           # 前端静态页面（由后端直接托管）
-│   ├── index.html      # 登录页面
-│   ├── dashboard.html  # 仪表盘（SPA 外壳）
-│   ├── dashboard-view.html # 仪表盘视图（支持 iframe 嵌入模式）
-│   ├── warehouse.html  # 仓库管理
-│   ├── location.html   # 库位管理
-│   ├── goods.html      # 货物管理
-│   ├── stock.html      # 库存查询
-│   ├── scan.html       # 扫码出入库
-│   ├── inbound.html    # 入库单管理
-│   ├── outbound.html   # 出库单管理
-│   ├── check.html      # 盘点管理
-│   ├── user.html       # 用户管理
-│   ├── common.js       # 通用脚本（含 escapeHtml/XSS 防护）
-│   ├── mobile/         # 手机端网页版（H5，见下节）
-│   └── assets/         # 资源文件（JS/CSS/图片/字体）
-├── wechat-miniprogram/ # 微信小程序客户端
-├── gh_mirror_switch.sh # GitHub 直连/镜像站切换工具
-└── README.md           # 项目说明
+├── main.py                 # FastAPI 应用入口、路由装配、静态托管、后台归档任务
+├── core/                   # 核心层：配置、数据库、模型、Schema、认证、LDAP、通用依赖
+├── api/                    # 业务 API
+│   ├── users.py
+│   ├── warehouses.py
+│   ├── locations.py
+│   ├── goods.py
+│   ├── stock.py
+│   ├── inbound.py
+│   ├── outbound.py
+│   ├── check.py
+│   └── requests.py         # 免登录申请、库存查询、管理处理、归档
+├── frontend/               # 桌面端与 H5 静态前端
+│   ├── index.html          # 桌面登录
+│   ├── dashboard.html      # SPA 外壳
+│   ├── dashboard-view.html # 仪表盘嵌入视图
+│   ├── request.html        # 免登录申请页
+│   ├── request-admin.html  # 申请管理
+│   ├── warehouse.html
+│   ├── location.html
+│   ├── goods.html
+│   ├── stock.html
+│   ├── scan.html
+│   ├── inbound.html
+│   ├── outbound.html
+│   ├── check.html
+│   ├── user.html
+│   ├── mobile/             # 手机端 H5
+│   └── assets/             # JS / CSS / 图片 / 字体
+├── wechat-miniprogram/     # 微信小程序
+├── migrations/             # 数据库迁移/升级辅助脚本
+├── tests/                  # 回归、并发、E2E 与测试说明
+├── .github/workflows/      # CI
+├── .env.example            # 环境变量示例
+├── requirements.txt
+├── gh_mirror_switch.sh     # GitHub 直连/镜像切换工具
+└── README.md
 ```
 
-## 如何运行
+## 快速开始
 
-### 1. 准备环境
+### 1. 安装依赖
 
 ```bash
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Windows PowerShell：
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 ```
 
 ### 2. 配置环境变量
 
-参考 `.env.example`（不要把真实凭据提交到版本库）：
+参考 `.env.example`。生产环境不要把真实凭据提交到版本库。
 
 | 变量 | 必填 | 说明 |
 | --- | --- | --- |
-| `SECRET_KEY` | 建议必填 | JWT 签名密钥，必须为长随机串。未设置时系统使用一次性随机密钥，**重启后所有已发 token 失效**。 |
-| `DATABASE_URL` | 是 | PostgreSQL 生产示例见 `.env.example`；本地试用可 `sqlite:///./warehouse.db` |
-| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 首次部署建议 | 系统没有任何用户时，启动自动创建该管理员并授权所有现有仓库；创建成功后即可移除 |
-| `ACCESS_TOKEN_EXPIRE_MINUTES` | 否 | JWT 有效期（分钟），默认 30 |
-| `CORS_ORIGINS` | 否 | CORS 允许来源，逗号分隔 |
-| `LDAP_*` | 否 | LDAP 服务器 / Base DN / 管理员绑定 / 用户查找过滤器 |
+| `SECRET_KEY` | **是** | JWT 签名密钥；代码未配置默认值，缺失时服务拒绝启动 |
+| `DATABASE_URL` | **是** | PostgreSQL 生产连接串；本地测试可使用 SQLite |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 首次部署建议 | 数据库无用户时自动创建初始管理员并授权现有仓库 |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | 否 | JWT 有效期，默认 30 分钟 |
+| `CORS_ORIGINS` | 否 | 允许的 CORS 来源，逗号分隔 |
+| `AUTH_COOKIE_SECURE` | 否 | HTTPS 生产环境建议设为 `true` |
+| `LDAP_*` | 否 | LDAP Server / Base DN / 管理员绑定 / 用户过滤器 |
 
-> 安全说明：系统**不再内置任何默认账号密码**，也没有明文密钥兜底。
-> 首次登录前必须通过 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 或手动写库创建管理员，
-> 否则处于“登录锁定”状态（启动日志会告警）。
+生成 `SECRET_KEY` 示例：
+
+```bash
+python3 -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+本地 SQLite 示例：
+
+```bash
+export SECRET_KEY='replace-with-a-long-random-value'
+export DATABASE_URL='sqlite:///./warehouse.db'
+export ADMIN_USERNAME='admin'
+export ADMIN_PASSWORD='replace-with-a-strong-password'
+```
 
 ### 3. 启动服务
 
-```bash
-# 开发
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+开发：
 
-# 生产（多 worker；不要开 --reload）
+```bash
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+```
+
+生产：
+
+```bash
 uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
-# 或：gunicorn -k uvicorn.workers.UvicornWorker -w 4 -b 0.0.0.0:8000 main:app
 ```
 
 服务启动后：
 
-- 前端页面：`http://<host>:8000/`（后端自动托管 `frontend/` 目录）
+- 桌面端：`http://<host>:8000/`
+- 手机 H5：`http://<host>:8000/mobile/index.html`
+- 免登录申请：`http://<host>:8000/request.html`
 - API 文档：`http://<host>:8000/docs`
-- 首次登录：使用 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 创建的管理员账号
 
-### 4. 既有数据库升级注意（重要·部署前置条件）
+## 数据库升级注意
 
-> **部署前置条件清单（上线前逐项核验）**
-> 1. **备份已就位**：代码备份 + 数据库 dump（`pg_dump warehouse_db > wms-db-backup-*.sql`），可回滚；
-> 2. **重复库存行预检 = 0 行**（执行下方法 2 的第一条 SQL）；
-> 3. **`stock` (仓库,货物,库位) 复合唯一约束已补加**（下方法 2），并在部署后执行"方法 3"的核验 SQL 确认约束存在；
-> 4. **部署后冒烟**：登录、仓库/库存查询、一笔出入库、一笔盘点各走一遍，确认无 5xx；
-> 5. 应用层防并发依赖**行级锁 + 咨询锁**（代码已含）；数据库级兜底依赖上表约束——两者齐备方可上线。
+`Base.metadata.create_all()` 只负责创建不存在的表，**不会自动给旧表补约束或完成结构迁移**。从旧版本升级时，务必先备份数据库并按实际版本检查迁移要求。
 
-`Base.metadata.create_all` **不会**修改已存在的表。若你从旧版本升级，请手动执行：
+生产部署至少应确认：
 
-```sql
--- 库存非负约束（新版模型已含；旧库需手工补）
-ALTER TABLE stock ADD CONSTRAINT stock_quantity_non_negative CHECK (quantity >= 0);
+1. 已完成代码与数据库备份，可回滚。
+2. `stock` 不存在重复的 `(warehouse_id, goods_id, location_id)` 行。
+3. `stock` 已存在 `(warehouse_id, goods_id, location_id)` 复合唯一约束。
+4. `stock.quantity` 已存在非负 CHECK 约束。
+5. 入库、出库、盘点单号具有唯一约束。
+6. 部署后完成登录、申请、库存查询、出入库、盘点和导出冒烟测试。
 
--- 库存 (仓库,货物,库位) 复合唯一（新版模型已含；旧库缺该约束，
--- 并发首次入库可能产生重复库存行，务必补上；执行前先确认无重复行）
-SELECT warehouse_id, goods_id, location_id, count(*) FROM stock
-GROUP BY 1,2,3 HAVING count(*) > 1;          -- 应为 0 行
-ALTER TABLE stock ADD CONSTRAINT _warehouse_goods_location_uc
-    UNIQUE (warehouse_id, goods_id, location_id);
-
--- 单据号唯一（新版模型已含；部分旧库以 <表名>_order_no_key 命名已存在，
--- 存在同名约束时跳过对应语句）
-ALTER TABLE inbound_order_header ADD CONSTRAINT inbound_order_no_key UNIQUE (order_no);
-ALTER TABLE outbound_order_header ADD CONSTRAINT outbound_order_no_key UNIQUE (order_no);
-ALTER TABLE check_order_header ADD CONSTRAINT check_order_no_key UNIQUE (order_no);
-```
-
-**方法 3：部署后核验（部署前置条件清单第 3 项的验证）**
+重复库存预检：
 
 ```sql
--- 复合唯一约束必须存在（应返回 1 行 _warehouse_goods_location_uc）
-SELECT conname FROM pg_constraint
-WHERE conrelid = 'stock'::regclass AND conname = '_warehouse_goods_location_uc';
-
--- 应用层防并发验证（可选）：并发首入库同组合后应恰好 1 条库存行
-SELECT warehouse_id, goods_id, location_id, count(*) FROM stock
-GROUP BY 1,2,3 HAVING count(*) > 1;   -- 应恒为 0 行
+SELECT warehouse_id, goods_id, location_id, count(*)
+FROM stock
+GROUP BY 1,2,3
+HAVING count(*) > 1;
 ```
 
-> 2026-09-14 对既有生产库（warehouse_db）只读实测：`stock_quantity_non_negative` CHECK 与三张单据表 `order_no` UNIQUE 均已存在（单据表约束为 `inbound_order_header_order_no_key` 等旧命名）；**`stock` 复合唯一缺失**，且当前无重复库存行，可安全补加。**该补加步骤为部署前置条件**（见本节顶部清单），部署后须以"方法 3"核验。
+复合唯一约束示例：
 
-## 安全基线（本次修复后）
+```sql
+ALTER TABLE stock
+ADD CONSTRAINT _warehouse_goods_location_uc
+UNIQUE (warehouse_id, goods_id, location_id);
+```
 
-- **JWT**：`SECRET_KEY` 缺失时启动直接失败（无明文兜底）；有效期默认 30 分钟，`ACCESS_TOKEN_EXPIRE_MINUTES` 可覆盖；
-- **并发**：出入库/盘点库存扣减使用 `SELECT ... FOR UPDATE` 行锁；单据提交前对单据头加行锁串行化（同一草稿并发重复提交只有第一个生效）；Postgres 咨询锁串行化单号生成，单号取“当天最大尾号+1”（删除草稿不会导致撞号）；
-- **出库校验**：同一 (货物, 库位) 的多条明细**先汇总再与库存比较**，拆单不能绕过库存检查；校验与扣减在同一事务内完成；
-- **单据明细编辑**：编辑入库/出库明细时，新库位必须属于单据所属仓库（否则 400，不会出现“单据仓库 + 他仓库位”写入库存/流水）；出库明细单价可省略（回退原明细价/物料价），不再 500；
-- **首次入库并发建行**：入库（含扫码）同一 (仓库,货物,库位) 的多条明细先按组合汇总、只创建/更新一条库存行；库存行不存在时先持 Postgres 咨询锁串行化建行再重查，避免并发首次入库触发复合唯一约束 500；
-- **盘点**：录入时记录系统库存基线；完成时若期间库存已变化（基线≠当前）返回 409 要求重盘，不覆盖盘点期间的合法出入库；
-- **扫码出入库**：库存变动、单据头/明细、流水在**单个事务**内一次提交，任一步失败整体回滚；
-- **输入**：数量 `gt=0/ge=0` 校验；`stock.quantity >= 0` 数据库级约束兜底；
-- **XSS**：前端所有用户可控文本经 `escapeHtml()` 转义后再入 `innerHTML`；
-- **Token 存储**：浏览器端统一存 `sessionStorage`（关闭标签页即失效），登录时主动清除 `localStorage` 遗留 token；
-- **权限**：仓库/库位/货物的创建修改为管理员专属（库位修改不允许变更所属仓库）；操作员仅出入库+盘点；禁用账号 401；
-- **LDAP**：过滤器值按 RFC 4515 转义；配置优先级为“环境变量 > 数据库配置表 > 未配置（LDAP 登录不可用）”，代码不含任何内部环境默认值、缺配置不静默放宽搜索过滤器；配置接口对 `ldap_admin_password` 脱敏返回；LDAP 新用户（首次登录/批量导入）默认**零仓库权限**（由管理员分配）；**每次加载都从空值重新构造完整配置**——数据库配置被删除/清空且无环境变量时，上一次加载的旧服务器/凭据/过滤器立即失效（登录 401），不会用旧值继续认证；
-- **初始管理员**：仅可通过 `ADMIN_USERNAME`/`ADMIN_PASSWORD` 环境变量自举（且仅当数据库无任何用户时），无内置弱口令。
+非负库存约束示例：
 
-## 回归测试
+```sql
+ALTER TABLE stock
+ADD CONSTRAINT stock_quantity_non_negative
+CHECK (quantity >= 0);
+```
 
-评审修复项的回归测试已随仓库提供（本地 SQLite 即可运行，无需 PostgreSQL）：
+> 对既有生产库执行任何 DDL 前，请先核对约束是否已存在，避免重复创建。
+
+## 安全与一致性基线
+
+- **启动配置**：`SECRET_KEY` 和 `DATABASE_URL` 缺失时直接拒绝启动。
+- **认证**：JWT + Cookie/Bearer 双通道；禁用用户无法继续访问受保护接口。
+- **初始管理员**：仅通过环境变量自举，不内置默认弱口令。
+- **权限**：仓库、库位、货物等维护操作按管理员权限控制；业务用户只获得授权仓库范围内能力。
+- **LDAP**：过滤器值转义；配置优先级为环境变量 > 数据库 > 未配置；敏感密码不明文返回。
+- **库存并发**：关键库存变更使用行级锁和 PostgreSQL 咨询锁，降低重复建行、重复提交和并发过账风险。
+- **库存约束**：数据库非负约束与复合唯一约束作为应用层防护之外的最终兜底。
+- **事务一致性**：扫码出入库、单据过账等关键库存操作在单事务中执行，失败整体回滚。
+- **盘点保护**：记录盘点基线，盘点期间库存已变化时拒绝直接覆盖并要求重新确认。
+- **申请接口**：公共申请/搜索接口带 IP 与全局限流，输入字段做长度和格式校验。
+- **XSS**：用户可控文本输出前统一转义。
+- **CSP**：前端页面使用 Content-Security-Policy；内联脚本哈希变更需同步更新 CSP。
+
+## 回归测试与 CI
+
+### 本地基础回归
 
 ```bash
 pip install -r requirements.txt
 bash tests/run_regression.sh
 ```
 
-覆盖：出库拆单/并发重复提交、盘点基线冲突、扫码单事务、LDAP 未配置降级与配置撤销、零仓库授权、库位越权、入库/出库明细编辑（跨仓校验、单价可选）、入库单同(货物,库位)多条明细、单号撞号、JWT 有效期、管理员自举等，共 61 项 HTTP 检查 + 3 项进程内 LDAP 加载检查。详见 `tests/README.md`。
+### PostgreSQL 并发专项
+
+```bash
+WMS_DATABASE_URL='postgresql://user:password@localhost/wms_pgconc' \
+python tests/pg_concurrency.py
+```
+
+### Playwright E2E
+
+```bash
+pip install playwright
+playwright install chromium
+bash tests/run_pw_e2e.sh
+```
+
+GitHub Actions 当前包含：
+
+- PostgreSQL 回归测试
+- PostgreSQL 并发专项
+- Playwright 浏览器端到端测试
+- 小程序申请页单元测试
+
+测试脚本具有测试库安全护栏，**不要把生产数据库连接串交给测试脚本**。详细测试场景和当前检查项数量见 `tests/README.md`。
 
 ## 手机端网页版（H5）
 
-功能对标微信小程序（`wechat-miniprogram/`），手机浏览器直接访问，无需安装：
+手机浏览器可直接访问 `frontend/mobile/`，无需安装 App。
 
-- **入口**：`http://<host>:8000/mobile/index.html`（后端同域托管，登录态与桌面端共享 Cookie 会话）
-- **页面**（均在 `frontend/mobile/` 下）：
-  | 页面 | 功能 |
-  | --- | --- |
-  | `index.html` | 首页：库存概览 + 功能入口（匿名可见申请入口） |
-  | `login.html` | 登录（`/token`，HttpOnly Cookie 会话） |
-  | `apply.html` | 备件申请：**免登录**提交，仓库选择、货物搜索（350ms 防抖）、批量库存刷新（`POST /public/stock-lookup`）、提交后展示申请编号 |
-  | `stock.html` | 库存查询（当前仓库过滤 + 关键字筛选） |
-  | `scan.html` | 扫码出入库：BarcodeDetector 相机扫码（不支持时回退手动输入/扫码枪）、库位联想、当前库存参考、出库不超库存校验 |
-  | `orders.html` | 单据中心（入库单/出库单/盘点单入口） |
-  | `inbound.html` / `outbound.html` | 单据列表、创建、明细增删、提交；入库单完成后可「退库」 |
-  | `check.html` | 盘点单：创建、逐项扫码确认数量、差异展示、完成盘点 |
-  | `logs.html` | 出入库日志 |
-  | `profile.html` | 我的：用户信息、切换仓库、退出登录 |
-- **实现约定**（与仓库 CSP 策略一致）：全部脚本外置、零内联 `<script>`、零内联事件处理器（统一 `data-act`/`data-scan` 事件委托）；每页 meta CSP `script-src 'self'`；API 基址相对路径 `../api`（任意子路径部署可用）。
-- **扫码说明**：相机扫码依赖 `BarcodeDetector` + `getUserMedia`（需 HTTPS 或 localhost，Android Chrome 等支持）；不支持时可外接扫码枪（键盘模式）或手动输入。
+| 页面 | 功能 |
+| --- | --- |
+| `mobile/index.html` | 首页、库存概览、功能入口 |
+| `mobile/login.html` | 登录 |
+| `mobile/apply.html` | 免登录办公用品申请、仓库选择、货物搜索和库存提示 |
+| `mobile/stock.html` | 库存查询 |
+| `mobile/scan.html` | 摄像头扫码/扫码枪/手动输入、扫码出入库 |
+| `mobile/orders.html` | 单据中心 |
+| `mobile/inbound.html` | 入库单 |
+| `mobile/outbound.html` | 出库单 |
+| `mobile/check.html` | 盘点 |
+| `mobile/logs.html` | 出入库日志 |
+| `mobile/profile.html` | 用户信息、切换仓库、退出登录 |
 
-## GitHub 镜像切换（网络不稳时）
+相机扫码依赖 `getUserMedia`，生产环境请使用 HTTPS。浏览器不支持相机扫码能力时，可使用扫码枪或手动输入作为回退方式。
 
-本机/部分网络访问 `github.com` 可能不稳定（SYN 丢失、fetch 超时）。仓库自带切换工具：
+## 微信小程序
+
+小程序代码位于 `wechat-miniprogram/`。目前 UI 标题统一为“办公用品申请系统”，并提供移动端登录、申请、库存及相关业务入口。
+
+部署小程序时需按实际环境配置合法域名、HTTPS 和后端 API 地址；不要把生产凭据写入仓库。
+
+## 导入与导出
+
+当前桌面端支持多类业务数据导入/导出：
+
+- 货物 Excel 导入、导出
+- 库存导出
+- 入库单导出
+- 出库单导出
+- 盘点报告导出
+
+SPA 嵌入模式对带 `download` 属性及动态下载链接保留浏览器原生下载行为，避免导出动作被站内路由拦截。
+
+## GitHub 镜像切换
+
+仓库提供 `gh_mirror_switch.sh`，用于网络不稳定时在 GitHub 直连和镜像 fetch 之间切换：
 
 ```bash
-./gh_mirror_switch.sh status    # 查看当前 fetch/push URL + 探测直连/镜像可达性
-./gh_mirror_switch.sh mirror    # fetch 切到镜像（gh-proxy.com），push 仍直连
-./gh_mirror_switch.sh direct    # fetch/push 均直连 github.com
-./gh_mirror_switch.sh auto      # 自动：直连优先；直连挂、镜像活才切镜像
+./gh_mirror_switch.sh status
+./gh_mirror_switch.sh mirror
+./gh_mirror_switch.sh direct
+./gh_mirror_switch.sh auto
 ```
 
 安全约定：
-- **镜像只用于 fetch**（ls-remote/fetch/pull）；**push 永远直连 github.com**（`git remote set-url --push`），凭证与推送内容不经过任何第三方代理；
-- `auto` 只在「直连不可达 且 镜像可达」时才切镜像；两者都不可达时保持现状；
-- `origin` 是自定义 URL（fork/内网等）时，`auto` 一律不改动；
-- 只修改 `origin` 的 fetch/push URL，不影响其它远端与配置。
 
-## 注意事项
+- 镜像仅用于 `fetch` / `pull`。
+- `push` 始终直连 `github.com`。
+- `auto` 仅在直连不可达且镜像可达时切换。
+- 自定义 `origin` 不自动改写。
 
-1. 金额/数量当前为 `Float`（十进制精度迁移不在本次范围，财务对账敏感场景建议后续改 `Numeric`）。
-2. 生产部署请置于反向代理（nginx 等）之后，启用 HTTPS；CORS 按实际来源收紧。
-3. 部分功能需要管理员权限（用户/仓库/库位/货物维护）；操作员仅可使用出入库、盘点与查询。
-4. 建议使用现代浏览器（Chrome、Firefox、Edge 等）访问系统。
+## 部署建议
 
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/0e1ef5ed-5436-44ce-81d3-2135918ededb" />
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/7d197729-09d5-4875-bbd1-faaa65e2583c" />
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/2635a119-277f-4673-9936-17d75ef557bc" />
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/89ae0998-8b9f-4f81-a11a-006a9ea07dab" />
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/44d89f5a-c62c-4a78-801a-e5f2b39e9341" />
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/6eedd286-55c4-4cd7-a0ae-cfd08155a723" />
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/ef27b20f-3e72-4776-96e3-881e7be9344f" />
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/800a0fdc-1ef3-4ab8-874a-fa5766c7f6e4" />
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/b5d2d2ba-3df5-4464-a975-b4919c69ddbe" />
-<img width="2550" height="1255" alt="image" src="https://github.com/user-attachments/assets/ca534d23-cf1e-4955-aa67-aa4d3eb70290" />
+1. 生产环境使用 PostgreSQL，并放在 nginx 等反向代理之后。
+2. 强制 HTTPS，并设置 `AUTH_COOKIE_SECURE=true`。
+3. 收紧 `CORS_ORIGINS`，只允许实际业务域名。
+4. 生产数据库与测试数据库完全隔离。
+5. 部署前备份数据库，部署后执行关键业务冒烟测试。
+6. 对数据库结构变更使用显式迁移流程，不依赖 `create_all()` 自动升级旧表。
+7. 合并代码前保持 GitHub Actions 全绿。
+
+## 说明
+
+- 金额/数量当前仍使用浮点类型的部分场景，财务精度敏感需求后续应迁移到 `Numeric/Decimal`。
+- 浏览器建议使用当前版本 Chrome / Edge / Firefox。
+- 摄像头扫码需 HTTPS 或 localhost 安全上下文。
+- 详细测试保护、并发场景和测试数据库要求见 `tests/README.md`。
