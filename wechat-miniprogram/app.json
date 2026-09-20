@@ -14,7 +14,7 @@
   ],
   "lazyCodeLoading": "requiredComponents",
   "window": {
-    "navigationBarTitleText": "WMS",
+    "navigationBarTitleText": "办公用品申请系统",
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTextStyle": "black",
     "backgroundTextStyle": "light"
