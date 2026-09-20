@@ -146,6 +146,13 @@ window.M_PAGES["scan"] = function () {
       var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
       if (!AudioContextCtor) return null;
       if (!scanAudioContext) scanAudioContext = new AudioContextCtor();
+      // iOS/Safari 不仅要求在用户手势内创建 Context，还通常要求实际启动一次
+      // BufferSource 才会把音频输出解锁；单纯调用 resume() 可能仍保持静音。
+      var unlockBuffer = scanAudioContext.createBuffer(1, 1, scanAudioContext.sampleRate);
+      var unlockSource = scanAudioContext.createBufferSource();
+      unlockSource.buffer = unlockBuffer;
+      unlockSource.connect(scanAudioContext.destination);
+      unlockSource.start(0);
       if ((scanAudioContext.state === "suspended" || scanAudioContext.state === "interrupted") && scanAudioContext.resume) {
         var resumeResult = scanAudioContext.resume();
         if (resumeResult && resumeResult.catch) resumeResult.catch(function () {});
@@ -158,20 +165,29 @@ window.M_PAGES["scan"] = function () {
   function playScanSuccessTone() {
     var ctx = prepareScanAudio();
     if (!ctx) return;
-    try {
+    function play() {
+      try {
       var now = ctx.currentTime;
       var oscillator = ctx.createOscillator();
       var gain = ctx.createGain();
       oscillator.type = "sine";
       oscillator.frequency.setValueAtTime(880, now);
       gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.exponentialRampToValueAtTime(0.08, now + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.22, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
       oscillator.connect(gain);
       gain.connect(ctx.destination);
       oscillator.start(now);
-      oscillator.stop(now + 0.13);
-    } catch (e) {}
+      oscillator.stop(now + 0.17);
+      } catch (e) {}
+    }
+    if ((ctx.state === "suspended" || ctx.state === "interrupted") && ctx.resume) {
+      try {
+        var resumeResult = ctx.resume();
+        if (resumeResult && resumeResult.then) return resumeResult.then(play).catch(function () {});
+      } catch (e) { return; }
+    }
+    play();
   }
   M.prepareScanAudio = prepareScanAudio;
   function quickLocationReady() {
