@@ -881,6 +881,60 @@ s, b = req("POST", "/api/inventory/batch", {
     "request_id": "test-batch-unknown-001"}, admin)
 check("连续扫码：未知条码 → 404 且不产生单据", s == 404, f"status={s} body={b}")
 
+# 15m.1. 连续扫码安全边界：当前仓库与启用库位必须由服务端兜底校验。
+s, b = req("POST", "/api/inventory/batch", {
+    "type": "入库", "warehouse_id": W1,
+    "items": [{"goods_barcode": "G001", "location_code": "L2", "quantity": 1}],
+    "request_id": "test-batch-cross-warehouse-001"}, admin)
+check("连续扫码：仓库 W1 页面携带 W2 库位 → 400", s == 400 and "当前仓库" in str(b), f"status={s} body={b}")
+s, disabled = req("POST", "/api/locations/", {
+    "warehouse_id": W1, "location_code": "L-DISABLED", "name": "停用测试库位"}, admin)
+_disabled_id = (disabled or {}).get("id")
+if _disabled_id:
+    req("PUT", f"/api/locations/{_disabled_id}", {"is_active": False}, admin)
+s, b = req("POST", "/api/inventory/batch", {
+    "type": "入库", "warehouse_id": W1,
+    "items": [{"goods_barcode": "G001", "location_code": "L-DISABLED", "quantity": 1}],
+    "request_id": "test-batch-disabled-location-001"}, admin)
+check("连续扫码：禁用库位 → 400 且不入库", s == 400 and "停用" in str(b), f"status={s} body={b}")
+if _disabled_id:
+    req("PUT", f"/api/locations/{_disabled_id}", {"is_active": True}, admin)
+
+# 15m.2. 大库存详情数据：目标货物超过 5000 个库位时，按货物查询不能被 LIMIT 截断。
+from datetime import datetime as _dt_rows
+_limit_now = _dt_rows.now().strftime("%Y-%m-%d %H:%M:%S")
+_limit_locations = [
+    {"warehouse_id": W1, "location_code": f"LMT-{i:04d}", "name": f"大库存测试{i}",
+     "is_active": True, "create_time": _limit_now}
+    for i in range(5001)
+]
+db_execute(
+    "INSERT INTO locations (warehouse_id, location_code, name, is_active, create_time) "
+    "VALUES (:warehouse_id, :location_code, :name, :is_active, :create_time)",
+    _limit_locations,
+)
+_limit_rows = db_execute(
+    "SELECT id, location_code FROM locations WHERE warehouse_id = :w AND location_code LIKE 'LMT-%' "
+    "ORDER BY id", {"w": W1})
+db_execute(
+    "INSERT INTO stock (warehouse_id, goods_id, location_id, quantity, update_time) "
+    "VALUES (:warehouse_id, :goods_id, :location_id, :quantity, :update_time)",
+    [{"warehouse_id": W1, "goods_id": (g or {}).get("id"), "location_id": row[0],
+      "quantity": 7 if row[1] == "LMT-5000" else 1, "update_time": _limit_now}
+     for row in _limit_rows],
+)
+s, _limit_stock = req("GET", f"/api/stock/?warehouse_id={W1}&goods_barcode=G001", token=admin)
+check("库存详情：目标货物超过 5000 个库位时查询不截断",
+      s == 200 and len(_limit_stock or []) >= 5001
+      and any(row.get("location_code") == "LMT-5000" and row.get("quantity") == 7 for row in (_limit_stock or [])),
+      f"status={s} rows={len(_limit_stock or [])}")
+_detail_html = open(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "request-admin.html"),
+    encoding="utf-8",
+).read()
+check("申请详情：库存查询按货物过滤且不使用 limit=5000 截断",
+      "goods_barcode=" in _detail_html and "limit=5000" not in _detail_html)
+
 # 15m. 前端静态守卫：所有页面禁止内联事件处理器（onclick= 等）
 # 背景：页面 CSP 仅放行 self/CDN/内联脚本哈希，浏览器会直接拦截内联事件处理器
 # （点击无反应、无任何报错，见出库单/入库单"查看"失效故障）。动态按钮一律
