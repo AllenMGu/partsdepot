@@ -1,7 +1,7 @@
 <view class="container">
   <view class="card" style="margin-top: 120rpx;">
-    <view class="title">仓储管理系统</view>
-    <view class="subtitle" style="margin-bottom: 24rpx;">请使用 WMS 账号登录</view>
+    <view class="title">办公用品申请系统</view>
+    <view class="subtitle" style="margin-bottom: 24rpx;">请使用办公用品申请系统账号登录</view>
 
     <input class="input" placeholder="用户名" value="{{username}}" bindinput="onUsernameInput" />
     <input
