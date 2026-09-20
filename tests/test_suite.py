@@ -4,7 +4,7 @@
 #      P1-4 LDAP 未配置降级 | P1-5 零仓库新用户 | P1-6 库位管理员专属
 #      P1-7 入库编辑 500 | P1-8 单号撞号 | JWT 30min | 管理员自举 | 静态托管
 #      五轮：终态单据(已提交/已完成)拒绝一切明细写入(顺序不变量) | 测试库安全护栏
-import base64, json, os, re, sqlite3, sys, threading, time, urllib.parse, urllib.request, urllib.error
+import base64, hashlib, json, os, re, sqlite3, sys, threading, time, urllib.parse, urllib.request, urllib.error
 
 BASE = os.environ.get("WMS_TEST_BASE", "http://127.0.0.1:8091")
 DB = os.environ.get("WMS_TEST_DB", os.path.join(os.path.dirname(os.path.abspath(__file__)), "test.db"))
@@ -862,6 +862,23 @@ check("连续扫码：批量入库成功并返回单号", s == 200 and _batch_or
 check("连续扫码：批量入库库存增加 2", abs(_w1_g001_total() - _batch_before - 2) < 1e-6, f"before={_batch_before} after={_w1_g001_total()}")
 s, b2 = req("POST", "/api/inventory/batch", _batch_body, admin, headers={"Idempotency-Key": _batch_key})
 check("连续扫码：相同幂等键重试只返回原单", s == 200 and (b2 or {}).get("order_no") == _batch_order_no and abs(_w1_g001_total() - _batch_before - 2) < 1e-6, f"status={s} body={b2}")
+# PR19 兼容回归：旧版本 hash 未包含 warehouse_id，升级后携带新字段重试仍须返回原单，不能触发 409 后让客户端换新 key。
+_legacy_canonical = json.dumps({
+    "type": "入库",
+    "items": [{"goods_barcode": "G001", "location_code": "L1", "quantity": 2.0}],
+    "remark": "连续扫码测试",
+}, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+_legacy_hash = hashlib.sha256(_legacy_canonical.encode("utf-8")).hexdigest()
+db_execute(
+    "UPDATE idempotency_records SET request_hash = :h WHERE operation = 'inventory-batch' AND idempotency_key = :k",
+    {"h": _legacy_hash, "k": _batch_key},
+)
+_batch_retry_with_warehouse = dict(_batch_body, warehouse_id=W1)
+s, b3 = req("POST", "/api/inventory/batch", _batch_retry_with_warehouse, admin, headers={"Idempotency-Key": _batch_key})
+check("连续扫码：PR19 旧 hash 携带 warehouse_id 重试仍返回原单",
+      s == 200 and (b3 or {}).get("order_no") == _batch_order_no
+      and abs(_w1_g001_total() - _batch_before - 2) < 1e-6,
+      f"status={s} body={b3}")
 s, b = req("POST", "/api/inventory/batch", _batch_body, op, headers={"Idempotency-Key": _batch_key})
 check("连续扫码：其他操作员复用幂等键 → 409（不泄露原响应）", s == 409, f"status={s} body={b}")
 s, b = req("POST", "/api/inventory/batch", {
@@ -948,6 +965,9 @@ check("连续扫码：入库自动匹配忽略历史 0 库存行",
 check("申请详情：新选货物立即按条码加载库存",
       "loadDetailGoodsStock(goods.barcode)" in _detail_html
       and "function loadDetailGoodsStock(barcode)" in _detail_html)
+check("申请详情：快速切换货物会清理过期库存 loading 状态",
+      "finally" in _detail_html
+      and "detailStockLoading[barcode] === seq" in _detail_html)
 
 # 15m. 前端静态守卫：所有页面禁止内联事件处理器（onclick= 等）
 # 背景：页面 CSP 仅放行 self/CDN/内联脚本哈希，浏览器会直接拦截内联事件处理器
