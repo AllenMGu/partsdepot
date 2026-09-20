@@ -146,8 +146,9 @@ window.M_PAGES["scan"] = function () {
       var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
       if (!AudioContextCtor) return null;
       if (!scanAudioContext) scanAudioContext = new AudioContextCtor();
-      if (scanAudioContext.state === "suspended" && scanAudioContext.resume) {
-        scanAudioContext.resume().catch(function () {});
+      if ((scanAudioContext.state === "suspended" || scanAudioContext.state === "interrupted") && scanAudioContext.resume) {
+        var resumeResult = scanAudioContext.resume();
+        if (resumeResult && resumeResult.catch) resumeResult.catch(function () {});
       }
       return scanAudioContext;
     } catch (e) {
@@ -172,6 +173,7 @@ window.M_PAGES["scan"] = function () {
       oscillator.stop(now + 0.13);
     } catch (e) {}
   }
+  M.prepareScanAudio = prepareScanAudio;
   function quickLocationReady() {
     var w = M.AUTH.currentWarehouse();
     if (!w || !w.id) { feedback(false, "请先选择当前仓库"); return false; }
