@@ -136,6 +136,7 @@ class InventoryBatchItem(BaseModel):
 class InventoryBatchCreate(BaseModel):
     """批量扫码确认请求。request_id 兼容无法设置自定义请求头的客户端。"""
     type: InventoryType
+    warehouse_id: Optional[int] = Field(default=None, gt=0, description="当前操作仓库ID")
     items: List[InventoryBatchItem] = Field(..., min_length=1, max_length=500)
     remark: Optional[str] = Field(default="", max_length=500)
     request_id: Optional[str] = Field(default=None, min_length=1, max_length=200)
