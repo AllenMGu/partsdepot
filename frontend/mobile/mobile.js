@@ -496,6 +496,8 @@ document.addEventListener("click", function (e) {
     e.preventDefault();
     var handler = (window.M_ACTIONS || {}).scanFill;
     if (handler) {
+      // 必须在用户点击事件内创建/恢复 AudioContext，避免普通单次扫码完成后才初始化而被浏览器拦截。
+      if (window.M && window.M.prepareScanAudio) window.M.prepareScanAudio();
       scanCode(function (code) {
         try { handler(code, scanEl); } catch (err) { toast(err.message || "操作失败", "err"); }
       });
