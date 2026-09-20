@@ -54,6 +54,7 @@ Page({
     currentWarehouseName: "",
     currentWarehouseId: null,
     warehouseLocations: [],
+    warehouseLocationsLoaded: false,
     locationOptions: [],
     visibleLocationOptions: [],
     hasMoreLocationOptions: false,
@@ -104,12 +105,14 @@ Page({
   setCheckMode() { this.setData({ mode: "check", result: "" }); },
 
   async loadCurrentWarehouseLocations() {
+    this.setData({ warehouseLocationsLoaded: false });
     if (!this.data.currentWarehouseId) return;
     try {
       const list = await request({ url: "/locations/", data: { warehouse_id: this.data.currentWarehouseId } });
-      this.setData({ warehouseLocations: list || [], locationOptions: list || [] });
+      this.setData({ warehouseLocations: list || [], locationOptions: list || [], warehouseLocationsLoaded: true });
       this.updateVisibleLocationOptions();
     } catch (err) {
+      this.setData({ warehouseLocations: [], locationOptions: [], warehouseLocationsLoaded: false });
       wx.showToast({ title: err.message || "\u5e93\u4f4d\u52a0\u8f7d\u5931\u8d25", icon: "none" });
     }
   },
@@ -185,8 +188,17 @@ Page({
       return;
     }
     const code = this.data.quickLocation;
-    if (code && !(this.data.warehouseLocations || []).some((l) => l.location_code === code)) {
-      return wx.showToast({ title: "指定库位不属于当前仓库", icon: "none" });
+    if (!this.data.warehouseLocationsLoaded) {
+      return wx.showToast({ title: "库位列表尚未加载完成，请稍后重试", icon: "none" });
+    }
+    if (code) {
+      const selected = (this.data.warehouseLocations || []).find((l) => l.location_code === code);
+      if (!selected || selected.warehouse_id !== this.data.currentWarehouseId) {
+        return wx.showToast({ title: "指定库位不属于当前仓库", icon: "none" });
+      }
+      if (selected.is_active === false) {
+        return wx.showToast({ title: "库位已停用，不能出入库", icon: "none" });
+      }
     }
     const generation = this.data.quickScanGeneration + 1;
     this.setData({
@@ -254,6 +266,10 @@ Page({
       const current = (this.data.quickRows || []).find((row) => row.goods_barcode === value && row.location_code === stock.location_code);
       return { stock, remaining: Number(stock.quantity || 0) - Number(current && current.quantity || 0) };
     });
+    const activeCodes = new Set((this.data.warehouseLocations || [])
+      .filter((item) => item.warehouse_id === warehouseId && item.is_active !== false)
+      .map((item) => item.location_code));
+    candidates = candidates.filter((item) => activeCodes.has(item.stock.location_code));
     if (this.data.quickType === "出库") {
       candidates = candidates.filter((item) => item.remaining > 0).sort((a, b) =>
         b.remaining - a.remaining || Number(a.stock.location_id || 0) - Number(b.stock.location_id || 0));
@@ -299,6 +315,7 @@ Page({
       requestId = this.data.quickRequestId || this.newQuickRequestId();
       payload = {
         type: this.data.quickType,
+        warehouse_id: this.data.currentWarehouseId,
         request_id: requestId,
         items: rows.map((row) => ({ goods_barcode: row.goods_barcode, location_code: row.location_code, quantity: row.quantity }))
       };
