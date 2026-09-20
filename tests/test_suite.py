@@ -972,6 +972,16 @@ _mini_scan = open(
 check("连续扫码：入库自动匹配忽略历史 0 库存行",
       "Number(item.stock.quantity || 0) > 0" in _h5_scan
       and "Number(item.stock.quantity || 0) > 0" in _mini_scan)
+check("连续扫码：成功时 H5 有声音或震动反馈",
+      "navigator.vibrate" in _h5_scan
+      and "playScanSuccessTone" in _h5_scan
+      and "createOscillator" in _h5_scan)
+check("单次扫码：货物和库位填充后也有成功反馈",
+      'feedback(true, "扫码成功")' in _h5_scan
+      and 'return false;' in _h5_scan)
+check("连续扫码：小程序成功时有轻震动和成功提示",
+      "wx.vibrateShort({ type: ok ? \"light\" : \"heavy\" })" in _mini_scan
+      and 'icon: ok ? "success" : "none"' in _mini_scan)
 check("申请详情：新选货物立即按条码加载库存",
       "loadDetailGoodsStock(goods.barcode)" in _detail_html
       and "function loadDetailGoodsStock(barcode)" in _detail_html)
