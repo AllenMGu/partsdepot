@@ -34,7 +34,7 @@ def _batch_operation_response(order_no: str, inventory_type: InventoryType, ware
         "items": rows,
     }
 
-def _batch_request_hash(payload: InventoryBatchCreate) -> str:
+def _batch_request_hash(payload: InventoryBatchCreate, include_warehouse: bool = True) -> str:
     canonical_items = sorted([
         {
             "goods_barcode": item.goods_barcode.strip(),
@@ -43,12 +43,14 @@ def _batch_request_hash(payload: InventoryBatchCreate) -> str:
         }
         for item in payload.items
     ], key=lambda item: (item["goods_barcode"], item["location_code"], item["quantity"]))
-    canonical = json.dumps({
+    canonical_data = {
         "type": payload.type.value,
-        "warehouse_id": payload.warehouse_id,
         "items": canonical_items,
         "remark": payload.remark or "",
-    }, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    }
+    if include_warehouse:
+        canonical_data["warehouse_id"] = payload.warehouse_id
+    canonical = json.dumps(canonical_data, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 @router.post("/inventory/batch", summary="连续扫码批量确认出入库")
@@ -66,6 +68,7 @@ async def batch_inventory(
     key = _batch_idempotency_key(idempotency_key, payload.request_id)
     operation = "inventory-batch"
     request_hash = _batch_request_hash(payload)
+    legacy_request_hash = _batch_request_hash(payload, include_warehouse=False)
     try:
         advisory_lock_idempotency_key(db, operation, key)
 
@@ -125,10 +128,26 @@ async def batch_inventory(
             IdempotencyRecord.idempotency_key == key,
         ).first()
         if previous:
+            try:
+                cached_response = json.loads(previous.response_json)
+            except (TypeError, ValueError):
+                cached_response = None
+            hash_matches = previous.request_hash == request_hash
+            # PR19 stored the canonical hash before warehouse_id was added. Keep
+            # those records retryable during a rolling deployment, but bind the
+            # compatibility path to the response warehouse so a same-user key
+            # cannot replay a result from another warehouse.
+            legacy_hash_matches = (
+                previous.request_hash == legacy_request_hash
+                and isinstance(cached_response, dict)
+                and cached_response.get("warehouse_id") == warehouse_id
+            )
             if (previous.operator_id != current_user.id or
-                    not previous.request_hash or previous.request_hash != request_hash):
+                    not isinstance(cached_response, dict) or
+                    cached_response.get("warehouse_id") != warehouse_id or
+                    not (hash_matches or legacy_hash_matches)):
                 raise HTTPException(status_code=409, detail="幂等键已被使用或请求内容不同，请更换幂等键")
-            return json.loads(previous.response_json)
+            return cached_response
 
         keys = sorted(resolved)
 
