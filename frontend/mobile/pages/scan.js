@@ -44,6 +44,7 @@ window.M_PAGES["scan"] = function () {
   var elQuickList = document.getElementById("mQuickList");
   var elQuickSummary = document.getElementById("mQuickSummary");
   var elQuickResult = document.getElementById("mQuickResult");
+  var scanAudioContext = null;
 
   elType1.addEventListener("click", function () { setType("入库"); });
   elType2.addEventListener("click", function () { setType("出库"); });
@@ -136,8 +137,40 @@ window.M_PAGES["scan"] = function () {
     }
   }
   function feedback(ok, message) {
-    if (navigator.vibrate) navigator.vibrate(ok ? 45 : [40, 50, 40]);
+    if (navigator.vibrate) navigator.vibrate(ok ? 70 : [40, 50, 40]);
+    if (ok) playScanSuccessTone();
     M.toast(message, ok ? "ok" : "err");
+  }
+  function prepareScanAudio() {
+    try {
+      var AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) return null;
+      if (!scanAudioContext) scanAudioContext = new AudioContextCtor();
+      if (scanAudioContext.state === "suspended" && scanAudioContext.resume) {
+        scanAudioContext.resume().catch(function () {});
+      }
+      return scanAudioContext;
+    } catch (e) {
+      return null;
+    }
+  }
+  function playScanSuccessTone() {
+    var ctx = prepareScanAudio();
+    if (!ctx) return;
+    try {
+      var now = ctx.currentTime;
+      var oscillator = ctx.createOscillator();
+      var gain = ctx.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(880, now);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.08, now + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.12);
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+      oscillator.start(now);
+      oscillator.stop(now + 0.13);
+    } catch (e) {}
   }
   function quickLocationReady() {
     var w = M.AUTH.currentWarehouse();
@@ -173,6 +206,7 @@ window.M_PAGES["scan"] = function () {
       return;
     }
     if (!quickLocationReady()) return;
+    prepareScanAudio();
     quick.scanGeneration += 1;
     var generation = quick.scanGeneration;
     quick.scanning = true;
@@ -429,18 +463,26 @@ window.M_PAGES["scan"] = function () {
       elBarcode.value = code;
       state.goodsBarcode = code;
       refreshStock();
+      feedback(true, "扫码成功");
+      return true;
     } else if (where === "location") {
       elLocation.value = code;
       state.locationCode = code;
       elLocOptions.innerHTML = "";
       refreshStock();
+      feedback(true, "扫码成功");
+      return true;
     } else if (where === "quick-location") {
       if ((Object.keys(quick.rows).length || quick.submitting || quick.unknown) && code !== quick.location) {
-        return feedback(false, "已有扫描清单，不能更换库位；请先清空清单");
+        feedback(false, "已有扫描清单，不能更换库位；请先清空清单");
+        return false;
       }
       elQuickLocation.value = code;
       quick.location = code;
       renderQuickRows();
+      feedback(true, "扫码成功");
+      return true;
     }
+    return false;
   };
 };
