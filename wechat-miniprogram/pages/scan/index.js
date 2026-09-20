@@ -276,6 +276,7 @@ Page({
       if (!candidates.length) throw new Error(`库存不足：${goods.name}，无法自动确定可出库库位`);
       return { goods, location: candidates[0].stock.location_code };
     }
+    candidates = candidates.filter((item) => Number(item.stock.quantity || 0) > 0);
     candidates.sort((a, b) => Number(b.stock.quantity || 0) - Number(a.stock.quantity || 0) ||
       Number(a.stock.location_id || 0) - Number(b.stock.location_id || 0));
     if (candidates.length) return { goods, location: candidates[0].stock.location_code };
