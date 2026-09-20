@@ -934,6 +934,20 @@ _detail_html = open(
 ).read()
 check("申请详情：库存查询按货物过滤且不使用 limit=5000 截断",
       "goods_barcode=" in _detail_html and "limit=5000" not in _detail_html)
+_h5_scan = open(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "mobile", "pages", "scan.js"),
+    encoding="utf-8",
+).read()
+_mini_scan = open(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "wechat-miniprogram", "pages", "scan", "index.js"),
+    encoding="utf-8",
+).read()
+check("连续扫码：入库自动匹配忽略历史 0 库存行",
+      "Number(item.stock.quantity || 0) > 0" in _h5_scan
+      and "Number(item.stock.quantity || 0) > 0" in _mini_scan)
+check("申请详情：新选货物立即按条码加载库存",
+      "loadDetailGoodsStock(goods.barcode)" in _detail_html
+      and "function loadDetailGoodsStock(barcode)" in _detail_html)
 
 # 15m. 前端静态守卫：所有页面禁止内联事件处理器（onclick= 等）
 # 背景：页面 CSP 仅放行 self/CDN/内联脚本哈希，浏览器会直接拦截内联事件处理器
