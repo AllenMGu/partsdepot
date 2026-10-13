@@ -5,8 +5,12 @@ const vm = require("vm");
 
 let page;
 let resolveLookup;
+let lastRequest;
 const context = {
-  require: () => ({ request: () => new Promise((resolve) => { resolveLookup = resolve; }) }),
+  require: () => ({ request: (options) => {
+    lastRequest = options;
+    return new Promise((resolve) => { resolveLookup = resolve; });
+  } }),
   Page: (definition) => { page = definition; },
   wx: { showToast: () => {} },
   setTimeout,
@@ -42,6 +46,28 @@ async function testLateBatchResponseDoesNotOverwriteNewRow() {
   assert.strictEqual(b.stockUnknown, false);
 }
 
+async function testDepartmentAndSubmitWithoutEmail() {
+  page.resetForm();
+  assert.strictEqual(page.data.departmentIndex, -1);
+  assert.deepStrictEqual(Array.from(page.data.departments),
+    ["行政事务部", "工程管理部", "安全管理部", "生产技术部", "质量管理", "综合管理部"]);
+  page.onDepartmentChange({ detail: { value: "4" } });
+  assert.strictEqual(page.data.department, "质量管理");
+  Object.assign(page.data, { applicantName: "申请人", description: "测试用途", warehouseId: 2 });
+  assert.strictEqual(page.validate(), "");
+  const pending = page.submit();
+  assert.strictEqual(lastRequest.data.department, "质量管理");
+  assert.strictEqual(Object.hasOwn(lastRequest.data, "contact"), false);
+  resolveLookup({ reference: "APP-TEST" });
+  context.wx.showModal = () => {};
+  await pending;
+  page.resetForm();
+  assert.strictEqual(page.data.department, "");
+  assert.strictEqual(page.data.departmentIndex, -1);
+  assert.strictEqual(page.data.submitting, false);
+}
+
 testLateBatchResponseDoesNotOverwriteNewRow()
-  .then(() => console.log("PASS | 小程序旧批量响应不覆盖请求期间新增行"))
+  .then(testDepartmentAndSubmitWithoutEmail)
+  .then(() => console.log("PASS | 小程序库存响应、部门选择、无邮箱提交及重置"))
   .catch((error) => { console.error(error); process.exit(1); });

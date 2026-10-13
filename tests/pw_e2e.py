@@ -284,8 +284,10 @@ with sync_playwright() as p:
 
     # 填写表单并提交
     page.fill("#applicantName", "浏览器申请人")
-    page.fill("#department", "测试部")
-    page.fill("#contact", "pw@test.com")
+    check("提交页：无邮箱输入框", page.locator("#contact").count() == 0)
+    check("提交页：部门固定六个选项",
+          page.locator("#department option").all_text_contents()[1:] == ['行政事务部', '工程管理部', '安全管理部', '生产技术部', '质量管理', '综合管理部'])
+    page.select_option("#department", "行政事务部")
     page.fill("#description", "Playwright 端到端：两行备件")
     page.click("#submitBtn")
     page.wait_for_selector("#successPanel:not(.hidden)")
@@ -304,7 +306,6 @@ with sync_playwright() as p:
     # 第二行保持未选择
     page.click("#addGoodsRowBtn")
     page.fill("#applicantName", "浏览器申请人B")
-    page.fill("#contact", "pw2@test.com")
     page.fill("#description", "一行已选 + 一行未选")
     page.click("#submitBtn")
     page.wait_for_selector("#successPanel:not(.hidden)")

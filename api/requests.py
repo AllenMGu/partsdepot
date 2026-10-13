@@ -874,7 +874,7 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
         operator_id=current_user.id,
         total_amount=total_amount,
         remark=(f"申请单 {reference} 审批通过自动出库"
-                f"（申请人：{req.applicant_name}；邮箱：{req.contact}）")[:500],
+                f"（申请人：{req.applicant_name}；部门：{req.department or '未填写'}）")[:500],
         status="COMPLETED",
         create_time=now,
         submit_time=now,
