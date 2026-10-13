@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-IIRpWrEtFYA6ZO44HXNkw+U0p2SYOSZsZNaoIq/NVqg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Z1YwIbjQ20EXXsEJmZit4PHzLCylDqtMwsEHGCOw2v8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 办公用品申请系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -43,19 +43,20 @@
                             </div>
                             <div>
                                 <label for="department" class="block text-sm font-medium text-gray-700 mb-1">部门</label>
-                                <input type="text" id="department" name="department" maxlength="100"
-                                       class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
-                                       placeholder="选填，如：装配部">
+                                <select id="department" name="department"
+                                        class="w-full px-4 py-2 border border-gray-300 rounded-md bg-white focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300">
+                                    <option value="">请选择部门（选填）</option>
+                                    <option value="行政事务部">行政事务部</option>
+                                    <option value="工程管理部">工程管理部</option>
+                                    <option value="安全管理部">安全管理部</option>
+                                    <option value="生产技术部">生产技术部</option>
+                                    <option value="质量管理">质量管理</option>
+                                    <option value="综合管理部">综合管理部</option>
+                                </select>
                             </div>
                         </div>
 
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
-                            <div>
-                                <label for="contact" class="block text-sm font-medium text-gray-700 mb-1">邮箱 <span class="text-red-500">*</span></label>
-                                <input type="email" id="contact" name="contact" maxlength="200"
-                                       class="w-full px-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300"
-                                       placeholder="您的邮箱" required>
-                            </div>
                             <div>
                                 <label for="warehouseId" class="block text-sm font-medium text-gray-700 mb-1">申请仓库 <span class="text-red-500">*</span></label>
                                 <select id="warehouseId" name="warehouse_id"
@@ -562,12 +563,11 @@
                 const payload = {
                     applicant_name: document.getElementById('applicantName').value.trim(),
                     department: document.getElementById('department').value.trim(),
-                    contact: document.getElementById('contact').value.trim(),
                     description: document.getElementById('description').value.trim(),
                     attachment_note: document.getElementById('attachmentNote').value.trim()
                 };
 
-                if (!payload.applicant_name || !payload.contact || !payload.description) {
+                if (!payload.applicant_name || !payload.description) {
                     showError('请填写带 * 的必填项');
                     return;
                 }
@@ -581,10 +581,6 @@
                     return;
                 }
                 payload.warehouse_id = warehouseId;
-                if (payload.contact.length < 3) {
-                    showError('邮箱至少 3 个字符');
-                    return;
-                }
 
                 // 相关货物（选填，可多行）：未选择备件的行不含数据、不参与提交；
                 // 已选择备件的行必须填写数量（大于 0）

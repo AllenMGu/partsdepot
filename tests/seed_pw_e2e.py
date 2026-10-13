@@ -103,7 +103,7 @@ def main():
 
     # 近期待处理：2 行货物 @ W1（轴承 x3 + 垫片 x2；审批通过时从 W1 扣减）
     r1 = req("POST", "/api/requests/", {
-        "applicant_name": "浏览器测试", "department": "装配部", "contact": "bw@test.com",
+        "applicant_name": "浏览器测试", "department": "生产技术部", "contact": "bw@test.com",
         "description": "Playwright 端到端验证：轴承 3 个、垫片 2 片（审批通过将从一号仓扣减库存）",
         "warehouse_id": wid,
         "items": [{"barcode": "8888001", "quantity": 3}, {"barcode": "8888003", "quantity": 2}],

@@ -422,12 +422,20 @@ def _first_item(r):
     return items[0] if isinstance(items, list) and items else {}
 
 s, b = req("POST", "/api/requests/", {
-    "applicant_name": "货物测试", "contact": "user@example.com",
+    "applicant_name": "货物测试", "department": "行政事务部",
     "description": "带货物申请", "warehouse_id": W1,
     "items": [{"barcode": "G001", "quantity": 2}]})
 check("带货物提交：明细行 条码+数量 → 201", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
 rid = (b or {}).get("id")
 check("带货物提交：响应含 id/reference/message", isinstance(b, dict) and b.get("id") and b.get("reference") and b.get("message"), f"body={b}")
+s, saved = req("GET", "/api/requests/", token=admin)
+_saved = next((r for r in saved if r["id"] == rid), {}) if isinstance(saved, list) else {}
+check("无邮箱申请：保存为空字符串且部门正确",
+      _saved.get("contact") == "" and _saved.get("department") == "行政事务部", str(_saved))
+s, b = req("POST", "/api/requests/", {
+    "applicant_name": "部门测试", "department": "其他部门", "description": "无效部门"})
+check("部门固定选项：非指定部门 → 422", s == 422, f"status={s} body={b}")
+
 s, b = req("POST", "/api/requests/", {
     "applicant_name": "货物测试", "contact": "user@example.com",
     "description": "多行申请", "items": [{"barcode": "G001", "quantity": 1}, {"barcode": "G001", "quantity": 3}]})

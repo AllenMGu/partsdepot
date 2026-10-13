@@ -5,9 +5,9 @@ import re
 from fastapi import status
 from pydantic import BaseModel, Field, field_validator
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Optional, Literal
 
-# 实用邮箱格式（评审 P2：contact 业务上即邮箱，后端强校验）。
+# 历史客户端仍可提交邮箱；省略或空白不再阻止申请提交。
 # 本地部分允许 字母/数字/._%+-，域名需至少一个点分段；拒绝手机号、任意文本。
 EMAIL_PATTERN = re.compile(r"^[\w.+-]+@[\w-]+(?:\.[\w-]+)+$", re.ASCII)
 
@@ -345,8 +345,8 @@ class PublicStockLookup(BaseModel):
 
 class RequestSubmit(BaseModel):
     applicant_name: str = Field(..., min_length=1, max_length=100, description="申请人")
-    department: Optional[str] = Field(None, max_length=100, description="部门（可选）")
-    contact: str = Field(..., min_length=3, max_length=200, description="邮箱（后端强校验格式）")
+    department: Optional[Literal['行政事务部', '工程管理部', '安全管理部', '生产技术部', '质量管理', '综合管理部']] = Field(None, description="部门（可选，固定六个选项）")
+    contact: str = Field("", max_length=200, description="历史客户端邮箱（可选，新申请页不再填写）")
     category: Optional[str] = Field(None, max_length=50, description="申请类别（已停用，可选，后端不再强校验）")
     description: str = Field(..., min_length=1, max_length=2000, description="事由描述")
     attachment_note: Optional[str] = Field(None, max_length=500, description="备注（可选）")
@@ -356,11 +356,16 @@ class RequestSubmit(BaseModel):
     # 相关货物（可选，可多行）：每行 条码+数量，名称/规格/单位由后端查库快照
     items: List[RequestItemSubmit] = Field(default_factory=list, max_length=200, description="相关货物明细（可选，每行条码+数量）")
 
+    @field_validator("department", mode="before")
+    @classmethod
+    def _normalize_department(cls, v):
+        return (v.strip() or None) if isinstance(v, str) else v
+
     @field_validator("contact")
     @classmethod
     def _contact_must_be_email(cls, v: str) -> str:
         v = v.strip()
-        if not EMAIL_PATTERN.match(v):
+        if v and not EMAIL_PATTERN.match(v):
             raise ValueError("邮箱格式不正确（示例：zhangsan@example.com）")
         return v
 

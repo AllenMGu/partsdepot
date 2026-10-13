@@ -1,13 +1,11 @@
 const { request } = require("../../utils/api");
 
-// 与后端 core/schemas.py 的 EMAIL_PATTERN 保持一致（ASCII 邮箱）
-const EMAIL_RE = /^[\w.+-]+@[\w-]+(?:\.[\w-]+)+$/;
-
 Page({
   data: {
     applicantName: "",
     department: "",
-    contact: "",
+    departments: ["行政事务部", "工程管理部", "安全管理部", "生产技术部", "质量管理", "综合管理部"],
+    departmentIndex: -1,
     description: "",
     attachmentNote: "",
     warehouses: [],
@@ -34,8 +32,12 @@ Page({
 
   // ---------- 表单输入 ----------
   onApplicantInput(e) { this.setData({ applicantName: e.detail.value }); },
-  onDepartmentInput(e) { this.setData({ department: e.detail.value }); },
-  onContactInput(e) { this.setData({ contact: e.detail.value }); },
+  onDepartmentChange(e) {
+    const index = Number(e.detail.value);
+    const department = this.data.departments[index];
+    if (!department) return;
+    this.setData({ departmentIndex: index, department });
+  },
   onDescriptionInput(e) { this.setData({ description: e.detail.value }); },
   onAttachmentNoteInput(e) { this.setData({ attachmentNote: e.detail.value }); },
 
@@ -191,13 +193,10 @@ Page({
   validate() {
     const d = this.data;
     const applicantName = d.applicantName.trim();
-    const contact = d.contact.trim();
     const description = d.description.trim();
 
     if (!d.warehouseId) return "请选择申请仓库";
     if (!applicantName) return "请填写申请人";
-    if (!contact) return "请填写联系邮箱";
-    if (!EMAIL_RE.test(contact)) return "邮箱格式不正确（示例：zhangsan@example.com）";
     if (!description) return "请填写事由描述";
     for (let i = 0; i < d.goodsItems.length; i++) {
       const q = Number(d.goodsItems[i].qty);
@@ -220,13 +219,11 @@ Page({
     try {
       const applicantName = this.data.applicantName.trim();
       const department = this.data.department.trim();
-      const contact = this.data.contact.trim();
       const description = this.data.description.trim();
       const attachmentNote = this.data.attachmentNote.trim();
 
       const payload = {
         applicant_name: applicantName,
-        contact,
         description,
         warehouse_id: this.data.warehouseId,
         items: this.data.goodsItems.map((g) => ({ barcode: g.barcode, quantity: Number(g.qty) }))
@@ -252,7 +249,7 @@ Page({
     this.setData({
       applicantName: "",
       department: "",
-      contact: "",
+      departmentIndex: -1,
       description: "",
       attachmentNote: "",
       goodsItems: [],

@@ -143,7 +143,10 @@ with sync_playwright() as p:
         "for (var i = 0; i < s.options.length; i++) if (s.options[i].value) return s.options[i].value; }")
     page.select_option("#mApplyWarehouse", wh_first)
     page.fill("#mApplyApplicant", "E2E申请人")
-    page.fill("#mApplyContact", "e2e-mobile@test.com")
+    check("手机申请：无邮箱输入框", page.locator("#mApplyContact").count() == 0)
+    check("手机申请：部门固定六个选项",
+          page.locator("#mApplyDepartment option").all_text_contents()[1:] == ['行政事务部', '工程管理部', '安全管理部', '生产技术部', '质量管理', '综合管理部'])
+    page.select_option("#mApplyDepartment", "工程管理部")
     page.fill("#mApplyDescription", "H5 端到端验证申请")
     # 搜索并添加一行货物（覆盖选货 + 库存显示路径）
     page.fill("#mApplyGoodsKw", "8888001")

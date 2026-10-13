@@ -18,7 +18,6 @@ window.M_PAGES["apply"] = function () {
   var elWarehouse = document.getElementById("mApplyWarehouse");
   var elApplicant = document.getElementById("mApplyApplicant");
   var elDepartment = document.getElementById("mApplyDepartment");
-  var elContact = document.getElementById("mApplyContact");
   var elDescription = document.getElementById("mApplyDescription");
   var elAttachment = document.getElementById("mApplyAttachment");
   var elKw = document.getElementById("mApplyGoodsKw");
@@ -226,14 +225,11 @@ window.M_PAGES["apply"] = function () {
     if (state.submitting) return;
     var applicant = elApplicant.value.trim();
     var department = elDepartment.value.trim();
-    var contact = elContact.value.trim();
     var description = elDescription.value.trim();
     var attachmentNote = elAttachment.value.trim();
 
     if (!state.warehouseId) return M.toast("请选择申请仓库", "err");
     if (!applicant) return M.toast("请填写申请人", "err");
-    if (!contact) return M.toast("请填写联系邮箱", "err");
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contact)) return M.toast("联系邮箱格式不正确", "err");
     if (!description) return M.toast("请填写事由描述", "err");
 
     var items = state.goodsItems.filter(function (g) { return (g.qty || "").trim() !== ""; });
@@ -243,7 +239,6 @@ window.M_PAGES["apply"] = function () {
 
     var payload = {
       applicant_name: applicant,
-      contact: contact,
       description: description,
       warehouse_id: state.warehouseId,
       items: items.map(function (g) { return { barcode: g.barcode, quantity: Number(g.qty) }; })
@@ -284,7 +279,6 @@ window.M_PAGES["apply"] = function () {
   function resetForm() {
     elApplicant.value = "";
     elDepartment.value = "";
-    elContact.value = "";
     elDescription.value = "";
     elAttachment.value = "";
     elKw.value = "";
