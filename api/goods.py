@@ -30,6 +30,43 @@ def _scope(db: Session, user: User, warehouse_id: Optional[int], *, manage: bool
     return require_warehouse(db, user, warehouse_id or selected, manage=manage)
 
 
+def _pending_request_ref_exists(db: Session, warehouse_id: int, barcode: str) -> bool:
+    """同仓待审批申请是否引用该条码（删除/改条码共用，评审 P1）。
+
+    覆盖审批的两条仓库解析路径：
+    1) 申请单明确指定本仓库；
+    2) 历史申请单未指定仓库，审批时解析到本仓库（全系统恰好一个启用仓库）。
+    多仓且历史单未指定仓库时审批本就会因"无法确定仓库"被拒，不构成新增故障。
+    """
+    same_wh_ref = (
+        db.query(RequestItem.id)
+        .join(Request, RequestItem.request_id == Request.id)
+        .filter(
+            RequestItem.barcode == barcode,
+            Request.warehouse_id == warehouse_id,
+            Request.status == RequestStatus.PENDING.value,
+        )
+        .first()
+    )
+    if same_wh_ref:
+        return True
+    legacy_ref = (
+        db.query(RequestItem.id)
+        .join(Request, RequestItem.request_id == Request.id)
+        .filter(
+            RequestItem.barcode == barcode,
+            Request.warehouse_id.is_(None),
+            Request.status == RequestStatus.PENDING.value,
+        )
+        .first()
+    )
+    if legacy_ref:
+        active_ids = [w.id for w in db.query(Warehouse.id).filter(Warehouse.is_active.is_(True)).all()]
+        if len(active_ids) == 1 and active_ids[0] == warehouse_id:
+            return True
+    return False
+
+
 @router.post("/goods/", response_model=GoodsResponse, summary="新增本仓库货物")
 async def create_goods(goods: GoodsCreate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
     warehouse_id = _scope(db, current_user, goods.warehouse_id, manage=True)
@@ -108,8 +145,18 @@ async def get_goods_detail(id: int, current_user: User = Depends(get_current_use
 @router.put("/goods/{id}", response_model=GoodsResponse, summary="修改本仓库货物")
 async def update_goods(id: int, goods: GoodsUpdate, current_user: User = Depends(get_current_user),
                        db: Session = Depends(get_db)):
-    row = _get_visible(db, current_user, id, manage=True)
-    for key, value in goods.model_dump(exclude_unset=True).items():
+    # lock=True：与"提交申请/修改申请明细"共用同一货物行锁（评审 P1），
+    # 条码改写的检查与提交路径的行锁在同一行上串行化，避免竞态。
+    row = _get_visible(db, current_user, id, manage=True, lock=True)
+    data = goods.model_dump(exclude_unset=True)
+    new_barcode = data.get("barcode")
+    if new_barcode is not None and new_barcode != row.barcode:
+        # 评审 P1：申请明细只存条码快照（无 goods_id 外键），本仓待审批申请引用旧条码时
+        # 改条码会让审批按旧条码找不到档案而卡死。持行锁、同事务内检查，存在则 409。
+        if _pending_request_ref_exists(db, row.warehouse_id, row.barcode):
+            raise HTTPException(status_code=409,
+                                detail="该货物已被本仓库待审批申请单引用，不能修改条码；请先驳回或处理相关申请单")
+    for key, value in data.items():
         setattr(row, key, value)
     try:
         db.commit()
@@ -130,37 +177,9 @@ async def delete_goods(id: int, current_user: User = Depends(get_current_user), 
         if db.query(model.id).filter(model.goods_id == id).first():
             raise HTTPException(status_code=409, detail="货物已有库存或业务记录，无法删除")
     # 申请单货物明细按条码引用档案（无 goods_id 外键）：删除后待审批申请将无法
-    # 通过审批（找不到本仓库货物档案，400 卡死）。覆盖审批的两条仓库解析路径：
-    # 1) 申请单明确指定本仓库；
-    # 2) 历史申请单未指定仓库，审批时解析到本仓库（全系统恰好一个启用仓库）。
-    same_wh_ref = (
-        db.query(RequestItem.id)
-        .join(Request, RequestItem.request_id == Request.id)
-        .filter(
-            RequestItem.barcode == row.barcode,
-            Request.warehouse_id == row.warehouse_id,
-            Request.status == RequestStatus.PENDING.value,
-        )
-        .first()
-    )
-    if same_wh_ref:
+    # 通过审批（找不到本仓库货物档案，400 卡死）。仓库解析路径与改条码检查共用。
+    if _pending_request_ref_exists(db, row.warehouse_id, row.barcode):
         raise HTTPException(status_code=409, detail="该货物已被本仓库待审批申请单引用，无法删除；请先驳回或处理相关申请单")
-    legacy_ref = (
-        db.query(RequestItem.id)
-        .join(Request, RequestItem.request_id == Request.id)
-        .filter(
-            RequestItem.barcode == row.barcode,
-            Request.warehouse_id.is_(None),
-            Request.status == RequestStatus.PENDING.value,
-        )
-        .first()
-    )
-    if legacy_ref:
-        active_ids = [w.id for w in db.query(Warehouse.id).filter(Warehouse.is_active.is_(True)).all()]
-        if len(active_ids) == 1 and active_ids[0] == row.warehouse_id:
-            raise HTTPException(status_code=409, detail="该货物被历史待审批申请单引用（审批将解析到本仓库），无法删除；请先处理相关申请单")
-        # 多仓且历史单未指定仓库：审批本就会因"无法确定仓库"被拒，
-        # 删除本仓货物不会造成新的故障，允许删除。
     db.delete(row)
     try:
         db.commit()

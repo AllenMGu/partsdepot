@@ -170,6 +170,49 @@ class WarehouseIsolationTest(unittest.TestCase):
         self._call("POST", f"/requests/{request_id}/status", {"status": "approved"},
                    auth=self.supervisor_auth, expected=403)
 
+    def test_update_barcode_blocked_by_pending_request(self):
+        # 评审 P1：货物被同仓待审批申请引用时改条码会让审批按旧条码找不到档案而卡死；
+        # 必须 409 拒绝且档案不变；申请进入终态（驳回）后改条码放行。
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+        gid = self._call("POST", "/goods/", {"barcode": "RENAME-OLD", "name": "改条码货物"})["id"]
+        req = self._call("POST", "/requests/", {
+            "applicant_name": "改条码拦截测试", "description": "待审批引用", "warehouse_id": self.wh1,
+            "items": [{"barcode": "RENAME-OLD", "quantity": 1}],
+        }, expected=201)
+        resp = self.client.put(f"/api/goods/{gid}", json={"barcode": "RENAME-NEW"},
+                               headers={"Authorization": "Bearer " + self.admin["access_token"]})
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertIn("待审批申请", resp.json()["detail"])
+        self.assertEqual(self._call("GET", f"/goods/{gid}")["barcode"], "RENAME-OLD")
+        # 仅改名等非条码字段不受拦截
+        self._call("PUT", f"/goods/{gid}", {"name": "改条码货物-改名称"})
+        self._call("POST", f"/requests/{req['id']}/status", {"status": "rejected"})
+        resp = self.client.put(f"/api/goods/{gid}", json={"barcode": "RENAME-NEW"},
+                               headers={"Authorization": "Bearer " + self.admin["access_token"]})
+        self.assertEqual(resp.status_code, 200, resp.text)
+        self.assertEqual(resp.json()["barcode"], "RENAME-NEW")
+        self._call("DELETE", f"/goods/{gid}")
+
+    def test_admin_role_change_keeps_warehouse_switch(self):
+        # 评审 P2：普通用户升为管理员后，仓库列表显示全部仓库，切仓不得被
+        # user_warehouses 关联表卡住（403）；降回后未授权仓库仍拒绝。
+        op_id = self._call("POST", "/users/", {
+            "username": "scope-promo", "password": "password2", "full_name": "待晋升用户",
+            "role": "operator", "warehouse_ids": [self.wh1],
+        })["id"]
+        # 升级前（operator）：未授权的 wh2 切换被拒
+        self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh2}", expected=403)
+        # 升为 admin（不补仓库授权）
+        self._call("PUT", f"/users/{op_id}", {"role": "admin"})
+        auth = self._login("scope-promo", "password2")["access_token"]
+        rows = self._call("GET", f"/users/{op_id}/warehouses", auth=auth)
+        self.assertEqual(sorted(w["id"] for w in rows), sorted([self.wh1, self.wh2]))
+        self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh2}", auth=auth)
+        # 降回 operator：wh2 无授权，再次切换被拒
+        self._call("PUT", f"/users/{op_id}", {"role": "operator"})
+        self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh2}", auth=auth, expected=403)
+        self._call("DELETE", f"/users/{op_id}")
+
 
 if __name__ == "__main__":
     unittest.main()

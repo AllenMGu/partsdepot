@@ -105,21 +105,35 @@ async def switch_user_warehouse(
     # 权限检查：只能切换自己的仓库或管理员操作
     if current_user.id != user_id and current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="无权限操作")
-    
-    # 检查用户是否有权限访问该仓库
-    user_warehouse = db.query(UserWarehouse).filter(
-        UserWarehouse.user_id == user_id,
-        UserWarehouse.warehouse_id == warehouse_id
-    ).first()
-    if not user_warehouse:
-        raise HTTPException(status_code=403, detail="用户无权访问该仓库")
-    
-    # 更新用户当前仓库
+
     user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    if user.role == UserRole.ADMIN:
+        # 管理员跨仓规则统一（评审 P2）：与 require_warehouse 的管理员豁免、
+        # 仓库列表接口的"管理员返回全部仓库"保持一致——不受 user_warehouses
+        # 关联表限制（修复"普通用户升管理员后列表可见仓库、切换却 403"），
+        # 目标仓库须存在且启用。
+        warehouse = db.query(Warehouse).filter(
+            Warehouse.id == warehouse_id, Warehouse.is_active.is_(True)
+        ).first()
+        if not warehouse:
+            raise HTTPException(status_code=404, detail="仓库不存在或已停用")
+    else:
+        # 检查用户是否有权限访问该仓库
+        user_warehouse = db.query(UserWarehouse).filter(
+            UserWarehouse.user_id == user_id,
+            UserWarehouse.warehouse_id == warehouse_id
+        ).first()
+        if not user_warehouse:
+            raise HTTPException(status_code=403, detail="用户无权访问该仓库")
+        warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+
+    # 更新用户当前仓库
     user.current_warehouse_id = warehouse_id
     db.commit()
-    
-    warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+
     return {
         "message": "仓库切换成功",
         "current_warehouse_id": warehouse_id,
