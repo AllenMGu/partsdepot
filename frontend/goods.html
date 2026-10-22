@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-u9cK2G1FigW9YsgCsFQNq7BRV0jQtZHVyACGaA1XGoo='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-iPB8F7IoGALHqxLk9u8B78PIEVkvmXG4p/jMOmkU4ok='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>货物管理 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -374,6 +374,8 @@
         let warehouses = [];
         let currentWarehouseId = null;
         let currentEditId = null;
+        let modalWarehouseId = null;
+        let goodsLoadSeq = 0;
         let currentDeleteId = null;
         let currentPage = 1;
         let pageSize = 10;
@@ -610,7 +612,7 @@
                             const warehouseName = this.dataset.warehouseName;
                             
                             // 更新当前仓库
-                            await switchWarehouse(warehouseId, warehouseName);
+                            if (!await switchWarehouse(warehouseId, warehouseName)) return;
                             
                             // 更新UI
                             warehouseList.querySelectorAll('a').forEach(a => {
@@ -654,6 +656,11 @@
                 // 更新UI
                 currentWarehouseEl.textContent = warehouseName;
                 currentWarehouseId = warehouseId;
+                goodsLoadSeq += 1;
+                allGoods = [];
+                filteredGoods = [];
+                goodsModal.classList.add('hidden');
+                modalWarehouseId = null;
                 
                 // 更新本地存储的用户信息
                 currentUser.current_warehouse_id = warehouseId;
@@ -664,30 +671,37 @@
                     sessionStorage.setItem('user', JSON.stringify(currentUser));
                 }
                 await loadGoodsData();
+                return true;
             } catch (error) {
                 console.error('切换仓库失败:', error);
                 alert('切换仓库失败，请重试');
+                return false;
             }
         }
         
         // 加载货物数据
         async function loadGoodsData() {
+            const seq = ++goodsLoadSeq;
+            const warehouseId = currentWarehouseId;
             try {
                 // 显示加载状态
                 goodsTableBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-gray-500">加载中...</td></tr>';
 
                 // 获取货物列表
-                const response = await fetch(`${API_BASE_URL}/goods/`, {
+                const response = await fetch(`${API_BASE_URL}/goods/?warehouse_id=${encodeURIComponent(warehouseId)}`, {
                     headers: {
                         ...getAuthHeaders()
                     }
                 });
 
+                if (seq !== goodsLoadSeq || warehouseId !== currentWarehouseId) return;
                 if (!response.ok) {
                     throw new Error('获取货物数据失败');
                 }
 
-                allGoods = await response.json();
+                const rows = await response.json();
+                if (seq !== goodsLoadSeq || warehouseId !== currentWarehouseId) return;
+                allGoods = rows;
                 filteredGoods = [...allGoods];
 
                 // 应用筛选
@@ -696,6 +710,7 @@
                 // 更新表格
                 renderGoodsTable();
             } catch (error) {
+                if (seq !== goodsLoadSeq || warehouseId !== currentWarehouseId) return;
                 console.error('加载货物数据失败:', error);
                 goodsTableBody.innerHTML = '<tr><td colspan="7" class="px-6 py-4 text-center text-red-500">加载失败，请重试</td></tr>';
             }
@@ -857,6 +872,8 @@
         
         // 打开新增货物模态框
         function openAddModal() {
+            if (!currentWarehouseId) return showToast('请先选择仓库', 'error');
+            modalWarehouseId = currentWarehouseId;
             modalTitle.textContent = '新增货物';
             goodsForm.reset();
             goodsId.value = '';
@@ -868,6 +885,7 @@
         
         // 打开编辑货物模态框
         async function editGoods(id) {
+            const warehouseId = currentWarehouseId;
             try {
                 // 获取货物详情
                 const response = await fetch(`${API_BASE_URL}/goods/${id}`, {
@@ -881,6 +899,8 @@
                 }
                 
                 const goods = await response.json();
+                if (warehouseId !== currentWarehouseId || goods.warehouse_id !== warehouseId) return;
+                modalWarehouseId = warehouseId;
                 
                 // 填充表单
                 modalTitle.textContent = '编辑货物';
@@ -902,6 +922,10 @@
         
         // 保存货物
         async function saveGoods() {
+            if (!modalWarehouseId || modalWarehouseId !== currentWarehouseId) {
+                showToast('仓库已切换，请重新打开货物表单', 'error');
+                return;
+            }
             // 表单验证
             if (!goodsBarcode.value.trim()) {
                 showToast('请输入货物条码', 'error');
@@ -951,6 +975,7 @@
                     });
                 } else {
                     // 新增货物
+                    goodsData.warehouse_id = modalWarehouseId;
                     response = await fetch(`${API_BASE_URL}/goods/`, {
                         method: 'POST',
                         headers: {
@@ -1181,7 +1206,7 @@
         // 导出货物数据
         async function exportGoods() {
             try {
-                const response = await fetch(`${API_BASE_URL}/goods/export`, {
+                const response = await fetch(`${API_BASE_URL}/goods/export?warehouse_id=${encodeURIComponent(currentWarehouseId)}`, {
                     headers: {
                         ...getAuthHeaders()
                     }
@@ -1225,7 +1250,7 @@
             formData.append('file', file);
 
             try {
-                const response = await fetch(`${API_BASE_URL}/goods/import`, {
+                const response = await fetch(`${API_BASE_URL}/goods/import?warehouse_id=${encodeURIComponent(currentWarehouseId)}`, {
                     method: 'POST',
                     headers: {
                         ...getAuthHeaders()

@@ -48,7 +48,9 @@ async def create_goods(goods: GoodsCreate, current_user: User = Depends(get_curr
 @router.get("/goods/", response_model=List[GoodsResponse], summary="查询当前仓库货物")
 async def get_goods(keyword: Optional[str] = None, warehouse_id: Optional[int] = None,
                     current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    wid = _scope(db, current_user, warehouse_id)
+    # Read-only lookups may target any granted warehouse (e.g. an application opened
+    # from another warehouse). Mutations still require the selected warehouse.
+    wid = require_warehouse(db, current_user, warehouse_id) if warehouse_id is not None else _scope(db, current_user, None)
     query = db.query(Goods).filter(Goods.warehouse_id == wid)
     if keyword:
         query = query.filter(Goods.name.contains(keyword) | Goods.barcode.contains(keyword) | Goods.spec.contains(keyword))

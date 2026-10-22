@@ -64,6 +64,23 @@ class WarehouseIsolationTest(unittest.TestCase):
         self._call("POST", "/goods/", {"warehouse_id": self.wh2, "barcode": "OTHER", "name": "越权"}, auth=self.supervisor_auth, expected=403)
         self._call("POST", "/goods/", {"barcode": "SAME", "name": "重复"}, auth=self.supervisor_auth, expected=400)
 
+    def test_stale_tab_cannot_write_to_changed_warehouse(self):
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh2}")
+        try:
+            # A tab still showing warehouse 1 sends its displayed warehouse explicitly.
+            self._call("POST", "/goods/", {"warehouse_id": self.wh1, "barcode": "STALE-TAB", "name": "旧页面"}, expected=403)
+            response = self.client.post(f"/api/goods/import?warehouse_id={self.wh1}",
+                                        files={"file": ("goods.xlsx", b"unused")},
+                                        headers={"Authorization": "Bearer " + self.admin["access_token"]})
+            self.assertEqual(response.status_code, 403)
+            self.assertEqual(self._call("GET", f"/goods/?warehouse_id={self.wh1}")[0]["name"], "工程耗材")
+            self.assertEqual(self._call("GET", f"/goods/?warehouse_id={self.wh2}")[0]["name"], "行政用品")
+            self.assertEqual(len(self._call("GET", "/goods/")), 1)
+            # A request for another granted warehouse can still search its own catalog.
+            self._call("GET", f"/goods/?warehouse_id={self.wh2}", auth=self.supervisor_auth, expected=403)
+        finally:
+            self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+
     def test_public_application_uses_selected_warehouse(self):
         headers = {"X-Real-IP": "198.51.100.22"}
         for wid, expected in [(self.wh1, "工程耗材"), (self.wh2, "行政用品")]:
