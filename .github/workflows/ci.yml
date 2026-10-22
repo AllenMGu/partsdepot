@@ -36,6 +36,11 @@ jobs:
       - name: 安装依赖
         run: pip install -r requirements.txt
 
+      # 快速护栏：CSP 页面内联脚本哈希必须与 script-src 白名单一致。
+      # 修改内联 JS 未更新哈希时浏览器会静默拦截整段脚本（页面失能），API 测试无感知。
+      - name: CSP 内联脚本哈希审计
+        run: python tests/csp_inline_audit.py
+
       # 走 run_regression.sh 的 WMS_DATABASE_URL 分支：
       # 在 PostgreSQL 上跑完整 HTTP 套件 + LDAP 单元测试（咨询锁等 PG 语义真实生效）
       - name: 运行回归测试
