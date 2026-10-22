@@ -76,15 +76,18 @@ def main():
     req("POST", "/api/users/%d/switch-warehouse?warehouse_id=" % admin_id + str(wid), None, cookie)
 
     # W1：轴承 12、垫片 5；W2：密封圈 100（刻意错位：每货在一仓为 0，另一仓 >0）
+    # 单次扫码必须与"当前选择的仓库"一致（评审 P1），扫 A2 前先切到 W2。
     scan = req("POST", "/api/inventory/scan",
                {"goods_barcode": "8888001", "location_code": "A1", "type": "入库", "quantity": 12}, cookie)[0]
     assert scan["current_stock"] == 12.0, scan
     scan = req("POST", "/api/inventory/scan",
                {"goods_barcode": "8888003", "location_code": "A1", "type": "入库", "quantity": 5}, cookie)[0]
     assert scan["current_stock"] == 5.0, scan
+    req("POST", "/api/users/%d/switch-warehouse?warehouse_id=" % admin_id + str(wid2), None, cookie)
     scan = req("POST", "/api/inventory/scan",
                {"goods_barcode": "8888002", "location_code": "A2", "type": "入库", "quantity": 100}, cookie)[0]
     assert scan["current_stock"] == 100.0, scan
+    req("POST", "/api/users/%d/switch-warehouse?warehouse_id=" % admin_id + str(wid), None, cookie)
 
     # 搜索接口按仓库汇总（评审 P1 双仓一致性：W1=0、W2>0 时选 W1 必须显示 0）
     def stock_of(barcode, wid_x=None):

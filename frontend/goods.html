@@ -540,11 +540,18 @@
         }
 
         function applyPermissionControls() {
-            const isAdmin = currentUser && ['admin', 'supervisor'].includes(currentUser.role);
-            if (!isAdmin) {
+            const role = currentUser && currentUser.role;
+            // 货物维护（新增/导入/导出）：管理员与仓库主管（后端 require_warehouse manage=True）。
+            const canManageGoods = role === 'admin' || role === 'supervisor';
+            // 仓库管理（warehouse.html 新增/修改）：仅管理员（后端强制 admin）。
+            // 主管不应看到"仓库管理"入口，避免点击后被后端 403 拒绝的体验问题。
+            const canManageWarehouse = role === 'admin';
+            if (!canManageGoods) {
                 importGoodsBtn.style.display = 'none';
                 addGoodsBtn.style.display = 'none';
                 exportGoodsBtn.style.display = 'none';
+            }
+            if (!canManageWarehouse) {
                 const warehouseNavLink = document.querySelector('a[href="warehouse.html"]');
                 if (warehouseNavLink) {
                     warehouseNavLink.style.display = 'none';

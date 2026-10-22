@@ -14,7 +14,7 @@ from core.models import UserRole, InventoryType, Warehouse, UserWarehouse, User,
 from core.schemas import InventoryBatchCreate, InventoryCreate, StockResponse
 from core.security import get_current_user
 from core.deps import get_db
-from core.access import require_operator
+from core.access import require_operator, require_selected_warehouse
 from core.order_utils import lock_stock_row, lock_stock_rows_for_keys, advisory_lock_stock_key, advisory_lock_idempotency_key, generate_order_no
 
 router = APIRouter()
@@ -305,13 +305,9 @@ async def scan_inventory(
     if not location.is_active:
         raise HTTPException(status_code=400, detail=f"库位已停用：{inventory.location_code}")
 
-    # 检查用户是否有权限操作这个仓库
-    user_warehouse = db.query(UserWarehouse).filter(
-        UserWarehouse.user_id == current_user.id,
-        UserWarehouse.warehouse_id == location.warehouse_id
-    ).first()
-    if not user_warehouse:
-        raise HTTPException(status_code=403, detail="无权限操作其他仓库库位")
+    # 统一仓库校验：库位仓库须是当前选择的启用仓库，且用户有权限
+    # （与批量扫码一致：多仓授权用户不能在 A 仓页面扫 B 库位完成出入库）。
+    require_selected_warehouse(db, current_user, location.warehouse_id)
 
     goods = db.query(Goods).filter(Goods.warehouse_id == location.warehouse_id, Goods.barcode == inventory.goods_barcode).first()
     if not goods:

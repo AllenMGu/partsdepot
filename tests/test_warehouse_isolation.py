@@ -121,6 +121,43 @@ class WarehouseIsolationTest(unittest.TestCase):
         self.assertTrue(all(r["goods_price"] is None for r in stock))
         self._call("GET", "/outbound-orders/", auth=self.viewer_auth, expected=403)
 
+    def test_delete_goods_blocked_by_pending_request(self):
+        # 审核 P1：新货物（无库存）被同仓待审批申请引用时，删除必须被拒绝；
+        # 申请进入终态（驳回）后删除放行。
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+        gid = self._call("POST", "/goods/", {"barcode": "PENDING-REF", "name": "待审批引用货物"})["id"]
+        req = self._call("POST", "/requests/", {
+            "applicant_name": "删除拦截测试", "description": "待审批引用", "warehouse_id": self.wh1,
+            "items": [{"barcode": "PENDING-REF", "quantity": 1}],
+        }, expected=201)
+        resp = self.client.delete("/api/goods/" + str(gid), headers={"Authorization": "Bearer " + self.admin["access_token"]})
+        self.assertEqual(resp.status_code, 409, resp.text)
+        self.assertIn("待审批申请", resp.json()["detail"])
+        self._call("POST", f"/requests/{req['id']}/status", {"status": "rejected"})
+        self._call("DELETE", f"/goods/{gid}")
+
+    def test_single_scan_bound_to_selected_warehouse(self):
+        # 审核 P1：多仓授权用户当前选中 wh1，扫描 wh2 库位必须拒绝（与批量扫码一致）；
+        # 切到正确仓库后放行；仓库停用后单次扫码与扫码盘点都拒绝写入。
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+        self._call("POST", "/inventory/scan",
+                   {"goods_barcode": "SAME", "location_code": "S-L2", "type": "入库", "quantity": 1},
+                   expected=400)
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh2}")
+        self._call("POST", "/inventory/scan",
+                   {"goods_barcode": "SAME", "location_code": "S-L2", "type": "入库", "quantity": 1})
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+        self._call("PUT", f"/warehouses/{self.wh1}", {"is_active": False})
+        try:
+            self._call("POST", "/inventory/scan",
+                       {"goods_barcode": "SAME", "location_code": "S-L1", "type": "入库", "quantity": 1}, expected=400)
+            self._call("POST", "/check/scan",
+                       {"goods_barcode": "SAME", "location_code": "S-L1", "check_quantity": 1}, expected=400)
+        finally:
+            self._call("PUT", f"/warehouses/{self.wh1}", {"is_active": True})
+        self._call("POST", "/inventory/scan",
+                   {"goods_barcode": "SAME", "location_code": "S-L1", "type": "入库", "quantity": 1})
+
     def test_supervisor_cannot_handle_other_warehouse_request(self):
         resp = self.client.post("/api/requests/", json={
             "applicant_name": "跨仓申请", "description": "行政仓申请", "warehouse_id": self.wh2,

@@ -307,8 +307,8 @@ with sync_playwright() as p:
         check("扫码页库存参考显示（%s@%s）" % (barcode, location), ok3, stock_txt)
 
         # D-guard：跨仓库防护——库位不属于当前仓库时必须阻止提交。
-        # 后端 /inventory/scan 按"库位所属仓库"执行（只要有该仓权限即可），
-        # 没有前端校验时会出现"页面显示仓库 A、实际操作仓库 B 库位"的错仓风险。
+        # 后端 /inventory/scan 已强制"库位必须属于当前选择的仓库"（评审 P1），
+        # 前端校验负责在提交前给出明确提示，避免"页面显示仓库 A、实际操作仓库 B 库位"的错仓风险。
         other_loc = "A2" if location == "A1" else "A1"
         dres = page.evaluate("""(loc) => {
             return new Promise(function (resolve) {

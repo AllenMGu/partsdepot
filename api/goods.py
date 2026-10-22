@@ -14,7 +14,8 @@ from core.access import require_warehouse
 from core.config import MAX_IMPORT_FILE_SIZE_BYTES
 from core.deps import get_db, read_upload_with_size_limit
 from core.models import (Goods, User, UserRole, Stock, InventoryRecord, CheckRecord,
-                         CheckOrderItem, InboundOrderItem, OutboundOrderItem)
+                         CheckOrderItem, InboundOrderItem, OutboundOrderItem,
+                          Warehouse, Request, RequestItem, RequestStatus)
 from core.schemas import GoodsCreate, GoodsResponse, GoodsUpdate
 from core.security import get_current_user
 
@@ -119,6 +120,38 @@ async def delete_goods(id: int, current_user: User = Depends(get_current_user), 
     for model in (Stock, InventoryRecord, CheckRecord, CheckOrderItem, InboundOrderItem, OutboundOrderItem):
         if db.query(model.id).filter(model.goods_id == id).first():
             raise HTTPException(status_code=409, detail="货物已有库存或业务记录，无法删除")
+    # 申请单货物明细按条码引用档案（无 goods_id 外键）：删除后待审批申请将无法
+    # 通过审批（找不到本仓库货物档案，400 卡死）。覆盖审批的两条仓库解析路径：
+    # 1) 申请单明确指定本仓库；
+    # 2) 历史申请单未指定仓库，审批时解析到本仓库（全系统恰好一个启用仓库）。
+    same_wh_ref = (
+        db.query(RequestItem.id)
+        .join(Request, RequestItem.request_id == Request.id)
+        .filter(
+            RequestItem.barcode == row.barcode,
+            Request.warehouse_id == row.warehouse_id,
+            Request.status == RequestStatus.PENDING.value,
+        )
+        .first()
+    )
+    if same_wh_ref:
+        raise HTTPException(status_code=409, detail="该货物已被本仓库待审批申请单引用，无法删除；请先驳回或处理相关申请单")
+    legacy_ref = (
+        db.query(RequestItem.id)
+        .join(Request, RequestItem.request_id == Request.id)
+        .filter(
+            RequestItem.barcode == row.barcode,
+            Request.warehouse_id.is_(None),
+            Request.status == RequestStatus.PENDING.value,
+        )
+        .first()
+    )
+    if legacy_ref:
+        active_ids = [w.id for w in db.query(Warehouse.id).filter(Warehouse.is_active.is_(True)).all()]
+        if len(active_ids) == 1 and active_ids[0] == row.warehouse_id:
+            raise HTTPException(status_code=409, detail="该货物被历史待审批申请单引用（审批将解析到本仓库），无法删除；请先处理相关申请单")
+        # 多仓且历史单未指定仓库：审批本就会因"无法确定仓库"被拒，
+        # 删除本仓货物不会造成新的故障，允许删除。
     db.delete(row)
     try:
         db.commit()
