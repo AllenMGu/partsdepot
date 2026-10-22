@@ -46,6 +46,21 @@ def require_operator(user: User) -> None:
         raise HTTPException(status_code=403, detail="无库存操作权限")
 
 
+def require_inventory_write(db: Session, user: User, warehouse_id: Optional[int]) -> int:
+    """库存单据写操作（入库/出库/盘点单的创建、明细、提交、完成、退库等）统一仓库访问规则。
+
+    评审第 5 轮 P2：入库/出库写接口此前直接查询 UserWarehouse，未遵循管理员跨仓豁免
+    （switch-warehouse、get_user_warehouses、require_warehouse 均豁免），管理员切换到
+    未分配的启用仓库后建单仍 403。统一为：
+      - 角色须具备库存操作权限（admin/supervisor/operator）；
+      - 目标仓库必须存在且启用；
+      - 非管理员须拥有该仓库授权（UserWarehouse）；
+      - 管理员可操作任意启用仓库。
+    """
+    require_operator(user)
+    return require_warehouse(db, user, warehouse_id, manage=False)
+
+
 def require_selected_warehouse(db: Session, user: User, warehouse_id: Optional[int]) -> int:
     """写操作（单次扫码出入库、扫码盘点等）必须绑定用户当前选择的仓库。
 

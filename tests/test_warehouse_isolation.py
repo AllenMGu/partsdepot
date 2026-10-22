@@ -237,6 +237,96 @@ class WarehouseIsolationTest(unittest.TestCase):
         self.assertEqual(login["user"]["warehouses"], [])
         self._call("DELETE", f"/users/{bare_id}")
 
+    def test_admin_unassigned_warehouse_order_flows(self):
+        # 评审第 5 轮 P2：操作员升为管理员后，入库/出库单据写接口（创建、添加明细、提交）
+        # 须遵循跨仓豁免——此前这些端点直接查询 UserWarehouse，管理员切换到未分配的
+        # 启用仓库后建单 403。同时已分配仓库的普通员工写他仓单据仍须 403 且单据不变。
+        op_id = self._call("POST", "/users/", {
+            "username": "scope-rwop", "password": "password2", "full_name": "跨仓单据测试",
+            "role": "operator", "warehouse_ids": [self.wh1],
+        })["id"]
+        op_auth = self._login("scope-rwop", "password2")["access_token"]
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh2}")
+        try:
+            # 管理员（已授权 wh2）建一张 wh2 空白入库单，作为普通员工的反向着陆点
+            wh2_order = self._call("POST", "/inbound-orders/", {"supplier": "跨仓供应商", "remark": "p2"})
+            self.assertEqual(wh2_order["warehouse_id"], self.wh2)
+            # 普通员工（仅授权 wh1）写 wh2 单据：403，单据保持草稿、无明细（库存零变化）
+            self._call("POST", f"/inbound-orders/{wh2_order['id']}/items",
+                       {"goods_barcode": "SAME", "location_code": "S-L2", "quantity": 1},
+                       auth=op_auth, expected=403)
+            detail = self._call("GET", f"/inbound-orders/{wh2_order['id']}")
+            self.assertEqual(detail["status"], "DRAFT")
+            self.assertEqual(len(detail["items"]), 0)
+            # 升为管理员（不补 wh2 授权）
+            self._call("PUT", f"/users/{op_id}", {"role": "admin"})
+            auth = self._login("scope-rwop", "password2")["access_token"]
+            # 切到未分配的 wh2（第 3 轮规则）
+            self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh2}", auth=auth)
+            # 建入库单（修复前 403）→ 明细 → 提交 → wh2 库存增加
+            inbound = self._call("POST", "/inbound-orders/", {"supplier": "未分配仓入库", "remark": "p2-in"})
+            self.assertEqual(inbound["warehouse_id"], self.wh2)
+            self._call("POST", f"/inbound-orders/{inbound['id']}/items",
+                       {"goods_barcode": "SAME", "location_code": "S-L2", "quantity": 2}, auth=auth)
+            self._call("POST", f"/inbound-orders/{inbound['id']}/submit", auth=auth)
+            stock = self._call("GET", f"/stock/?goods_barcode=SAME&warehouse_id={self.wh2}", auth=auth)
+            self.assertEqual(sum(r["quantity"] for r in stock), 2.0)
+            # 建出库单 → 明细 → 提交 → wh2 库存减少
+            outbound = self._call("POST", "/outbound-orders/", {"customer": "未分配仓出库", "remark": "p2-out"})
+            self.assertEqual(outbound["warehouse_id"], self.wh2)
+            self._call("POST", f"/outbound-orders/{outbound['id']}/items",
+                       {"goods_barcode": "SAME", "location_code": "S-L2", "quantity": 1}, auth=auth)
+            self._call("POST", f"/outbound-orders/{outbound['id']}/submit", auth=auth)
+            stock = self._call("GET", f"/stock/?goods_barcode=SAME&warehouse_id={self.wh2}", auth=auth)
+            self.assertEqual(sum(r["quantity"] for r in stock), 1.0)
+            # 降回操作员：当前仓库（wh2）不在授权集内，须重指回 wh1
+            self._call("PUT", f"/users/{op_id}", {"role": "operator"})
+            self.assertEqual(self._login("scope-rwop", "password2")["user"]["current_warehouse_id"], self.wh1)
+        finally:
+            self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+        self._call("DELETE", f"/inbound-orders/{wh2_order['id']}")
+        self._call("DELETE", f"/users/{op_id}")
+
+    def test_inactive_warehouse_switch_and_login_snapshot(self):
+        # 评审第 5 轮 P2：所有角色都只能切换到已启用仓库；非管理员登录快照不含停用仓库；
+        # 管理员降级时的备用仓库选择只用启用仓库（此前停用仓库仍可切换成功，
+        # 随后货物/库存请求才被启用校验拒绝，前后端状态不一致）。
+        wh3 = self._call("POST", "/warehouses/", {"code": "S3", "name": "停用测试"})["id"]
+        self._call("POST", f"/users/{self.supervisor}/assign-warehouse?warehouse_id={wh3}")
+        # 启用期间：登录快照含 wh3，可切换
+        self.assertEqual(
+            sorted(w["id"] for w in self._login("scope-supervisor", "password2")["user"]["warehouses"]),
+            sorted([self.wh1, wh3]))
+        # 停用 wh3
+        self._call("PUT", f"/warehouses/{wh3}", {"is_active": False})
+        # 登录快照不再包含停用仓库
+        self.assertEqual(
+            [w["id"] for w in self._login("scope-supervisor", "password2")["user"]["warehouses"]],
+            [self.wh1])
+        # 非管理员切换停用仓库：404（修复前 200 成功）
+        sup_auth = self._login("scope-supervisor", "password2")["access_token"]
+        self._call("POST", f"/users/{self.supervisor}/switch-warehouse?warehouse_id={wh3}",
+                   auth=sup_auth, expected=404)
+        # 管理员切换停用仓库同样拒绝
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={wh3}", expected=404)
+        # 降级备用仓库选择只用启用仓库：
+        # 主管升 admin → 切到（当时启用的）wh3 → 停用 wh3 → 降回 supervisor → 当前仓库重指回 wh1
+        self._call("PUT", f"/warehouses/{wh3}", {"is_active": True})
+        self._call("PUT", f"/users/{self.supervisor}", {"role": "admin"})
+        try:
+            admin_auth = self._login("scope-supervisor", "password2")["access_token"]
+            self._call("POST", f"/users/{self.supervisor}/switch-warehouse?warehouse_id={wh3}", auth=admin_auth)
+            self._call("PUT", f"/warehouses/{wh3}", {"is_active": False})
+            self._call("PUT", f"/users/{self.supervisor}", {"role": "supervisor"})
+            login = self._login("scope-supervisor", "password2")
+            self.assertEqual(login["user"]["current_warehouse_id"], self.wh1)
+            # 前端/服务端状态一致：货物查询正常
+            self._call("GET", "/goods/", auth=login["access_token"])
+        finally:
+            self._call("DELETE", f"/users/{self.supervisor}/unassign-warehouse?warehouse_id={wh3}")
+            self._call("DELETE", f"/users/{self.admin_id}/unassign-warehouse?warehouse_id={wh3}")
+            self._call("PUT", f"/warehouses/{wh3}", {"is_active": False})
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -121,6 +121,14 @@ async def switch_user_warehouse(
         if not warehouse:
             raise HTTPException(status_code=404, detail="仓库不存在或已停用")
     else:
+        # 评审第 5 轮 P2：所有角色都只能切换到已启用仓库——此前非管理员分支仅检查
+        # UserWarehouse 关联，已停用仓库仍可切换成功，随后货物/库存请求才被启用校验
+        # 拒绝，造成前后端仓库状态不一致。
+        warehouse = db.query(Warehouse).filter(
+            Warehouse.id == warehouse_id, Warehouse.is_active.is_(True)
+        ).first()
+        if not warehouse:
+            raise HTTPException(status_code=404, detail="仓库不存在或已停用")
         # 检查用户是否有权限访问该仓库
         user_warehouse = db.query(UserWarehouse).filter(
             UserWarehouse.user_id == user_id,
@@ -128,7 +136,6 @@ async def switch_user_warehouse(
         ).first()
         if not user_warehouse:
             raise HTTPException(status_code=403, detail="用户无权访问该仓库")
-        warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
 
     # 更新用户当前仓库
     user.current_warehouse_id = warehouse_id
@@ -238,7 +245,19 @@ async def update_user(
         # 选中仓库不一致（货物查询 403、扫码报错）。与取消分配的重指规则一致：
         # 优先默认仓库，其次第一个授权仓库，均无则清空要求重新选择。
         if user_update.role != UserRole.ADMIN and user.current_warehouse_id:
-            assignments = db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all()
+            all_assignments = db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all()
+            if all_assignments:
+                active_ids = {
+                    w.id for w in db.query(Warehouse).filter(
+                        Warehouse.id.in_([uw.warehouse_id for uw in all_assignments]),
+                        Warehouse.is_active.is_(True),
+                    ).all()
+                }
+            else:
+                active_ids = set()
+            # 评审第 5 轮 P2：备用仓库选择只用启用仓库——当前仓库不在启用授权集内
+            # （未分配或已停用）即重指，避免降级后停留在无权限/已停用仓库。
+            assignments = [uw for uw in all_assignments if uw.warehouse_id in active_ids]
             if user.current_warehouse_id not in [uw.warehouse_id for uw in assignments]:
                 default = next((uw for uw in assignments if uw.is_default), None)
                 user.current_warehouse_id = (default or assignments[0]).warehouse_id if assignments else None

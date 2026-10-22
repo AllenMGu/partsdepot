@@ -85,9 +85,13 @@ async def login_for_access_token(
                 "is_default": uw.is_default if uw else False
             })
     else:
+        # 评审第 5 轮 P2：非管理员登录快照只包含启用仓库（与仓库列表接口、
+        # switch-warehouse 的启用校验一致），避免已停用仓库出现在前端下拉列表。
         warehouses = []
         for uw in db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all():
-            warehouse = db.query(Warehouse).filter(Warehouse.id == uw.warehouse_id).first()
+            warehouse = db.query(Warehouse).filter(
+                Warehouse.id == uw.warehouse_id, Warehouse.is_active.is_(True)
+            ).first()
             if warehouse:
                 warehouses.append({
                     "id": warehouse.id,
