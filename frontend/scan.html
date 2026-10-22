@@ -897,7 +897,9 @@
 
                 if (!response.ok) {
                     const errorData = await response.json();
-                    throw new Error(errorData.message || '操作失败');
+                    // FastAPI 错误体使用 detail（如"该库位不属于当前选择的仓库"），
+                    // 兼容旧的 message 字段，避免后端拒绝原因被吞成"操作失败"。
+                    throw new Error(errorData.detail || errorData.message || '操作失败');
                 }
 
                 const result = await response.json();
