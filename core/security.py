@@ -10,7 +10,7 @@ from jose import JWTError, jwt
 import os
 
 from core.config import SECRET_KEY, ALGORITHM
-from core.models import User
+from core.models import User, UserRole
 from core.deps import get_db
 
 # ===== 原 main.py 块: pwd/oauth2/cookie =====
@@ -80,4 +80,15 @@ async def get_current_user(request: Request, db: Session = Depends(get_db)):
         raise credentials_exception
     if not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户已被禁用")
+    # 所有业务写入口统一拦截只读账号，覆盖 Web、移动端及小程序。
+    path = request.url.path
+    if user.role == UserRole.VIEWER and path.startswith((
+        "/api/inbound-orders/", "/api/outbound-orders/", "/api/check-orders/",
+    )):
+        raise HTTPException(status_code=403, detail="普通员工没有单据访问权限")
+    if user.role == UserRole.VIEWER and request.method not in ("GET", "HEAD", "OPTIONS") and path.startswith((
+        "/api/inventory/", "/api/check/", "/api/check-orders/",
+        "/api/inbound-orders/", "/api/outbound-orders/", "/api/locations/", "/api/goods/",
+    )):
+        raise HTTPException(status_code=403, detail="普通员工没有仓库操作权限")
     return user

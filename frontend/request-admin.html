@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ZETSLfw3RKLIwUOS4Cveh1XEv9LFpWu2zGUxMEv5mi4='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-BbKfZWubbLDSztWK9avScIuUAv7QJfM8QAT9F8Rg/uY='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 办公用品申请系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -950,7 +950,7 @@
             // 初始化：common.js 在 checkLoginStatus() 成功解析用户后回调本函数（与 user.html 同模式）
             function pageInit() {
                 // 权限检查：只有管理员可以访问申请管理页面
-                if (typeof currentUser === 'undefined' || !currentUser || currentUser.role !== 'admin') {
+                if (typeof currentUser === 'undefined' || !currentUser || !['admin', 'supervisor'].includes(currentUser.role)) {
                     const mainEl = document.querySelector('main');
                     if (mainEl) {
                         mainEl.innerHTML =

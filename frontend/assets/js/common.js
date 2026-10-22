@@ -113,7 +113,7 @@ function checkLoginStatus() {
         }
 
         // 非 admin 隐藏申请管理菜单（仅管理员可见）
-        if (getCurrentUserRole() !== 'admin') {
+        if (!['admin', 'supervisor'].includes(getCurrentUserRole())) {
             const requestNavLinks = document.querySelectorAll('a[href="request-admin.html"]');
             requestNavLinks.forEach(link => {
                 link.style.display = 'none';

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-Z1YwIbjQ20EXXsEJmZit4PHzLCylDqtMwsEHGCOw2v8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-uWOTJUdrQP34de+R9rKaZ1bA/GYgKW5eM0HOzHX6vFE='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请提交 - 办公用品申请系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -258,7 +258,9 @@
                 whEpoch++;
                 searchEpoch++;   // 在途搜索结果作废（到达时 epoch 不匹配即丢弃）
                 clearCandidates();
-                refreshPickedStock();
+                goodsRows.length = 0;
+                renderGoodsTable();
+                showGoodsStatus('仓库已切换，请重新选择该仓库的货物', false);
             });
 
             // ---------- 相关货物（选填，多行：添加行 → 行内搜索选择备件 → 显示可用库存） ----------

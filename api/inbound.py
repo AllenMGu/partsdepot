@@ -104,7 +104,7 @@ async def add_inbound_order_item(
             raise HTTPException(status_code=400, detail="只能向草稿状态的单据添加明细")
         
         # 查询货物和库位
-        goods = db.query(Goods).filter(Goods.barcode == item.goods_barcode).first()
+        goods = db.query(Goods).filter(Goods.warehouse_id == order.warehouse_id, Goods.barcode == item.goods_barcode).first()
         if not goods:
             raise HTTPException(status_code=404, detail="货物不存在")
         
@@ -482,7 +482,7 @@ async def update_inbound_order_item(
             raise HTTPException(status_code=404, detail="入库单明细不存在")
 
         # 查询货物信息
-        goods = db.query(Goods).filter(Goods.barcode == item.goods_barcode).first()
+        goods = db.query(Goods).filter(Goods.warehouse_id == order.warehouse_id, Goods.barcode == item.goods_barcode).first()
         if not goods:
             raise HTTPException(status_code=404, detail="货物不存在")
 

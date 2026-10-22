@@ -214,8 +214,16 @@ async def update_user(
     if user_update.full_name is not None:
         user.full_name = user_update.full_name
     if user_update.role is not None:
+        if user.role == UserRole.ADMIN and user_update.role != UserRole.ADMIN and db.query(User).filter(
+            User.role == UserRole.ADMIN, User.is_active.is_(True)
+        ).count() <= 1:
+            raise HTTPException(status_code=409, detail="不能降级最后一名启用的系统管理员")
         user.role = user_update.role
     if user_update.is_active is not None:
+        if user.role == UserRole.ADMIN and not user_update.is_active and db.query(User).filter(
+            User.role == UserRole.ADMIN, User.is_active.is_(True)
+        ).count() <= 1:
+            raise HTTPException(status_code=409, detail="不能禁用最后一名启用的系统管理员")
         user.is_active = user_update.is_active
     if user_update.password:
         user.hashed_password = get_password_hash(user_update.password)
@@ -278,6 +286,11 @@ async def delete_user(
     # 不能删除自己
     if current_user.id == user_id:
         raise HTTPException(status_code=400, detail="不能删除自己的账户")
+    target = db.query(User).filter(User.id == user_id).first()
+    if target and target.role == UserRole.ADMIN and target.is_active and db.query(User).filter(
+        User.role == UserRole.ADMIN, User.is_active.is_(True)
+    ).count() <= 1:
+        raise HTTPException(status_code=409, detail="不能删除最后一名启用的系统管理员")
 
     # 查找用户
     user = db.query(User).filter(User.id == user_id).first()

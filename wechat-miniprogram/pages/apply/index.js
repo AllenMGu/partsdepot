@@ -70,9 +70,11 @@ Page({
       warehouseId: warehouse.id,
       goodsKeyword: "",
       goodsResults: [],
+      goodsItems: [],
       searching: false,
       searchError: ""
-    }, () => this.refreshPickedStock(this._warehouseSeq));
+    });
+    wx.showToast({ title: "请重新选择本仓库货物", icon: "none" });
   },
 
   async refreshPickedStock(seq) {

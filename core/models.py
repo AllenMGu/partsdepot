@@ -13,6 +13,8 @@ from core.database import engine, Base
 class UserRole(str, enum.Enum):
     ADMIN = "admin"       # 仓库管理员，可管理所有数据
     OPERATOR = "operator" # 操作员，仅可做出入库和盘点
+    SUPERVISOR = "supervisor" # 仓库主管，管理授权仓库的货物和申请
+    VIEWER = "viewer" # 普通员工，只读库存
 
 class InventoryType(str, enum.Enum):
     IN = "入库"
@@ -55,7 +57,7 @@ class User(Base):
     username = Column(String(50), unique=True, index=True, comment="用户名")
     hashed_password = Column(String(100), comment="加密密码")
     full_name = Column(String(100), comment="真实姓名")
-    role = Column(Enum(UserRole), default=UserRole.OPERATOR, comment="角色")
+    role = Column(Enum(UserRole), default=UserRole.VIEWER, comment="角色")
     is_active = Column(Boolean, default=True, comment="是否启用")
     is_ldap_user = Column(Boolean, default=False, comment="是否是LDAP用户")
     create_time = Column(DateTime, default=datetime.now)
@@ -78,11 +80,13 @@ class Location(Base):
     # 关联关系
     warehouse = relationship("Warehouse")
 
-# 4. 货物表（全局货物，多仓库共享）
+# 4. 货物表（每个仓库独立档案）
 class Goods(Base):
     __tablename__ = "goods"
+    __table_args__ = (UniqueConstraint('warehouse_id', 'barcode', name='uq_goods_warehouse_barcode'),)
     id = Column(Integer, primary_key=True, index=True)
-    barcode = Column(String(100), unique=True, index=True, comment="货物条码")
+    warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True, comment="所属仓库ID")
+    barcode = Column(String(100), index=True, comment="仓库内唯一货物条码")
     name = Column(String(100), comment="货物名称")
     spec = Column(String(100), comment="规格型号")
     unit = Column(String(20), comment="单位")

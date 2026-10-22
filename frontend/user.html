@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-Qs8ESBDCGS2rbOXrHQE+zWiMugrX282KDyTI0K+/EF8='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-HaBztMO4ERNKfQUd7eG/FdkOCQgbKwyB3pgLopL68II='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>用户管理 - 办公用品申请系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -191,7 +191,9 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700">角色</label>
                     <select id="role" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary">
-                        <option value="operator">操作员</option>
+                        <option value="viewer">普通员工</option>
+                        <option value="operator">仓库操作员</option>
+                        <option value="supervisor">仓库主管</option>
                         <option value="admin">管理员</option>
                     </select>
                 </div>
@@ -231,7 +233,9 @@
                 <div>
                     <label class="block text-sm font-medium text-gray-700">角色</label>
                     <select id="editRole" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-primary focus:ring-primary">
-                        <option value="operator">操作员</option>
+                        <option value="viewer">普通员工</option>
+                        <option value="operator">仓库操作员</option>
+                        <option value="supervisor">仓库主管</option>
                         <option value="admin">管理员</option>
                     </select>
                 </div>
@@ -459,7 +463,7 @@
             }
 
             tbody.innerHTML = filteredUsers.map(user => {
-                const roleLabel = user.role === 'admin' ? '管理员' : '操作员';
+                const roleLabel = ({ admin: '系统管理员', supervisor: '仓库主管', operator: '仓库操作员', viewer: '普通员工' })[user.role] || user.role;
                 const roleClass = user.role === 'admin' ? 'bg-green-100 text-green-800' : 'bg-blue-100 text-blue-800';
                 const statusLabel = user.is_active ? '启用' : '禁用';
                 const statusClass = user.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-600';
@@ -730,8 +734,8 @@
                 const warehouseIds = Array.from(document.querySelectorAll('#warehouseOptions input:checked'))
                     .map(input => Number(input.value));
 
-                if (role === 'operator' && warehouseIds.length === 0) {
-                    showToast('请为操作员选择至少一个仓库', 'warning');
+                if (role !== 'admin' && warehouseIds.length === 0) {
+                    showToast('请至少选择一个仓库', 'warning');
                     return;
                 }
 

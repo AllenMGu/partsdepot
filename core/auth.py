@@ -54,7 +54,7 @@ async def login_for_access_token(
                 username=username,
                 hashed_password=hashed_password,
                 full_name=ldap_user_info.get('full_name', username),
-                role=UserRole.OPERATOR,  # 默认角色为操作员
+                role=UserRole.VIEWER,  # 新 LDAP 用户须显式授权才能操作库存
                 is_ldap_user=True  # 标识为LDAP用户
             )
             db.add(user)

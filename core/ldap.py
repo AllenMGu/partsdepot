@@ -301,7 +301,7 @@ async def import_ldap_users(
                 username=username,
                 hashed_password=hashed_password,
                 full_name=full_name,
-                role=UserRole.OPERATOR,  # 默认角色为操作员
+                role=UserRole.VIEWER,  # 导入用户默认只读，仓库权限需显式分配
                 is_ldap_user=True  # 标识为LDAP用户
             )
             db.add(new_user)

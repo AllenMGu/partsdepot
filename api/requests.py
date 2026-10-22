@@ -33,7 +33,7 @@ from sqlalchemy.orm import Session
 
 from core.models import (
     Config, Goods, InventoryRecord, InventoryType, Request, RequestArchive,
-    RequestItem, RequestItemArchive, RequestItemAudit, RequestItemAuditArchive, RequestStatus, Stock, User, UserRole, Warehouse,
+    RequestItem, RequestItemArchive, RequestItemAudit, RequestItemAuditArchive, RequestStatus, Stock, User, UserRole, UserWarehouse, Warehouse,
     OutboundOrderHeader, OutboundOrderItem,
 )
 from core.order_utils import generate_order_no, lock_stock_rows_for_goods
@@ -48,6 +48,7 @@ from core.schemas import (
 )
 from core.security import get_current_user
 from core.deps import get_db
+from core.access import require_warehouse
 
 router = APIRouter()
 
@@ -125,16 +126,16 @@ def search_goods_public(
     可用库存为产品需求——申请人在申请页选备件时直接看到现有库存，便于判断是否足够。
     单次最多 20 条，独立限流桶防止被用来枚举全量货物目录。
 
-    warehouse_id（可选）：指定时可用库存**仅按该仓库汇总**——必须与审批实际扣减的
-    仓库一致，否则多仓环境下页面会显示"其他仓库的库存"造成误导（例如所选仓 0 件、
-    他仓 100 件时显示 100，审批却必然库存不足）。仓库不存在或已停用 → 400。
-    不指定时返回全仓合计（兼容未升级的旧客户端）。
+    warehouse_id 必填：只能搜索该仓库的货物档案和该仓库的库存。
+    仓库不存在、停用或未指定时返回 400。
     """
     keyword = (q or "").strip()
     if not keyword:
         raise HTTPException(status_code=400, detail="请输入货物条码或名称")
     _check_search_rate_limit(_client_ip(request))
-    # 仓库过滤（v2）：申请页库存展示必须与审批扣减仓库一致
+    # 货物目录归属仓库；禁止不指定仓库时跨部门搜索。
+    if warehouse_id is None:
+        raise HTTPException(status_code=400, detail="请先选择申请仓库")
     wh = None
     if warehouse_id is not None:
         wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
@@ -143,7 +144,7 @@ def search_goods_public(
     like = f"%{keyword}%"
     rows = (
         db.query(Goods.id, Goods.barcode, Goods.name, Goods.spec, Goods.unit)
-        .filter(or_(Goods.barcode.like(like), Goods.name.like(like)))
+        .filter(Goods.warehouse_id == warehouse_id, or_(Goods.barcode.like(like), Goods.name.like(like)))
         .order_by(Goods.id)
         .limit(20)
         .all()
@@ -185,6 +186,7 @@ def stock_lookup_public(
     契约：
     - JSON 请求体包含 warehouse_id + barcodes；仅按指定仓库汇总。
     - barcodes 为 1~200 条、每条 ≤100 字符；使用 POST 避免批量参数生成超长 URL。
+    - 不属于该仓库的条码按不存在处理，库存返回 0。
     - 响应按输入顺序去重返回；条码不存在或该仓无库存 → available_stock=0。
     - 与 goods-search 共用搜索限流桶；每 10 个唯一条码消耗 1 个配额。
     - 安全边界：仅返回 条码 + 可用库存 非敏感字段（不含名称/单价等）。
@@ -200,7 +202,7 @@ def stock_lookup_public(
     wh = db.query(Warehouse).filter(Warehouse.id == payload.warehouse_id).first()
     if wh is None or not wh.is_active:
         raise HTTPException(status_code=400, detail=f"仓库不存在或已停用：{payload.warehouse_id}")
-    goods_rows = db.query(Goods.id, Goods.barcode).filter(Goods.barcode.in_(unique_codes)).all()
+    goods_rows = db.query(Goods.id, Goods.barcode).filter(Goods.warehouse_id == wh.id, Goods.barcode.in_(unique_codes)).all()
     id_by_code = {bc: gid for (gid, bc) in goods_rows}
     gids = [id_by_code[c] for c in unique_codes if c in id_by_code]
     stock_map = {}
@@ -249,6 +251,8 @@ def submit_request(
 
     # 申请仓库（可选）：指定时必须为启用中的仓库（防写入失效 ID）；
     # 不指定时允许提交（审批时按"唯一启用仓库"兜底或拒绝，见 _apply_approval）
+    if payload.items and payload.warehouse_id is None:
+        raise HTTPException(status_code=422, detail="选择货物时必须指定申请仓库")
     if payload.warehouse_id is not None:
         wh = db.query(Warehouse).filter(Warehouse.id == payload.warehouse_id).first()
         if not wh or not wh.is_active:
@@ -264,7 +268,7 @@ def submit_request(
         barcode = (it.barcode or "").strip()
         if not barcode:
             raise HTTPException(status_code=422, detail=f"第 {idx} 行货物缺少条码")
-        row = db.query(Goods).filter(Goods.barcode == barcode).order_by(Goods.id).first()
+        row = db.query(Goods).filter(Goods.warehouse_id == payload.warehouse_id, Goods.barcode == barcode).first()
         if not row:
             raise HTTPException(status_code=422, detail=f"第 {idx} 行货物不存在：{barcode}（请确认条码有效）")
         resolved_items.append((barcode, row.name, row.spec, row.unit, it.quantity))
@@ -462,9 +466,17 @@ def archive_due(db: Session) -> int:
     return archive_old_requests(db)
 
 # ------------------- 管理端接口（需登录，仅限管理员） -------------------
+def _require_manager(current_user: User) -> None:
+    if current_user.role not in (UserRole.ADMIN, UserRole.SUPERVISOR):
+        raise HTTPException(status_code=403, detail="申请单管理仅限仓库主管操作")
+
 def _require_admin(current_user: User) -> None:
     if current_user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="申请单管理仅限管理员操作")
+        raise HTTPException(status_code=403, detail="仅系统管理员可执行归档配置操作")
+
+def _require_request_scope(db: Session, current_user: User, warehouse_id: Optional[int]) -> None:
+    if current_user.role == UserRole.SUPERVISOR:
+        require_warehouse(db, current_user, warehouse_id, manage=True)
 
 def _warehouse_name_map(db: Session, warehouse_ids: list) -> dict:
     """仓库 id → 名称 映射（仅查出现过的 id，避免无关查询）。"""
@@ -556,9 +568,9 @@ def _item_snapshot(item: RequestItem) -> dict:
         "quantity": item.quantity,
     }
 
-def _resolve_request_item(db: Session, payload: RequestItemEdit):
+def _resolve_request_item(db: Session, payload: RequestItemEdit, warehouse_id: int):
     barcode = payload.barcode.strip()
-    goods = db.query(Goods).filter(Goods.barcode == barcode).order_by(Goods.id).first()
+    goods = db.query(Goods).filter(Goods.warehouse_id == warehouse_id, Goods.barcode == barcode).first()
     if goods is None:
         raise HTTPException(status_code=422, detail=f"货物不存在：{barcode}")
     return goods
@@ -594,10 +606,11 @@ def add_request_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _require_admin(current_user)
+    _require_manager(current_user)
     try:
         req = _lock_pending_request(db, id)
-        goods = _resolve_request_item(db, payload)
+        _require_request_scope(db, current_user, req.warehouse_id)
+        goods = _resolve_request_item(db, payload, req.warehouse_id)
         max_sort = db.query(func.max(RequestItem.sort)).filter(RequestItem.request_id == req.id).scalar()
         item = RequestItem(
             request_id=req.id,
@@ -630,14 +643,15 @@ def update_request_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _require_admin(current_user)
+    _require_manager(current_user)
     try:
         req = _lock_pending_request(db, id)
+        _require_request_scope(db, current_user, req.warehouse_id)
         item = db.query(RequestItem).filter(RequestItem.id == item_id, RequestItem.request_id == id).first()
         if item is None:
             raise HTTPException(status_code=404, detail="申请单货物明细不存在")
         before = _item_snapshot(item)
-        goods = _resolve_request_item(db, payload)
+        goods = _resolve_request_item(db, payload, req.warehouse_id)
         item.barcode = goods.barcode
         item.name = goods.name
         item.spec = goods.spec
@@ -663,9 +677,10 @@ def delete_request_item(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _require_admin(current_user)
+    _require_manager(current_user)
     try:
         req = _lock_pending_request(db, id)
+        _require_request_scope(db, current_user, req.warehouse_id)
         item = db.query(RequestItem).filter(RequestItem.id == item_id, RequestItem.request_id == id).first()
         if item is None:
             raise HTTPException(status_code=404, detail="申请单货物明细不存在")
@@ -688,9 +703,11 @@ def list_request_item_audits(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _require_admin(current_user)
-    if not db.query(Request).filter(Request.id == id).first():
+    _require_manager(current_user)
+    req = db.query(Request).filter(Request.id == id).first()
+    if not req:
         raise HTTPException(status_code=404, detail="申请单不存在（可能已归档）")
+    _require_request_scope(db, current_user, req.warehouse_id)
     rows = db.query(RequestItemAudit).filter(RequestItemAudit.request_id == id).order_by(RequestItemAudit.id.asc()).all()
     return [
         {
@@ -712,10 +729,11 @@ def list_archived_request_item_audits(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    _require_admin(current_user)
+    _require_manager(current_user)
     archive = db.query(RequestArchive).filter(RequestArchive.original_id == original_id).first()
     if archive is None:
         raise HTTPException(status_code=404, detail="归档申请单不存在")
+    _require_request_scope(db, current_user, archive.warehouse_id)
     rows = (
         db.query(RequestItemAuditArchive)
         .filter(RequestItemAuditArchive.archive_id == archive.id)
@@ -743,8 +761,11 @@ def list_requests(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    _require_admin(current_user)
+    _require_manager(current_user)
     query = db.query(Request).order_by(Request.create_time.desc(), Request.id.desc())
+    if current_user.role != UserRole.ADMIN:
+        allowed = db.query(UserWarehouse.warehouse_id).filter(UserWarehouse.user_id == current_user.id)
+        query = query.filter(Request.warehouse_id.in_(allowed))
     if status:
         query = query.filter(Request.status == status)
     reqs = query.all()
@@ -783,18 +804,6 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
     if not items:
         return  # 无明细：通过仅留痕
 
-    # 需求数量（同一货物多行汇总；提交时条码已校验存在，此处按条码回查货物）
-    required: dict = {}
-    names: dict = {}
-    gprice: dict = {}
-    for it in items:
-        g = db.query(Goods).filter(Goods.barcode == it.barcode).order_by(Goods.id).first()
-        if g is None:
-            raise HTTPException(status_code=400, detail=f"货物 {it.barcode} 已不存在，无法扣减库存（请联系管理员处理）")
-        required[g.id] = required.get(g.id, 0.0) + (it.quantity or 0)
-        names[g.id] = g.name or it.name or it.barcode
-        gprice[g.id] = g.price
-
     # 仓库解析
     warehouse_id = req.warehouse_id
     if warehouse_id is None:
@@ -815,6 +824,18 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
             status_code=400,
             detail=f"申请仓库 {wh.name or wh.code} 已停用，无法扣减库存（请驳回后由申请人重新提交并选择有效仓库）"
         )
+
+    # 需求数量（同一货物多行汇总；提交时条码已校验存在，此处按条码回查货物）
+    required: dict = {}
+    names: dict = {}
+    gprice: dict = {}
+    for it in items:
+        g = db.query(Goods).filter(Goods.warehouse_id == warehouse_id, Goods.barcode == it.barcode).first()
+        if g is None:
+            raise HTTPException(status_code=400, detail=f"货物 {it.barcode} 已不存在，无法扣减库存（请联系管理员处理）")
+        required[g.id] = required.get(g.id, 0.0) + (it.quantity or 0)
+        names[g.id] = g.name or it.name or it.barcode
+        gprice[g.id] = g.price
 
     reference = f"APP-{req.create_time:%Y%m%d}-{req.id:04d}"
     # 所有出库路径统一为“库存锁 → 号段锁”：扫码出库先锁库存再生成单号，审批也必须
@@ -901,7 +922,7 @@ def set_request_status(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    _require_admin(current_user)
+    _require_manager(current_user)
     if payload.status not in (RequestStatus.APPROVED.value, RequestStatus.REJECTED.value):
         raise HTTPException(status_code=400, detail="状态只能为 approved 或 rejected")
 
@@ -914,6 +935,7 @@ def set_request_status(
     req = req_q.first()
     if req is None:
         raise HTTPException(status_code=404, detail="申请单不存在（可能已归档，请到归档列表查看）")
+    _require_request_scope(db, current_user, req.warehouse_id)
 
     # 状态机：仅 pending 可处理；通过/驳回均为终态，不可再次处理——
     # 通过会扣库存，允许"通过→驳回→再通过"会造成重复扣减，v2 明确禁止
@@ -949,10 +971,13 @@ def list_archived_requests(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    _require_admin(current_user)
+    _require_manager(current_user)
     page = max(1, page)
     page_size = min(200, max(1, page_size))
     query = db.query(RequestArchive).order_by(RequestArchive.id.desc())
+    if current_user.role != UserRole.ADMIN:
+        allowed = db.query(UserWarehouse.warehouse_id).filter(UserWarehouse.user_id == current_user.id)
+        query = query.filter(RequestArchive.warehouse_id.in_(allowed))
     if batch:
         query = query.filter(RequestArchive.archive_batch == batch)
     rows = query.offset((page - 1) * page_size).limit(page_size).all()
