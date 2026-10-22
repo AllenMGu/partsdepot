@@ -4,7 +4,26 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from core.models import User, UserRole, UserWarehouse, Warehouse
+from core.models import User, UserRole, UserWarehouse, Warehouse, Goods
+
+
+def lock_goods_row(db: Session, warehouse_id: Optional[int], barcode: str):
+    """按 (仓库, 条码) 锁定货物行（SELECT ... FOR UPDATE），返回行或 None。
+
+    评审 P2（并发）：删除货物与提交申请/修改申请明细两条路径都引用同一货物档案行。
+    仅"先查后写"在两个事务交错时会漏判（检查通过→对方提交→删除落地→悬空待审批引用）。
+    两条路径对同一 (仓库, 条码) 行加行级锁后互斥串行：
+      - 删除先提交 → 申请侧锁定查询取不到行 → 422"货物不存在"；
+      - 申请先提交 → 删除侧待审批引用检查可见该明细 → 409。
+    SQLite 方言不支持 FOR UPDATE：与 _lock_pending_request 相同的防御性降级
+    （单进程/单连接测试下无并发语义，直接读即可）。
+    """
+    q = db.query(Goods).filter(Goods.warehouse_id == warehouse_id, Goods.barcode == barcode)
+    try:
+        q = q.with_for_update()
+    except Exception:
+        pass
+    return q.first()
 
 
 def require_warehouse(db: Session, user: User, warehouse_id: Optional[int], *, manage: bool = False) -> int:

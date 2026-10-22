@@ -79,8 +79,15 @@ async def export_goods(warehouse_id: Optional[int] = None, current_user: User = 
                              headers={"Content-Disposition": f"attachment; filename=goods_{wid}.xlsx"})
 
 
-def _get_visible(db: Session, user: User, goods_id: int, *, manage: bool = False) -> Goods:
-    row = db.query(Goods).filter(Goods.id == goods_id).first()
+def _get_visible(db: Session, user: User, goods_id: int, *, manage: bool = False, lock: bool = False) -> Goods:
+    q = db.query(Goods).filter(Goods.id == goods_id)
+    if lock:
+        # 删除路径需与"提交申请/修改明细"的货物行锁互斥（评审 P2 并发竞态）
+        try:
+            q = q.with_for_update()
+        except Exception:
+            pass
+    row = q.first()
     if not row:
         raise HTTPException(status_code=404, detail="货物未找到")
     wid = _scope(db, user, None, manage=manage)
@@ -115,7 +122,9 @@ async def update_goods(id: int, goods: GoodsUpdate, current_user: User = Depends
 
 @router.delete("/goods/{id}", summary="删除本仓库货物")
 async def delete_goods(id: int, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    row = _get_visible(db, current_user, id, manage=True)
+    # lock=True：与"提交申请/修改申请明细"在货物档案行上互斥（评审 P2），
+    # 防止检查通过后并发提交产生悬空的待审批货物引用。
+    row = _get_visible(db, current_user, id, manage=True, lock=True)
     # SQLite installations may not enable FK enforcement; keep history references intact.
     for model in (Stock, InventoryRecord, CheckRecord, CheckOrderItem, InboundOrderItem, OutboundOrderItem):
         if db.query(model.id).filter(model.goods_id == id).first():

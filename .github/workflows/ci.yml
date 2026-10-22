@@ -48,6 +48,11 @@ jobs:
           WMS_DATABASE_URL: postgresql+psycopg2://wms:wms_test_ci@localhost:5432/wms_test
         run: bash tests/run_regression.sh
 
+      # 仓库隔离/角色回归（评审 P2 要求纳入 CI 实际执行）：
+      # 独立进程、自带临时 SQLite，覆盖跨仓 403、选仓 400、删除货物被待审批申请 409 拦截等。
+      - name: 运行仓库隔离回归测试（unittest）
+        run: python -m unittest discover -s tests -p test_warehouse_isolation.py -v
+
       - name: 演练旧库货物迁移
         env:
           WMS_DATABASE_URL: postgresql+psycopg2://wms:wms_test_ci@localhost:5432/wms_test

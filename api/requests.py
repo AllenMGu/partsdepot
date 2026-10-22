@@ -48,7 +48,7 @@ from core.schemas import (
 )
 from core.security import get_current_user
 from core.deps import get_db
-from core.access import require_warehouse
+from core.access import require_warehouse, lock_goods_row
 
 router = APIRouter()
 
@@ -264,14 +264,28 @@ def submit_request(
     if len(items_in) > 200:
         raise HTTPException(status_code=422, detail="相关货物最多 200 行")
     resolved_items = []
-    for idx, it in enumerate(items_in, start=1):
-        barcode = (it.barcode or "").strip()
-        if not barcode:
-            raise HTTPException(status_code=422, detail=f"第 {idx} 行货物缺少条码")
-        row = db.query(Goods).filter(Goods.warehouse_id == payload.warehouse_id, Goods.barcode == barcode).first()
-        if not row:
-            raise HTTPException(status_code=422, detail=f"第 {idx} 行货物不存在：{barcode}（请确认条码有效）")
-        resolved_items.append((barcode, row.name, row.spec, row.unit, it.quantity))
+    if items_in:
+        # 并发护栏（评审 P2）：与"删除货物"在货物档案行上互斥。
+        # 先按条码排序统一加行级锁（避免多行并发提交时的锁序死锁），
+        # 再按原始行序填充快照。删除先提交则此处取不到行（422），
+        # 本单先提交则删除侧的待审批引用检查会命中（409）。
+        idx_by_barcode: dict = {}
+        for idx, it in enumerate(items_in, start=1):
+            barcode = (it.barcode or "").strip()
+            if not barcode:
+                raise HTTPException(status_code=422, detail=f"第 {idx} 行货物缺少条码")
+            idx_by_barcode.setdefault(barcode, idx)
+        locked = {}
+        for barcode in sorted(idx_by_barcode):
+            row = lock_goods_row(db, payload.warehouse_id, barcode)
+            if row is None:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"第 {idx_by_barcode[barcode]} 行货物不存在：{barcode}（请确认条码有效）")
+            locked[barcode] = row
+        for it in items_in:
+            row = locked[(it.barcode or "").strip()]
+            resolved_items.append(((it.barcode or "").strip(), row.name, row.spec, row.unit, it.quantity))
 
     new_request = Request(
         applicant_name=payload.applicant_name.strip(),
@@ -577,7 +591,8 @@ def _resolve_request_item(db: Session, payload: RequestItemEdit, warehouse_id: O
             raise HTTPException(status_code=400, detail="申请单未指定仓库且无法确定唯一启用仓库，请驳回后重新提交")
         warehouse_id = active[0][0]
     barcode = payload.barcode.strip()
-    goods = db.query(Goods).filter(Goods.warehouse_id == warehouse_id, Goods.barcode == barcode).first()
+    # 行级锁：与"删除货物"互斥，防止并发下产生指向已删除货物的待审批明细。
+    goods = lock_goods_row(db, warehouse_id, barcode)
     if goods is None:
         raise HTTPException(status_code=422, detail=f"货物不存在：{barcode}")
     return goods
