@@ -11,6 +11,7 @@ from core.security import AUTH_COOKIE_NAME, AUTH_COOKIE_SAMESITE, AUTH_COOKIE_SE
 from core.ldap import load_ldap_config_from_db, ldap_authenticate
 from core.auth_state import clear_login_fail_state, ensure_not_locked, handle_login_failure
 from core.deps import get_db
+from core.access import repair_current_warehouse
 
 router = APIRouter()
 
@@ -68,6 +69,13 @@ async def login_for_access_token(
             handle_login_failure(db, username)
 
     clear_login_fail_state(db, username)
+
+    # 评审第 6 轮 P2：登录时兜底修复当前仓库——仓库被停用/撤销授权后，
+    # current_warehouse_id 可能仍指向不可用仓库（列表已过滤、请求仍被拒）。
+    # 有效则保留，否则按"默认 → 第一个启用授权仓库 → 清空"重选。
+    before_current = user.current_warehouse_id
+    if repair_current_warehouse(db, user) != before_current:
+        db.commit()
 
     # 获取用户所有可管理仓库
     # 评审 P2：管理员与 GET /users/{id}/warehouses 的规则保持一致——返回全部启用仓库

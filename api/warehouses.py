@@ -9,6 +9,7 @@ from core.models import UserRole, Warehouse, UserWarehouse, User
 from core.schemas import WarehouseCreate, WarehouseResponse, WarehouseUpdate
 from core.security import get_current_user
 from core.deps import get_db
+from core.access import repair_current_warehouse
 
 router = APIRouter()
 
@@ -120,7 +121,16 @@ async def update_warehouse(
     # 只更新提供的字段
     for key, value in warehouse.dict(exclude_unset=True).items():
         setattr(db_warehouse, key, value)
-    
+
+    db.flush()
+    # 评审第 6 轮 P2：管理员直接停用仓库时，同步修复所有"当前仓库指向该仓"的用户，
+    # 避免用户重新登录后仓库列表已过滤停用仓、当前仓库却仍指向它（业务请求失败）。
+    # 无可用启用授权仓库时清空，由前端要求重新选择。
+    if not db_warehouse.is_active:
+        affected_users = db.query(User).filter(User.current_warehouse_id == db_warehouse.id).all()
+        for affected_user in affected_users:
+            repair_current_warehouse(db, affected_user)
+
     db.commit()
     db.refresh(db_warehouse)
     return db_warehouse

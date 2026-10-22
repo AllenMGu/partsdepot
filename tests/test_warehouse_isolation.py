@@ -155,6 +155,8 @@ class WarehouseIsolationTest(unittest.TestCase):
                        {"goods_barcode": "SAME", "location_code": "S-L1", "check_quantity": 1}, expected=400)
         finally:
             self._call("PUT", f"/warehouses/{self.wh1}", {"is_active": True})
+        # 停用期间当前仓库已被同步重指（评审第 6 轮 P2），启用后须显式切回 wh1
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
         self._call("POST", "/inventory/scan",
                    {"goods_barcode": "SAME", "location_code": "S-L1", "type": "入库", "quantity": 1})
 
@@ -264,7 +266,8 @@ class WarehouseIsolationTest(unittest.TestCase):
             # 切到未分配的 wh2（第 3 轮规则）
             self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh2}", auth=auth)
             # 建入库单（修复前 403）→ 明细 → 提交 → wh2 库存增加
-            inbound = self._call("POST", "/inbound-orders/", {"supplier": "未分配仓入库", "remark": "p2-in"})
+            inbound = self._call("POST", "/inbound-orders/", {"supplier": "未分配仓入库", "remark": "p2-in"},
+                                 auth=auth)
             self.assertEqual(inbound["warehouse_id"], self.wh2)
             self._call("POST", f"/inbound-orders/{inbound['id']}/items",
                        {"goods_barcode": "SAME", "location_code": "S-L2", "quantity": 2}, auth=auth)
@@ -272,7 +275,8 @@ class WarehouseIsolationTest(unittest.TestCase):
             stock = self._call("GET", f"/stock/?goods_barcode=SAME&warehouse_id={self.wh2}", auth=auth)
             self.assertEqual(sum(r["quantity"] for r in stock), 2.0)
             # 建出库单 → 明细 → 提交 → wh2 库存减少
-            outbound = self._call("POST", "/outbound-orders/", {"customer": "未分配仓出库", "remark": "p2-out"})
+            outbound = self._call("POST", "/outbound-orders/", {"customer": "未分配仓出库", "remark": "p2-out"},
+                                  auth=auth)
             self.assertEqual(outbound["warehouse_id"], self.wh2)
             self._call("POST", f"/outbound-orders/{outbound['id']}/items",
                        {"goods_barcode": "SAME", "location_code": "S-L2", "quantity": 1}, auth=auth)
@@ -326,6 +330,63 @@ class WarehouseIsolationTest(unittest.TestCase):
             self._call("DELETE", f"/users/{self.supervisor}/unassign-warehouse?warehouse_id={wh3}")
             self._call("DELETE", f"/users/{self.admin_id}/unassign-warehouse?warehouse_id={wh3}")
             self._call("PUT", f"/warehouses/{wh3}", {"is_active": False})
+
+    def test_deactivating_warehouse_repairs_current_warehouse(self):
+        # 评审第 6 轮 P2：管理员直接停用仓库时，须同步修复"当前仓库指向该仓"的用户，
+        # 避免重新登录后仓库列表已过滤停用仓、当前仓库却仍指向它；无启用授权仓库
+        # 时清空选中状态（登录时兜底同样生效）。
+        wh4 = self._call("POST", "/warehouses/", {"code": "S4", "name": "停用同步测试"})["id"]
+        try:
+            op_id = self._call("POST", "/users/", {
+                "username": "scope-sync", "password": "password2", "full_name": "停用同步用户",
+                "role": "operator", "warehouse_ids": [self.wh1],
+            })["id"]
+            auth = self._login("scope-sync", "password2")["access_token"]
+            self._call("POST", f"/users/{op_id}/assign-warehouse?warehouse_id={wh4}")
+            self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={wh4}", auth=auth)
+            self.assertEqual(self._login("scope-sync", "password2")["user"]["current_warehouse_id"], wh4)
+            # 停用 wh4：受影响用户当前仓库立即重指到启用授权仓 wh1（无需重新登录）
+            self._call("PUT", f"/warehouses/{wh4}", {"is_active": False})
+            rows = self._call("GET", f"/users/{op_id}/warehouses")
+            self.assertEqual([r["id"] for r in rows if r["is_current"]], [self.wh1])
+            self.assertEqual(self._login("scope-sync", "password2")["user"]["current_warehouse_id"], self.wh1)
+            # 前端/服务端状态一致：货物查询正常
+            self._call("GET", "/goods/", auth=auth)
+            # 只授权停用仓库的用户：当前仓库清空，登录快照不含停用仓（登录兜底修复）
+            bare_id = self._call("POST", "/users/", {
+                "username": "scope-sync-bare", "password": "password2", "full_name": "停用无备选",
+                "role": "operator", "warehouse_ids": [wh4],
+            })["id"]
+            login = self._login("scope-sync-bare", "password2")
+            self.assertIsNone(login["user"]["current_warehouse_id"])
+            self.assertEqual(login["user"]["warehouses"], [])
+            self._call("DELETE", f"/users/{bare_id}")
+            self._call("DELETE", f"/users/{op_id}")
+        finally:
+            self._call("DELETE", f"/users/{self.admin_id}/unassign-warehouse?warehouse_id={wh4}")
+            self._call("PUT", f"/warehouses/{wh4}", {"is_active": False})
+
+    def test_delete_draft_order_after_warehouse_unassigned(self):
+        # 评审第 6 轮 P2：删除草稿单同样须校验目标仓库授权——操作员被撤销仓库授权后
+        # 不能再删除该仓库下的旧草稿单（此前仅校验 operator_id）。
+        op_id = self._call("POST", "/users/", {
+            "username": "scope-delop", "password": "password2", "full_name": "删单权限测试",
+            "role": "operator", "warehouse_ids": [self.wh1],
+        })["id"]
+        auth = self._login("scope-delop", "password2")["access_token"]
+        inbound = self._call("POST", "/inbound-orders/", {"supplier": "删单测试"}, auth=auth)
+        outbound = self._call("POST", "/outbound-orders/", {"customer": "删单测试"}, auth=auth)
+        self._call("DELETE", f"/users/{op_id}/unassign-warehouse?warehouse_id={self.wh1}")
+        # 撤销授权后删除旧草稿单：403，单据仍在（管理员可见）
+        self._call("DELETE", f"/inbound-orders/{inbound['id']}", auth=auth, expected=403)
+        self._call("DELETE", f"/outbound-orders/{outbound['id']}", auth=auth, expected=403)
+        self.assertEqual(self._call("GET", f"/inbound-orders/{inbound['id']}")["status"], "DRAFT")
+        self.assertEqual(self._call("GET", f"/outbound-orders/{outbound['id']}")["status"], "DRAFT")
+        # 恢复授权后可删（保留"仅所有人可删"限制）
+        self._call("POST", f"/users/{op_id}/assign-warehouse?warehouse_id={self.wh1}")
+        self._call("DELETE", f"/inbound-orders/{inbound['id']}", auth=auth)
+        self._call("DELETE", f"/outbound-orders/{outbound['id']}", auth=auth)
+        self._call("DELETE", f"/users/{op_id}")
 
 
 if __name__ == "__main__":

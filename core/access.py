@@ -61,6 +61,45 @@ def require_inventory_write(db: Session, user: User, warehouse_id: Optional[int]
     return require_warehouse(db, user, warehouse_id, manage=False)
 
 
+def resolve_current_warehouse(db: Session, user: User) -> Optional[int]:
+    """计算用户当前应指向的仓库：有效的当前仓库优先，否则按"启用授权仓库"重选。
+
+    评审第 6 轮 P2：管理员停用仓库、撤销授权后，current_warehouse_id 可能仍指向
+    已停用或已无授权的仓库——前端仓库列表已过滤，业务请求却会被启用校验拒绝。
+    规则与管理员降级重指一致：当前仓库有效则保留；否则默认仓库 → 第一个启用
+    授权仓库 → 清空（前端据此要求重新选择）。
+    """
+    if user.current_warehouse_id is not None:
+        current = db.query(Warehouse).filter(
+            Warehouse.id == user.current_warehouse_id,
+            Warehouse.is_active.is_(True),
+        ).first()
+        if current and (user.role == UserRole.ADMIN or db.query(UserWarehouse).filter(
+                UserWarehouse.user_id == user.id,
+                UserWarehouse.warehouse_id == current.id).first()):
+            return current.id
+    assignments = db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all()
+    if not assignments:
+        return None
+    active_ids = {w.id for w in db.query(Warehouse).filter(
+        Warehouse.id.in_([uw.warehouse_id for uw in assignments]),
+        Warehouse.is_active.is_(True),
+    ).all()}
+    active_assignments = [uw for uw in assignments if uw.warehouse_id in active_ids]
+    if not active_assignments:
+        return None
+    default = next((uw for uw in active_assignments if uw.is_default), None)
+    return (default or active_assignments[0]).warehouse_id
+
+
+def repair_current_warehouse(db: Session, user: User) -> Optional[int]:
+    """按 resolve_current_warehouse 修复用户当前仓库并返回结果（调用方负责 commit）。"""
+    resolved = resolve_current_warehouse(db, user)
+    if user.current_warehouse_id != resolved:
+        user.current_warehouse_id = resolved
+    return resolved
+
+
 def require_selected_warehouse(db: Session, user: User, warehouse_id: Optional[int]) -> int:
     """写操作（单次扫码出入库、扫码盘点等）必须绑定用户当前选择的仓库。
 

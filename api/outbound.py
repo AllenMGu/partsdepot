@@ -546,7 +546,9 @@ async def delete_outbound_order(
         if order.status != "DRAFT":
             raise HTTPException(status_code=400, detail="仅允许删除草稿状态的出库单")
 
-        # 权限检查
+        # 权限检查（评审第 6 轮 P2：删除同样须有目标仓库授权，管理员跨仓豁免；
+        # 保留原有"仅单据所有人可删"限制，撤销仓库授权后不得再删旧单据）
+        require_inventory_write(db, current_user, order.warehouse_id)
         if current_user.role != UserRole.ADMIN:
             # 检查订单是否属于当前用户
             if order.operator_id != current_user.id:

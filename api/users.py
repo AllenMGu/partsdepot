@@ -9,6 +9,7 @@ from core.models import UserRole, Warehouse, UserWarehouse, User
 from core.schemas import UserCreate, UserResponse, UserUpdate
 from core.security import get_password_hash, get_current_user
 from core.deps import get_db
+from core.access import repair_current_warehouse
 
 router = APIRouter()
 router_post = APIRouter()
@@ -240,27 +241,11 @@ async def update_user(
         ).count() <= 1:
             raise HTTPException(status_code=409, detail="不能降级最后一名启用的系统管理员")
         user.role = user_update.role
-        # 评审 P2：降级为非管理员后，原管理员"当前仓库"可能不在其 user_warehouses
-        # 授权集内（管理员切仓豁免关联表检查），继续保留会造成前端显示与服务端
-        # 选中仓库不一致（货物查询 403、扫码报错）。与取消分配的重指规则一致：
-        # 优先默认仓库，其次第一个授权仓库，均无则清空要求重新选择。
+        # 评审 P2（第 5/6 轮）：降级后"当前仓库"可能不在其启用授权集内（管理员
+        # 切仓豁免关联表检查），继续保留会造成前端显示与服务端选中仓库不一致
+        # （货物查询 403、扫码报错）。统一按"启用授权仓库：默认 → 第一个 → 清空"重指。
         if user_update.role != UserRole.ADMIN and user.current_warehouse_id:
-            all_assignments = db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all()
-            if all_assignments:
-                active_ids = {
-                    w.id for w in db.query(Warehouse).filter(
-                        Warehouse.id.in_([uw.warehouse_id for uw in all_assignments]),
-                        Warehouse.is_active.is_(True),
-                    ).all()
-                }
-            else:
-                active_ids = set()
-            # 评审第 5 轮 P2：备用仓库选择只用启用仓库——当前仓库不在启用授权集内
-            # （未分配或已停用）即重指，避免降级后停留在无权限/已停用仓库。
-            assignments = [uw for uw in all_assignments if uw.warehouse_id in active_ids]
-            if user.current_warehouse_id not in [uw.warehouse_id for uw in assignments]:
-                default = next((uw for uw in assignments if uw.is_default), None)
-                user.current_warehouse_id = (default or assignments[0]).warehouse_id if assignments else None
+            repair_current_warehouse(db, user)
     if user_update.is_active is not None:
         if user.role == UserRole.ADMIN and not user_update.is_active and db.query(User).filter(
             User.role == UserRole.ADMIN, User.is_active.is_(True)
@@ -369,19 +354,10 @@ async def unassign_warehouse_from_user(
     
     # 如果这是用户的当前仓库，需要重新设置
     user = db.query(User).filter(User.id == user_id).first()
-    if user.current_warehouse_id == warehouse_id:
-        # 尝试找默认仓库，没有就找第一个
-        default = db.query(UserWarehouse).filter(
-            UserWarehouse.user_id == user_id,
-            UserWarehouse.is_default == True
-        ).first()
-        if default:
-            user.current_warehouse_id = default.warehouse_id
-        else:
-            first = db.query(UserWarehouse).filter(
-                UserWarehouse.user_id == user_id
-            ).first()
-            user.current_warehouse_id = first.warehouse_id if first else None
+    if user and user.current_warehouse_id == warehouse_id:
+        # 评审第 6 轮 P2：备用仓库只用启用授权仓库（默认 → 第一个 → 清空），
+        # 避免回退到已停用的仓库
+        repair_current_warehouse(db, user)
     
     db.commit()
     return {"message": "取消分配成功"}

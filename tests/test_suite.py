@@ -108,6 +108,7 @@ check("创建物料 G001(price=10)", s == 200)
 s, u = req("POST", "/api/users/", {"username": "op1", "password": "Op-Test-2026",
     "full_name": "操作员", "warehouse_ids": [W1], "role": "operator"}, admin)
 check("创建操作员 op1(仅W1)", s == 200, f"status={s}")
+OP1_ID = (u or {}).get("id")
 s, b = req("POST", "/api/token", {"username": "op1", "password": "Op-Test-2026"}, form=True)
 check("op1 登录", s == 200)
 op = b.get("access_token", "")
@@ -706,6 +707,9 @@ check("停用：申请单仍为待处理（可改仓重提/再处理）",
       isinstance(_off_row, dict) and _off_row.get("status") == "pending", f"row={_off_row}")
 s, b = req("PUT", f"/api/warehouses/{W1}", {"is_active": True}, admin)
 check("停用：恢复 W1 启用（环境复原）", s == 200 and (b or {}).get("is_active") in (True, 1), f"status={s} body={b}")
+# 评审第 6 轮 P2：W1 停用期间 op1（仅授权 W1）的当前仓库已被同步清空（无可用启用仓库）；
+# 恢复启用后由管理员代为重新选定，模拟用户重新选择仓库。
+req("POST", f"/api/users/{OP1_ID}/switch-warehouse?warehouse_id={W1}", token=admin)
 
 # 15j. 批量按仓库存查询（评审 P2 跟进：切仓批量刷新，1 次调用替代 N 次 goods-search）
 def _lookup(wid, codes):
