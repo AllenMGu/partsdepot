@@ -64,6 +64,19 @@ class WarehouseIsolationTest(unittest.TestCase):
         self._call("POST", "/goods/", {"warehouse_id": self.wh2, "barcode": "OTHER", "name": "越权"}, auth=self.supervisor_auth, expected=403)
         self._call("POST", "/goods/", {"barcode": "SAME", "name": "重复"}, auth=self.supervisor_auth, expected=400)
 
+    def test_legacy_request_item_uses_the_only_active_warehouse(self):
+        req = self._call("POST", "/requests/", {"applicant_name": "历史申请", "description": "未指定仓库"}, expected=201)
+        path = f"/requests/{req['id']}/items"
+        self._call("POST", path, {"barcode": "SAME", "quantity": 1}, expected=400)
+        self._call("PUT", f"/warehouses/{self.wh2}", {"is_active": False})
+        try:
+            item = self._call("POST", path, {"barcode": "SAME", "quantity": 1})
+            self.assertEqual(item["name"], "工程耗材")
+            edited = self._call("PUT", f"{path}/{item['id']}", {"barcode": "SAME", "quantity": 2})
+            self.assertEqual(edited["quantity"], 2)
+        finally:
+            self._call("PUT", f"/warehouses/{self.wh2}", {"is_active": True})
+
     def test_stale_tab_cannot_write_to_changed_warehouse(self):
         self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh2}")
         try:

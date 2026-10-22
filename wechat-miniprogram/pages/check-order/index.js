@@ -1,5 +1,5 @@
 const { request } = require("../../utils/api");
-const { requireLogin } = require("../../utils/guard");
+const { requireOperator } = require("../../utils/guard");
 const { fmtDateTime, fmtNum } = require("../../utils/format");
 
 function normalizeItem(it) {
@@ -58,7 +58,7 @@ Page({
   },
 
   async onShow() {
-    if (!requireLogin()) return;
+    if (!requireOperator()) return;
     await Promise.all([this.loadOrders(), this.loadGoods()]);
   },
 

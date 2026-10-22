@@ -1,4 +1,4 @@
-const { getToken, isExpired } = require("./auth");
+const { getToken, getUser, isExpired } = require("./auth");
 
 function requireLogin() {
   const token = getToken();
@@ -15,4 +15,12 @@ function isLoggedIn() {
   return Boolean(token && !isExpired());
 }
 
-module.exports = { requireLogin, isLoggedIn };
+function requireOperator() {
+  if (!requireLogin()) return false;
+  if (["admin", "supervisor", "operator"].includes((getUser() || {}).role)) return true;
+  wx.showToast({ title: "当前账号没有仓库操作权限", icon: "none" });
+  wx.switchTab({ url: "/pages/stock/index" });
+  return false;
+}
+
+module.exports = { requireLogin, requireOperator, isLoggedIn };

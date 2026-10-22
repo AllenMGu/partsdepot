@@ -43,8 +43,19 @@ jobs:
           WMS_DATABASE_URL: postgresql+psycopg2://wms:wms_test_ci@localhost:5432/wms_test
         run: bash tests/run_regression.sh
 
+      - name: 演练旧库货物迁移
+        env:
+          WMS_DATABASE_URL: postgresql+psycopg2://wms:wms_test_ci@localhost:5432/wms_test
+        run: python tests/migration_goods_rehearsal.py
+
       - name: 运行小程序申请页单元测试
         run: node tests/miniprogram_apply_unit.js
+
+      - name: 验证出入库单选货仓库上下文
+        run: node tests/order_goods_context_unit.js
+
+      - name: 验证小程序角色入口
+        run: node tests/miniprogram_role_unit.js
 
   pg-concurrency:
     name: PostgreSQL 并发专项

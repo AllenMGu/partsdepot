@@ -2,7 +2,7 @@
 -- This transaction is intentionally fail-closed for unassigned legacy goods.
 BEGIN;
 LOCK TABLE goods, stock, inventory_records, check_records, check_order_item,
-           inbound_order_item, outbound_order_item IN ACCESS EXCLUSIVE MODE;
+           inbound_order_item, outbound_order_item, requests, request_items IN ACCESS EXCLUSIVE MODE;
 
 CREATE TEMP TABLE goods_manual_assignment (goods_id integer PRIMARY KEY, warehouse_id integer NOT NULL) ON COMMIT DROP;
 -- Before running, insert mappings for old goods with no stock/order/history references, e.g.:
@@ -19,6 +19,17 @@ SELECT DISTINCT goods_id, warehouse_id FROM (
     UNION ALL SELECT i.goods_id, h.warehouse_id FROM check_order_item i JOIN check_order_header h ON h.id=i.header_id
     UNION ALL SELECT i.goods_id, h.warehouse_id FROM inbound_order_item i JOIN inbound_order_header h ON h.id=i.header_id
     UNION ALL SELECT i.goods_id, h.warehouse_id FROM outbound_order_item i JOIN outbound_order_header h ON h.id=i.header_id
+    -- Request items store barcode snapshots, not goods_id. Include pending requests
+    -- even when the requested warehouse has never stocked the item.
+    UNION ALL SELECT g.id, r.warehouse_id FROM request_items i
+      JOIN requests r ON r.id=i.request_id JOIN goods g ON g.barcode=i.barcode
+      WHERE r.status='pending' AND r.warehouse_id IS NOT NULL
+    -- Match the legacy approval fallback if exactly one warehouse is active.
+    UNION ALL SELECT g.id, w.id FROM request_items i
+      JOIN requests r ON r.id=i.request_id JOIN goods g ON g.barcode=i.barcode
+      CROSS JOIN warehouses w
+      WHERE r.status='pending' AND r.warehouse_id IS NULL AND w.is_active IS TRUE
+        AND (SELECT count(*) FROM warehouses WHERE is_active IS TRUE)=1
     UNION ALL SELECT goods_id, warehouse_id FROM goods_manual_assignment
 ) refs WHERE goods_id IS NOT NULL AND warehouse_id IS NOT NULL;
 
@@ -28,6 +39,11 @@ DO $$ BEGIN
   END IF;
   IF EXISTS (SELECT 1 FROM goods_scope s LEFT JOIN warehouses w ON w.id=s.warehouse_id WHERE w.id IS NULL) THEN
     RAISE EXCEPTION 'Historical goods reference missing warehouses. Fix orphan data before migrating.';
+  END IF;
+  IF EXISTS (SELECT 1 FROM request_items i JOIN requests r ON r.id=i.request_id
+             LEFT JOIN goods g ON g.barcode=i.barcode
+             WHERE r.status='pending' AND r.warehouse_id IS NOT NULL AND g.id IS NULL) THEN
+    RAISE EXCEPTION 'Pending requests reference deleted goods. Resolve those requests before migrating.';
   END IF;
 END $$;
 

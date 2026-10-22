@@ -568,7 +568,14 @@ def _item_snapshot(item: RequestItem) -> dict:
         "quantity": item.quantity,
     }
 
-def _resolve_request_item(db: Session, payload: RequestItemEdit, warehouse_id: int):
+def _resolve_request_item(db: Session, payload: RequestItemEdit, warehouse_id: Optional[int]):
+    # Old requests could omit warehouse_id. Match the approval path's
+    # single-active-warehouse fallback when editing those requests.
+    if warehouse_id is None:
+        active = db.query(Warehouse.id).filter(Warehouse.is_active.is_(True)).limit(2).all()
+        if len(active) != 1:
+            raise HTTPException(status_code=400, detail="申请单未指定仓库且无法确定唯一启用仓库，请驳回后重新提交")
+        warehouse_id = active[0][0]
     barcode = payload.barcode.strip()
     goods = db.query(Goods).filter(Goods.warehouse_id == warehouse_id, Goods.barcode == barcode).first()
     if goods is None:
