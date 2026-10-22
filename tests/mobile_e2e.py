@@ -575,11 +575,14 @@ with sync_playwright() as p:
     page.goto(BASE + "/mobile/profile.html", wait_until="networkidle")
     page.wait_for_timeout(300)
     _wh_box = page.locator("#mProfileWarehouses")
-    check("profile 页：唯一仓库显示'当前'",
+    check("profile 页：当前仓库显示'当前'徽章",
           _wh_box.locator(".m-item", has_text="一号仓").locator(".m-badge-done").count() == 1,
           _wh_box.inner_text())
-    check("profile 页：无'切换'按钮（当前仓库已建立）",
-          page.locator('[data-act="whSwitch"]').count() == 0,
+    # 注意：admin 登录按评审规则返回全部启用仓库（与 GET /users/{id}/warehouses 一致），
+    # 故列表会出现二号仓及其"切换"按钮——属预期新行为；
+    # 本用例的原始约束是"当前仓库本身"不得出现切换按钮。
+    check("profile 页：当前仓库（一号仓）无'切换'按钮",
+          page.locator('[data-act="whSwitch"][data-arg="%d"]' % _wh1).count() == 0,
           _wh_box.inner_text())
     # 创建入库单——旧实现的故障场景（后端 400"请先选择当前仓库"）
     page.goto(BASE + "/mobile/inbound.html", wait_until="networkidle")
@@ -589,6 +592,94 @@ with sync_playwright() as p:
     ok = wait_until(lambda: page.locator(".m-item", has_text="首用验证").count() > 0, timeout_ms=10000)
     check("首次使用用户创建入库单成功（不再 400'请先选择当前仓库'）", ok,
           (page.locator("#mToast").text_content() or ""))
+
+    # ---------- J. 评审 P2：管理员升降级后的前端仓库状态（H5 真实登录） ----------
+    # 与桌面端同源：仓库列表/当前仓库取自登录响应的 user 快照。
+    #   1) 操作员（仅一号仓）晋升管理员后重新登录 → 快照应含全部启用仓库，可切换二号仓；
+    #   2) 停留在二号仓时被降级为操作员 → 服务端当前仓库重指回一号仓，重新登录后 UI 一致。
+    _wmap = {}
+    _u0 = page.evaluate("() => window.M.AUTH.getUser() || {}")
+    for _w in (_u0.get("warehouses") or []):
+        _wmap[_w["id"]] = _w["name"]
+    _w1id = next((k for k, v in _wmap.items() if v == "一号仓"), None)
+    _w2id = next((k for k, v in _wmap.items() if v == "二号仓"), None)
+    if _w1id is None or _w2id is None:
+        check("升降级前端(H5)：双仓环境可用", False, str(_wmap))
+    else:
+        _mk = page.evaluate("""(w1) => M.api("POST", "/users/", {
+            username: "m-promo", password: "Promo-Test-2026", full_name: "H5升降级",
+            role: "operator", warehouse_ids: [w1]
+        }).then(r => r.id).catch(e => "ERR:" + (e.message || e))""", _w1id)
+        if isinstance(_mk, str):
+            check("升降级前端(H5)：建号/升级成功", False, _mk)
+        else:
+            _pid = _mk
+
+            def _mlogin(p, user, pw):
+                p.goto(BASE + "/mobile/login.html", wait_until="networkidle")
+                p.fill("#mLoginUser", user)
+                p.fill("#mLoginPass", pw)
+                p.click("#mLoginBtn")
+                try:
+                    p.wait_for_url("**/index.html", timeout=25000)
+                except Exception:
+                    pass
+
+            def _mlogout(p):
+                p.goto(BASE + "/mobile/profile.html", wait_until="networkidle")
+                p.locator('[data-act="logout"]').click()
+                p.wait_for_selector(".m-modal .m-btn", timeout=8000)
+                p.locator(".m-modal .m-btn", has_text="退出").click()
+                try:
+                    p.wait_for_url("**/login.html", timeout=15000)
+                except Exception:
+                    pass
+
+            try:
+                ctx2 = browser.new_context(viewport={"width": 390, "height": 844})
+                p2 = ctx2.new_page()
+                # 1) 基线：操作员（仅一号仓）真实登录，快照只有授权仓
+                _mlogin(p2, "m-promo", "Promo-Test-2026")
+                check("升降级前端(H5)：操作员真实登录成功", "index.html" in p2.evaluate("() => location.href"))
+                _u_op = p2.evaluate("() => window.M.AUTH.getUser() || {}")
+                _snap_op = sorted(w["id"] for w in (_u_op.get("warehouses") or []))
+                check("升降级前端(H5)：操作员快照仅含授权的一号仓",
+                      _snap_op == [_w1id], str(_u_op.get("warehouses")))
+                # 2) 晋升管理员后重新登录：快照应含全部启用仓库（评审缺陷点）
+                _prom2 = page.evaluate("""(pid) => M.api("PUT", "/users/" + pid, { role: "admin" })
+                    .then(() => "ok").catch(e => "ERR:" + (e.message || e))""", _pid)
+                check("升降级前端(H5)：晋升接口成功", _prom2 == "ok", str(_prom2))
+                _mlogout(p2)
+                _mlogin(p2, "m-promo", "Promo-Test-2026")
+                p2.goto(BASE + "/mobile/profile.html", wait_until="networkidle")
+                _u_ad = p2.evaluate("() => window.M.AUTH.getUser() || {}")
+                _snap_ad = sorted(w["id"] for w in (_u_ad.get("warehouses") or []))
+                check("升降级前端(H5)：晋升重登录后快照含全部启用仓库",
+                      _snap_ad == sorted([_w1id, _w2id]), str(_u_ad.get("warehouses")))
+                # 3) profile 真实 UI 切换到未分配的二号仓
+                _sw = p2.locator('[data-act="whSwitch"]')
+                _tgt = int(_sw.first.get_attribute("data-arg")) if _sw.count() else None
+                check("升降级前端(H5)：profile 出现另一仓库切换按钮", _tgt in (_w1id, _w2id) and _tgt != _u_ad.get("current_warehouse_id"),
+                      "tgt=%s cur=%s" % (_tgt, _u_ad.get("current_warehouse_id")))
+                if _tgt:
+                    _sw.first.click()
+                    ok = wait_until(lambda: "切换成功" in (p2.locator("#mToast").text_content() or ""), timeout_ms=8000)
+                    check("升降级前端(H5)：晋升后可切换未分配仓库", ok)
+                # 4) 停留非授权仓时被降级：当前仓库重指回一号仓
+                _dem = page.evaluate("""(pid) => M.api("PUT", "/users/" + pid, { role: "operator" })
+                    .then(() => "ok").catch(e => "ERR:" + (e.message || e))""", _pid)
+                check("升降级前端(H5)：降级接口成功", _dem == "ok", str(_dem))
+                _mlogout(p2)
+                _mlogin(p2, "m-promo", "Promo-Test-2026")
+                p2.goto(BASE + "/mobile/profile.html", wait_until="networkidle")
+                _u2 = p2.evaluate("() => window.M.AUTH.getUser() || {}")
+                check("升降级前端(H5)：降级重登录后当前仓库重指到授权的一号仓",
+                      _u2.get("current_warehouse_id") == _w1id, str(_u2.get("current_warehouse_id")))
+                _snap2 = sorted(w["id"] for w in (_u2.get("warehouses") or []))
+                check("升降级前端(H5)：降级后快照回到授权集合", _snap2 == [_w1id], str(_snap2))
+            finally:
+                ctx2.close()
+                page.evaluate("""(pid) => M.api("DELETE", "/users/" + pid).catch(() => {})""", _pid)
 
     browser.close()
 

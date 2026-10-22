@@ -321,6 +321,81 @@ with sync_playwright() as p:
     page.wait_for_url("**/dashboard*.html", timeout=15000)
     check("登录：跳转仪表盘", "dashboard" in page.url)
 
+    # ================= 2b. 评审 P2：管理员升降级后的前端仓库状态（真实 UI 登录） =================
+    # 桌面 Web 与 H5 的仓库列表/当前仓库均来自登录响应的 user 快照：
+    #   1) 升为管理员后重新登录，快照应含全部启用仓库（此前只有历史分配记录）；
+    #   2) 管理员在 B 仓时被降级为操作员（仅授权 A 仓），服务端当前仓库须重指回 A 仓，
+    #      重新登录后前端"当前仓库"与服务端一致（不再显示无权限的 B 仓）。
+    _whs = page.evaluate("() => (typeof userWarehouses !== 'undefined' ? userWarehouses : []).map(w => ({id: w.id, name: w.name}))")
+    _w1 = next((w for w in _whs if w["name"] == "一号仓"), None)
+    _w2 = next((w for w in _whs if w["name"] == "二号仓"), None)
+    if not (_w1 and _w2):
+        check("升降级前端：双仓环境可用", False, str(_whs))
+    else:
+        # 1) 管理员经 UI 会话建操作员（仅授权一号仓）并升为管理员
+        _promo = page.evaluate("""async (w1) => {
+            const r = await fetch('/api/users/', {method: 'POST', headers: {'content-type': 'application/json'},
+                body: JSON.stringify({username: 'pw-promo', password: 'Promo-Test-2026',
+                    full_name: '升降级测试', role: 'operator', warehouse_ids: [w1]})});
+            const d = await r.json();
+            if (r.status !== 200 && r.status !== 201) return {error: r.status + ' ' + JSON.stringify(d)};
+            const r2 = await fetch('/api/users/' + d.id, {method: 'PUT', headers: {'content-type': 'application/json'},
+                body: JSON.stringify({role: 'admin'})});
+            return {id: d.id, ok: r2.ok};
+        }""", _w1["id"])
+        if "id" not in _promo:
+            check("升降级前端：建号/升级成功", False, str(_promo))
+        else:
+            pid = _promo["id"]
+            try:
+                # 2) 独立上下文真实登录已晋升管理员：仓库列表 = 全部启用仓库，并可切到未分配的二号仓
+                ctx2 = browser.new_context(viewport={"width": 1280, "height": 900},
+                                          extra_http_headers={"X-Real-IP": "8.8.8.211"})
+                page2 = ctx2.new_page()
+                page2.set_default_timeout(15000)
+                page2.goto(BASE + "/index.html")
+                page2.fill("#username", "pw-promo")
+                page2.fill("#password", "Promo-Test-2026")
+                page2.click("#loginForm button[type=submit], #loginForm [type=submit]")
+                page2.wait_for_url("**/dashboard*.html", timeout=15000)
+                _snap = page2.evaluate("() => (typeof userWarehouses !== 'undefined' ? userWarehouses : []).map(w => w.id)")
+                check("升降级前端：晋升后真实登录，仓库快照含全部启用仓库",
+                      sorted(_snap) == sorted([_w1["id"], _w2["id"]]), str(_snap))
+                page2.click("#warehouseSelector")
+                page2.wait_for_selector("#warehouseList div", timeout=5000)
+                _names = page2.evaluate("() => Array.from(document.querySelectorAll('#warehouseList div')).map(d => d.innerText)")
+                check("升降级前端：下拉同时显示一号仓/二号仓",
+                      any("一号仓" in t for t in _names) and any("二号仓" in t for t in _names), str(_names))
+                page2.locator("#warehouseList div", has_text="二号仓").first.click()
+                wait_js(page2, "() => (document.getElementById('currentWarehouse') || {}).textContent === '二号仓'")
+                check("升降级前端：未分配的二号仓切换成功（前端+服务端一致）", True)
+                # 3) 用户停留在二号仓时被降级为操作员（仅授权一号仓）：当前仓库重指回一号仓
+                _dem = page.evaluate("""async (pid) => {
+                    const r = await fetch('/api/users/' + pid, {method: 'PUT', headers: {'content-type': 'application/json'},
+                        body: JSON.stringify({role: 'operator'})});
+                    return {status: r.status, data: await r.json()};
+                }""", pid)
+                check("升降级前端：降级接口成功", _dem.get("status") == 200, str(_dem))
+                page2.click("#userMenu")
+                page2.wait_for_selector("#userDropdown:not(.hidden)", timeout=5000)
+                page2.click("#logoutButton")
+                page2.wait_for_url("**/index.html", timeout=10000)
+                page2.fill("#username", "pw-promo")
+                page2.fill("#password", "Promo-Test-2026")
+                page2.click("#loginForm button[type=submit], #loginForm [type=submit]")
+                page2.wait_for_url("**/dashboard*.html", timeout=15000)
+                wait_js(page2, "() => (document.getElementById('currentWarehouse') || {}).textContent === '一号仓'")
+                check("升降级前端：降级重登录后当前仓库已重指到授权的一号仓", True)
+                _snap2 = page2.evaluate("() => (typeof userWarehouses !== 'undefined' ? userWarehouses : []).map(w => w.id)")
+                check("升降级前端：降级后仓库快照回到授权集合", sorted(_snap2) == [_w1["id"]], str(_snap2))
+            finally:
+                ctx2.close()
+                # 4) 清理测试用户
+                page.evaluate("""async (pid) => {
+                    const r = await fetch('/api/users/' + pid, {method: 'DELETE'});
+                    return r.status;
+                }""", pid)
+
     # ================= 3. 申请管理：近期列表 + 详情弹窗 =================
     page.goto(BASE + "/request-admin.html")
     page.wait_for_selector("#recentBody tr")

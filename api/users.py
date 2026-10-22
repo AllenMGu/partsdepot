@@ -233,6 +233,15 @@ async def update_user(
         ).count() <= 1:
             raise HTTPException(status_code=409, detail="不能降级最后一名启用的系统管理员")
         user.role = user_update.role
+        # 评审 P2：降级为非管理员后，原管理员"当前仓库"可能不在其 user_warehouses
+        # 授权集内（管理员切仓豁免关联表检查），继续保留会造成前端显示与服务端
+        # 选中仓库不一致（货物查询 403、扫码报错）。与取消分配的重指规则一致：
+        # 优先默认仓库，其次第一个授权仓库，均无则清空要求重新选择。
+        if user_update.role != UserRole.ADMIN and user.current_warehouse_id:
+            assignments = db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all()
+            if user.current_warehouse_id not in [uw.warehouse_id for uw in assignments]:
+                default = next((uw for uw in assignments if uw.is_default), None)
+                user.current_warehouse_id = (default or assignments[0]).warehouse_id if assignments else None
     if user_update.is_active is not None:
         if user.role == UserRole.ADMIN and not user_update.is_active and db.query(User).filter(
             User.role == UserRole.ADMIN, User.is_active.is_(True)

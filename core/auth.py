@@ -70,16 +70,31 @@ async def login_for_access_token(
     clear_login_fail_state(db, username)
 
     # 获取用户所有可管理仓库
-    warehouses = []
-    for uw in db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all():
-        warehouse = db.query(Warehouse).filter(Warehouse.id == uw.warehouse_id).first()
-        if warehouse:
+    # 评审 P2：管理员与 GET /users/{id}/warehouses 的规则保持一致——返回全部启用仓库
+    # （不受 user_warehouses 关联表限制），否则桌面 Web / H5 登录快照里只有历史分配，
+    # 用户被升为管理员后前端仓库列表看不到新增仓库。
+    if user.role == UserRole.ADMIN:
+        uw_by_wh = {uw.warehouse_id: uw for uw in db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all()}
+        warehouses = []
+        for warehouse in db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.id).all():
+            uw = uw_by_wh.get(warehouse.id)
             warehouses.append({
                 "id": warehouse.id,
                 "code": warehouse.code,
                 "name": warehouse.name,
-                "is_default": uw.is_default
+                "is_default": uw.is_default if uw else False
             })
+    else:
+        warehouses = []
+        for uw in db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all():
+            warehouse = db.query(Warehouse).filter(Warehouse.id == uw.warehouse_id).first()
+            if warehouse:
+                warehouses.append({
+                    "id": warehouse.id,
+                    "code": warehouse.code,
+                    "name": warehouse.name,
+                    "is_default": uw.is_default
+                })
 
     # 获取当前仓库名称
     current_warehouse_name = None

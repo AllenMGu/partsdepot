@@ -204,14 +204,38 @@ class WarehouseIsolationTest(unittest.TestCase):
         self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh2}", expected=403)
         # 升为 admin（不补仓库授权）
         self._call("PUT", f"/users/{op_id}", {"role": "admin"})
-        auth = self._login("scope-promo", "password2")["access_token"]
+        # 登录快照（桌面 Web / H5 仓库列表的数据源）须包含全部启用仓库
+        login = self._login("scope-promo", "password2")
+        self.assertEqual(sorted(w["id"] for w in login["user"]["warehouses"]), sorted([self.wh1, self.wh2]))
+        auth = login["access_token"]
         rows = self._call("GET", f"/users/{op_id}/warehouses", auth=auth)
         self.assertEqual(sorted(w["id"] for w in rows), sorted([self.wh1, self.wh2]))
         self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh2}", auth=auth)
-        # 降回 operator：wh2 无授权，再次切换被拒
+        # 管理员在 wh2 时被降回 operator（只授权 wh1）：当前仓库必须重指回授权集
         self._call("PUT", f"/users/{op_id}", {"role": "operator"})
+        login2 = self._login("scope-promo", "password2")
+        self.assertEqual(login2["user"]["current_warehouse_id"], self.wh1)
+        # 前端/服务端状态一致：货物查询正常（不再因"选中 wh2、授权 wh1"而 403）
+        self._call("GET", "/goods/", auth=login2["access_token"])
+        # 未授权的 wh2 切换仍被拒
         self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh2}", auth=auth, expected=403)
         self._call("DELETE", f"/users/{op_id}")
+
+    def test_demote_admin_without_assignments_clears_current(self):
+        # 评审 P2：管理员降为非管理员且没有任何仓库授权时，当前仓库须清空
+        # （前端据此要求重新选择），而不是保留一个无权限的仓库。
+        bare_id = self._call("POST", "/users/", {
+            "username": "scope-bare", "password": "password2", "full_name": "无授权用户",
+            "role": "operator", "warehouse_ids": [],
+        })["id"]
+        self._call("PUT", f"/users/{bare_id}", {"role": "admin"})
+        auth = self._login("scope-bare", "password2")["access_token"]
+        self._call("POST", f"/users/{bare_id}/switch-warehouse?warehouse_id={self.wh2}", auth=auth)
+        self._call("PUT", f"/users/{bare_id}", {"role": "viewer"})
+        login = self._login("scope-bare", "password2")
+        self.assertIsNone(login["user"]["current_warehouse_id"])
+        self.assertEqual(login["user"]["warehouses"], [])
+        self._call("DELETE", f"/users/{bare_id}")
 
 
 if __name__ == "__main__":
