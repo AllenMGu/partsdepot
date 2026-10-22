@@ -107,132 +107,27 @@ with sync_playwright() as p:
           and "二号仓" in page.locator("#warehouseId option").nth(1).inner_text(),
           page.locator("#warehouseId").inner_text())
 
-    # ---------- 仓库切换联动演练（评审 P1：库存展示必须与审批扣减仓库一致） ----------
-    # 密封圈：一号仓 0、二号仓 100 → 切换仓库后候选必须作废、按新仓库重搜，
-    # 已选行的库存快照必须按新仓库刷新并重算超库存软提示。
+    # ---------- 独立档案：切换仓库必须清除旧仓已选货物与候选 ----------
     page.click("#addGoodsRowBtn")
-    page.wait_for_selector("#goodsTableBody tr")
-    d_in = page.locator("#goodsTableBody tr:nth-child(1) input[type=text]")
-    d_in.fill("密封圈")
+    page.locator("#goodsTableBody tr:nth-child(1) input[type=text]").fill("密封圈")
     page.locator("#goodsTableBody tr:nth-child(1) button[title=搜索备件]").click()
     page.wait_for_selector("#goodsSearchResults:not(.hidden)")
-    d1 = page.locator("#goodsSearchResults li button").first
-    check("仓库联动：密封圈@一号仓候选显示『可用库存 0（无库存）』",
-          "可用库存 0" in d1.inner_text() and "无库存" in d1.inner_text(), d1.inner_text())
-    # 切到二号仓 → 在途/残留候选必须被清空（旧仓库数据不得残留）
+    first = page.locator("#goodsSearchResults li button").first
+    check("仓库联动：一号仓密封圈库存 0", "可用库存 0" in first.inner_text(), first.inner_text())
+    first.click()
+    check("仓库联动：一号仓已选货物", "测试密封圈" in page.locator("#goodsTableBody").inner_text())
     page.locator("#warehouseId").select_option(index=1)
-    page.wait_for_timeout(300)
-    check("仓库联动：切换仓库后候选面板被清空（旧仓候选作废）",
-          page.locator("#goodsSearchResults").evaluate("el => el.classList.contains('hidden')"),
-          page.locator("#goodsSearchResults").inner_text())
-    # 按新仓库重新搜索 → 二号仓有 100
+    check("仓库联动：切仓清除已选货物与候选", page.locator("#goodsTableBody tr").count() == 0
+          and page.locator("#goodsSearchResults").evaluate("el => el.classList.contains('hidden')"))
+    page.click("#addGoodsRowBtn")
+    page.locator("#goodsTableBody tr:nth-child(1) input[type=text]").fill("密封圈")
     page.locator("#goodsTableBody tr:nth-child(1) button[title=搜索备件]").click()
     page.wait_for_selector("#goodsSearchResults:not(.hidden)")
-    d2 = page.locator("#goodsSearchResults li button").first
-    check("仓库联动：密封圈@二号仓候选显示『可用库存 100 件』", "可用库存 100" in d2.inner_text(), d2.inner_text())
-    d2.click()
-    check("仓库联动：选中行库存列显示二号仓 100 件",
-          "100" in page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text(),
-          page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text())
-    page.locator("#goodsTableBody tr:nth-child(1) input[type=number]").fill("2")
-    page.wait_for_timeout(200)
-    check("仓库联动：数量 2 ≤ 二号仓库存 100 → 无超库存提示",
-          page.locator("#goodsTableBody .qty-warn:not(.hidden)").count() == 0)
-    # 切回一号仓 → 已选行库存快照必须按一号仓刷新为 0，且 2 > 0 触发软提示
+    hit = page.locator("#goodsSearchResults li button").first
+    check("仓库联动：二号仓重新搜索库存 100", "可用库存 100" in hit.inner_text(), hit.inner_text())
+    hit.click()
     page.locator("#warehouseId").select_option(index=0)
-    page.wait_for_selector("#goodsTableBody .qty-warn:not(.hidden)", timeout=3000)
-    check("仓库联动：切回一号仓后已选行库存列刷新为 0（无库存）",
-          "无库存" in page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text(),
-          page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text())
-    check("仓库联动：数量 2 超过一号仓库存 0 → 超库存软提示重新出现",
-          "超过可用库存" in page.locator("#goodsTableBody tr:nth-child(1)").inner_text())
-    # 再切回二号仓 → 库存恢复 100、软提示消除（证明快照随仓库双向刷新）
-    page.locator("#warehouseId").select_option(index=1)
-    wait_js(page,
-            "Array.from(document.querySelectorAll('#goodsTableBody tr')).some(tr => tr.innerText.includes('100') "
-            "&& !tr.querySelector('.qty-warn:not(.hidden)'))")
-    check("仓库联动：再切回二号仓 → 库存列恢复 100 件且软提示消除",
-          "100" in page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text()
-          and page.locator("#goodsTableBody .qty-warn:not(.hidden)").count() == 0,
-          page.locator("#goodsTableBody tr:nth-child(1) td:nth-child(3)").inner_text())
-    # 移除演练行，恢复干净状态后继续原流程
-    page.locator("#goodsTableBody tr:nth-child(1) button[title=移除该行]").click()
-    check("仓库联动：演练行已移除", page.query_selector_all("#goodsTableBody tr") == [])
-    # 演练结束于二号仓——把仓库选择器复位为默认一号仓，后续主流程按 W1 语义断言
-    # （此时无已选行，切换不触发库存刷新请求）
-    page.locator("#warehouseId").select_option(index=0)
-    page.wait_for_timeout(200)
-
-    # ---------- 批量刷新演练（评审 P2 跟进：切仓 N 行 = 1 次 stock-lookup；失败标记"库存未知"） ----------
-    # 轴承 8888001：W1=12 / W2=0；密封圈 8888002：W1=0 / W2=100（种子刻意错位）
-    page.click("#addGoodsRowBtn")
-    page.wait_for_selector("#goodsTableBody tr")
-    page.locator("#goodsTableBody tr:nth-child(1) input[type=text]").fill("轴承")
-    page.locator("#goodsTableBody tr:nth-child(1) button[title=搜索备件]").click()
-    page.wait_for_selector("#goodsSearchResults:not(.hidden)")
-    page.locator("#goodsSearchResults li button").first.click()
-    page.click("#addGoodsRowBtn")
-    page.locator("#goodsTableBody tr:nth-child(2) input[type=text]").fill("密封圈")
-    page.locator("#goodsTableBody tr:nth-child(2) button[title=搜索备件]").click()
-    page.wait_for_selector("#goodsSearchResults:not(.hidden)")
-    page.locator("#goodsSearchResults li button").first.click()
-    page.locator("#goodsTableBody tr:nth-child(1) input[type=number]").fill("2")
-    def row_stock(idx):
-        return page.locator("#goodsTableBody tr:nth-child(%d) td:nth-child(3)" % idx).inner_text()
-    check("批量演练：前置 轴承@W1=12、密封圈@W1=0（无库存）",
-          "12" in row_stock(1) and "无库存" in row_stock(2), (row_stock(1), row_stock(2)))
-    reqs_seen = []
-    req_cap = page.on("request", lambda r: reqs_seen.append(r.url))
-    # 切二号仓 → 两行同时刷新（轴承 12→无库存、密封圈 0→100），且只发 1 次批量调用
-    page.locator("#warehouseId").select_option(index=1)
-    wait_js(page, "document.querySelectorAll('#goodsTableBody tr')[0].innerText.includes('无库存') "
-                  "&& document.querySelectorAll('#goodsTableBody tr')[1].innerText.includes('100')")
-    _lk_n = sum(1 for u in reqs_seen if "stock-lookup" in u)
-    _gs_n = sum(1 for u in reqs_seen if "goods-search" in u)
-    check("批量演练：切二号仓后两行库存同时刷新（轴承无库存 / 密封圈 100）",
-          "无库存" in row_stock(1) and "100" in row_stock(2), (row_stock(1), row_stock(2)))
-    check("批量演练：2 行切仓仅 1 次 stock-lookup（不再逐行 goods-search）",
-          _lk_n == 1 and _gs_n == 0, "stock-lookup=%d goods-search=%d" % (_lk_n, _gs_n))
-    reqs_seen.clear()
-    # 切回一号仓 → 轴承 12、密封圈 无库存（0）
-    page.locator("#warehouseId").select_option(index=0)
-    wait_js(page, "document.querySelectorAll('#goodsTableBody tr')[1].innerText.includes('无库存') "
-                  "&& document.querySelectorAll('#goodsTableBody tr')[0].innerText.includes('12')")
-    check("批量演练：切回一号仓两行同时刷新（轴承 12 / 密封圈无库存）",
-          "12" in row_stock(1) and "无库存" in row_stock(2), (row_stock(1), row_stock(2)))
-    check("批量演练：反向切仓同样仅 1 次 stock-lookup",
-          sum(1 for u in reqs_seen if "stock-lookup" in u) == 1, "seen=%r" % reqs_seen)
-    reqs_seen.clear()
-    # 失败路径：拦截 stock-lookup 返回 429 → 已选行必须标记"库存未知"，不得残留旧仓数字
-    def _fail429(route):
-        route.fulfill(status=429, content_type="application/json",
-                      body='{"detail": "搜索过于频繁，请稍后再试"}')
-    page.route("**/stock-lookup*", _fail429)
-    page.locator("#warehouseId").select_option(index=1)
-    wait_js(page, "document.querySelectorAll('#goodsTableBody tr')[0].innerText.includes('库存未知') "
-                  "&& document.querySelectorAll('#goodsTableBody tr')[1].innerText.includes('库存未知')")
-    check("批量演练：刷新失败(429) → 两行均标记『库存未知』（不残留旧仓数字 12）",
-          "库存未知" in row_stock(1) and "库存未知" in row_stock(2) and "12" not in row_stock(1),
-          (row_stock(1), row_stock(2)))
-    _tr1_txt = page.locator("#goodsTableBody tr:nth-child(1)").inner_text()
-    check("批量演练：库存未知时数量提示为『库存未知』而非误报『超过可用库存』",
-          "库存未知" in _tr1_txt and "超过可用库存" not in _tr1_txt, _tr1_txt)
-    page.unroute("**/stock-lookup*", _fail429)
-    # 恢复：切回一号仓 → 批量成功 → "未知"标记清除、库存数字恢复
-    page.locator("#warehouseId").select_option(index=0)
-    wait_js(page, "document.querySelectorAll('#goodsTableBody tr')[1].innerText.includes('无库存') "
-                  "&& document.querySelectorAll('#goodsTableBody tr')[0].innerText.includes('12')")
-    check("批量演练：恢复后两行库存刷新成功（轴承 12 / 密封圈无库存），『库存未知』清除",
-          "12" in row_stock(1) and "无库存" in row_stock(2)
-          and "库存未知" not in row_stock(1) and "库存未知" not in row_stock(2),
-          (row_stock(1), row_stock(2)))
-    # 注：request 监听器保留至进程退出（仅向 reqs_seen 追加 URL，无副作用；
-    # Playwright sync API 的 remove_listener 包装器对象不一致会抛 KeyError）
-    # 移除演练行，恢复干净状态
-    while page.query_selector_all("#goodsTableBody tr"):
-        page.locator("#goodsTableBody tr:nth-child(1) button[title=移除该行]").click()
-        page.wait_for_timeout(150)
-    check("批量演练：演练行已移除（干净状态）", page.query_selector_all("#goodsTableBody tr") == [])
+    check("仓库联动：切回一号仓再次清空货物", page.locator("#goodsTableBody tr").count() == 0)
 
     # 添加第一行
     page.click("#addGoodsRowBtn")

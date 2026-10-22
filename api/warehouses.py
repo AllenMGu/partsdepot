@@ -43,9 +43,11 @@ async def create_warehouse(
             user_warehouse = UserWarehouse(
                 user_id=admin.id,
                 warehouse_id=new_warehouse.id,
-                is_default=False  # 不设为默认，保持原有默认仓库
+                is_default=(admin.current_warehouse_id is None)
             )
             db.add(user_warehouse)
+        if admin.current_warehouse_id is None:
+            admin.current_warehouse_id = new_warehouse.id
     
     db.commit()
     db.refresh(new_warehouse)
