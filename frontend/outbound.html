@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-NdJGbHKIsgTxsvG7CpHpXxiO4ytENKzjIZadZnfVgoM='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-tbUUwbrEDrBUq9/e717Klnj69dd9O587nuy1ZNu/I40='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>出库单管理 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -392,6 +392,9 @@
         let currentPage = 1;
         let pageSize = 10;
         let currentOrderId = null;
+        let currentOrderWarehouseId = null;
+        const goodsWarehouseId = () => currentOrderWarehouseId || (currentWarehouse && currentWarehouse.id);
+        const goodsCacheKey = (wid, barcode) => `${wid}:${barcode}`;
         let goodsCache = new Map();
         let locationCache = new Map();
 
@@ -638,6 +641,7 @@
 
                 const order = await response.json();
                 currentOrderId = orderId;
+                currentOrderWarehouseId = order.warehouse_id;
 
                 // 显示订单详情
                 showOrderDetail(order);
@@ -915,6 +919,7 @@
                 }
 
                 const locationList = await response.json();
+                if (warehouseId !== goodsWarehouseId()) return [];
                 const locationSelect = document.getElementById('locationCode');
 
                 // 清空下拉框
@@ -953,8 +958,8 @@
             document.getElementById('submitItem').textContent = '添加';
 
             // 加载当前仓库下的库位数据
-            if (currentWarehouse) {
-                loadLocationsByWarehouse(currentWarehouse.id);
+            if (goodsWarehouseId()) {
+                loadLocationsByWarehouse(goodsWarehouseId());
             } else {
                 showToast('未选择仓库', 'error');
             }
@@ -964,7 +969,7 @@
         async function autoFillLocationCode() {
             try {
                 // 调用API获取库位列表
-                const response = await fetch(`${API_BASE_URL}/locations/?warehouse_id=${currentWarehouse.id}`, {
+                const response = await fetch(`${API_BASE_URL}/locations/?warehouse_id=${goodsWarehouseId()}`, {
                     headers: getHeaders()
                 });
 
@@ -1102,7 +1107,9 @@
         async function searchGoods(keyword) {
             try {
                 // 调用API搜索货物
-                const response = await fetch(`${API_BASE_URL}/goods/?keyword=${encodeURIComponent(keyword)}`, {
+                const warehouseId = goodsWarehouseId();
+                if (!warehouseId) throw new Error("请先选择单据仓库");
+                const response = await fetch(`${API_BASE_URL}/goods/?warehouse_id=${warehouseId}&keyword=${encodeURIComponent(keyword)}`, {
                     headers: getHeaders()
                 });
 
@@ -1111,11 +1118,12 @@
                 }
 
                 const goodsList = await response.json();
+                if (warehouseId !== goodsWarehouseId()) return;
 
                 if (goodsList.length > 0) {
-                    await showGoodsSearchResults(goodsList);
+                    await showGoodsSearchResults(goodsList, warehouseId);
                 } else {
-                    await showGoodsSearchResults([]);
+                    await showGoodsSearchResults([], warehouseId);
                     showToast('未找到匹配的货物', 'info');
                 }
             } catch (error) {
@@ -1125,7 +1133,8 @@
         }
 
         // 显示货物搜索结果
-        async function showGoodsSearchResults(goodsList) {
+        async function showGoodsSearchResults(goodsList, warehouseId = goodsWarehouseId()) {
+            if (warehouseId !== goodsWarehouseId()) return;
             const resultsContainer = document.getElementById('goodsResultsList');
             const resultsDiv = document.getElementById('goodsSearchResults');
 
@@ -1138,11 +1147,12 @@
             // 异步获取所有货物的可用库存
             const goodsWithStock = await Promise.all(
                 goodsList.map(async goods => {
-                    const availableStock = await getAvailableStock(goods.barcode);
+                    const availableStock = await getAvailableStock(goods.barcode, warehouseId);
                     return { ...goods, availableStock };
                 })
             );
 
+            if (warehouseId !== goodsWarehouseId()) return;
             resultsContainer.innerHTML = goodsWithStock.map(goods => `
                 <div class="px-3 py-2 hover:bg-gray-100 cursor-pointer" data-goods="${encodeURIComponent(JSON.stringify(goods))}">
                     <div class="font-medium text-gray-900">${escapeHTML(goods.name)}</div>
@@ -1164,29 +1174,34 @@
 
         // 选择货物
         async function selectGoods(goods) {
+            if (goods.warehouse_id !== goodsWarehouseId()) return showToast("货物不属于该单据仓库，请重新搜索", "error");
             // 填充货物条码输入框
             document.getElementById('goodsBarcode').value = goods.barcode;
             // 显示货物信息
             await showGoodsInfo(goods);
+            if (goods.warehouse_id !== goodsWarehouseId()) return;
             // 隐藏搜索结果
             document.getElementById('goodsSearchResults').classList.add('hidden');
             // 缓存货物信息
-            goodsCache.set(goods.barcode, goods);
+            goodsCache.set(goodsCacheKey(goods.warehouse_id, goods.barcode), goods);
         }
 
         // 验证货物
         async function validateGoods(keyword) {
+            const warehouseId = goodsWarehouseId();
+            if (!warehouseId) return showToast("请先选择单据仓库", "error");
+            const cacheKey = goodsCacheKey(warehouseId, keyword);
             // 如果输入内容较短，可能是条码，直接查找
             if (keyword.length <= 10) {
                 // 检查缓存
-                if (goodsCache.has(keyword)) {
-                    await showGoodsInfo(goodsCache.get(keyword));
+                if (goodsCache.has(cacheKey)) {
+                    await showGoodsInfo(goodsCache.get(cacheKey));
                     document.getElementById('goodsSearchResults').classList.add('hidden');
                     return;
                 }
 
                 // 调用API获取货物信息
-                const response = await fetch(`${API_BASE_URL}/goods/`, {
+                const response = await fetch(`${API_BASE_URL}/goods/?warehouse_id=${warehouseId}&keyword=${encodeURIComponent(keyword)}`, {
                     headers: getHeaders()
                 });
 
@@ -1195,10 +1210,11 @@
                 }
 
                 const goodsList = await response.json();
-                const goods = goodsList.find(g => g.barcode === keyword);
+                if (warehouseId !== goodsWarehouseId()) return;
+                const goods = goodsList.find(g => g.barcode === keyword && g.warehouse_id === warehouseId);
 
                 if (goods) {
-                    goodsCache.set(keyword, goods);
+                    goodsCache.set(cacheKey, goods);
                     await showGoodsInfo(goods);
                     document.getElementById('goodsSearchResults').classList.add('hidden');
                 } else {
@@ -1212,12 +1228,12 @@
         }
         
         // 获取货物在当前仓库的可用库存
-        async function getAvailableStock(goodsBarcode) {
+        async function getAvailableStock(goodsBarcode, warehouseId = goodsWarehouseId()) {
             try {
-                console.log('正在查询货物条码:', goodsBarcode, '在仓库:', currentWarehouse.id, '的库存');
+                console.log('正在查询货物条码:', goodsBarcode, '在仓库:', warehouseId, '的库存');
 
                 // 首先获取所有库存数据
-                const response = await fetch(`${API_BASE_URL}/stock/`, {
+                const response = await fetch(`${API_BASE_URL}/stock/?warehouse_id=${warehouseId}&goods_barcode=${encodeURIComponent(goodsBarcode)}`, {
                     headers: getHeaders()
                 });
 
@@ -1231,7 +1247,7 @@
                 if (Array.isArray(stockData) && stockData.length > 0) {
                     // 过滤出指定货物条码和仓库的库存记录
                     const filteredStock = stockData.filter(stock => {
-                        return stock.goods_barcode === goodsBarcode;
+                        return stock.warehouse_id === warehouseId && stock.goods_barcode === goodsBarcode;
                     });
                     console.log('过滤后的库存数据:', filteredStock);
 
@@ -1253,12 +1269,15 @@
 
         // 显示货物信息
         async function showGoodsInfo(goods) {
+            const warehouseId = goodsWarehouseId();
+            if (goods.warehouse_id !== warehouseId) return;
             document.getElementById('goodsName').textContent = goods.name;
             document.getElementById('goodsSpec').textContent = `${goods.spec || ''}${goods.spec && goods.unit ? ' | ' : ''}${goods.unit} | ¥${goods.price}`;
             document.getElementById('goodsInfo').classList.remove('hidden');
 
             // 显示可用库存
-            const availableStock = await getAvailableStock(goods.barcode);
+            const availableStock = await getAvailableStock(goods.barcode, warehouseId);
+            if (warehouseId !== goodsWarehouseId()) return;
             document.getElementById('goodsSpec').textContent += ` | 可用库存: ${availableStock}`;
 
             // 如果没有输入单价，自动填充

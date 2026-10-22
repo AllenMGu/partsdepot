@@ -77,9 +77,14 @@ if [ $MARK_RC -ne 0 ]; then
   exit 1
 fi
 
-if [ $SUITE_RC -eq 0 ] && [ $UNIT_RC -eq 0 ]; then
+echo "==> 运行仓库隔离回归测试（独立进程 + 独立临时 SQLite，不触碰目标测试库）"
+# 评审 P2：跨仓 403 / 选仓 400 / 删除货物被待审批申请 409 拦截等回归必须纳入一键命令
+ISO_RC=0
+"$PY" -m unittest discover -s tests -p test_warehouse_isolation.py -v || ISO_RC=$?
+
+if [ $SUITE_RC -eq 0 ] && [ $UNIT_RC -eq 0 ] && [ $ISO_RC -eq 0 ]; then
   echo "==> 全部回归测试通过"
 else
-  echo "==> 存在失败（HTTP 套件 rc=$SUITE_RC，进程内 rc=$UNIT_RC）"
+  echo "==> 存在失败（HTTP 套件 rc=$SUITE_RC，进程内 rc=$UNIT_RC，隔离回归 rc=$ISO_RC）"
 fi
-exit $(( SUITE_RC != 0 || UNIT_RC != 0 ))
+exit $(( SUITE_RC != 0 || UNIT_RC != 0 || ISO_RC != 0 ))

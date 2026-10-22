@@ -56,7 +56,8 @@ def get_status(path):
 
 def main():
     # 登录，拿 HttpOnly Cookie
-    _, cookie = req("POST", "/api/token", "username=admin&password=" + ADMIN_PW, form=True)
+    login, cookie = req("POST", "/api/token", "username=admin&password=" + ADMIN_PW, form=True)
+    admin_id = login["user"]["id"]
     cookie = cookie.split(";")[0]
 
     # 双仓：一号仓 W1 + 二号仓 W2（各自一个库位）
@@ -68,17 +69,25 @@ def main():
     req("POST", "/api/goods/", {"barcode": "8888001", "name": "测试轴承", "spec": "6204", "unit": "个", "price": 10}, cookie)
     req("POST", "/api/goods/", {"barcode": "8888002", "name": "测试密封圈", "spec": "NBR-35", "unit": "件", "price": 5}, cookie)
     req("POST", "/api/goods/", {"barcode": "8888003", "name": "测试垫片", "spec": "DN50", "unit": "片", "price": 8}, cookie)
+    # 各仓独立档案：测试同条码可重复建档，但库存互不串仓。
+    req("POST", "/api/users/%d/switch-warehouse?warehouse_id=" % admin_id + str(wid2), None, cookie)
+    for barcode, name, price in (("8888001", "测试轴承", 10), ("8888002", "测试密封圈", 5), ("8888003", "测试垫片", 8)):
+        req("POST", "/api/goods/", {"barcode": barcode, "name": name, "price": price}, cookie)
+    req("POST", "/api/users/%d/switch-warehouse?warehouse_id=" % admin_id + str(wid), None, cookie)
 
     # W1：轴承 12、垫片 5；W2：密封圈 100（刻意错位：每货在一仓为 0，另一仓 >0）
+    # 单次扫码必须与"当前选择的仓库"一致（评审 P1），扫 A2 前先切到 W2。
     scan = req("POST", "/api/inventory/scan",
                {"goods_barcode": "8888001", "location_code": "A1", "type": "入库", "quantity": 12}, cookie)[0]
     assert scan["current_stock"] == 12.0, scan
     scan = req("POST", "/api/inventory/scan",
                {"goods_barcode": "8888003", "location_code": "A1", "type": "入库", "quantity": 5}, cookie)[0]
     assert scan["current_stock"] == 5.0, scan
+    req("POST", "/api/users/%d/switch-warehouse?warehouse_id=" % admin_id + str(wid2), None, cookie)
     scan = req("POST", "/api/inventory/scan",
                {"goods_barcode": "8888002", "location_code": "A2", "type": "入库", "quantity": 100}, cookie)[0]
     assert scan["current_stock"] == 100.0, scan
+    req("POST", "/api/users/%d/switch-warehouse?warehouse_id=" % admin_id + str(wid), None, cookie)
 
     # 搜索接口按仓库汇总（评审 P1 双仓一致性：W1=0、W2>0 时选 W1 必须显示 0）
     def stock_of(barcode, wid_x=None):
@@ -89,11 +98,11 @@ def main():
         hit = next((g for g in rows if g["barcode"] == barcode), None)
         return float(hit["available_stock"]) if hit else -1.0
 
-    assert stock_of("8888001") == 12.0 and stock_of("8888002") == 100.0 and stock_of("8888003") == 5.0, "全仓合计"
+    assert get_status("/api/public/goods-search?q=8888001") == 400, "搜索必须明确仓库"
     assert stock_of("8888001", wid) == 12.0 and stock_of("8888002", wid) == 0.0 and stock_of("8888003", wid) == 5.0, "W1 汇总"
     assert stock_of("8888001", wid2) == 0.0 and stock_of("8888002", wid2) == 100.0 and stock_of("8888003", wid2) == 0.0, "W2 汇总"
     assert get_status("/api/public/goods-search?q=8888001&warehouse_id=99999") == 400, "失效仓库应 400"
-    print("search stocks (dual-wh): W1 轴承12/密封圈0/垫片5, W2 轴承0/密封圈100/垫片0, 全仓合计 12/100/5")
+    print("search stocks (dual-wh): W1 轴承12/密封圈0/垫片5, W2 轴承0/密封圈100/垫片0")
 
     # 公开仓库列表接口（申请页仓库下拉用）：两仓
     whs = get_json("/api/public/warehouses")
@@ -122,10 +131,15 @@ def main():
     # 多仓环境未指定仓库的待处理单（审批必须 400：无法确定扣哪个仓）
     r4 = req("POST", "/api/requests/", {
         "applicant_name": "多仓测试", "contact": "mw@test.com",
-        "description": "Playwright 多仓拦截验证：未指定申请仓库（审批应被拒绝）",
-        "items": [{"barcode": "8888001", "quantity": 1}],
+        "description": "Playwright 历史申请验证：未指定申请仓库（审批应被拒绝）",
     })[0]
-    print("no-warehouse request:", r4["reference"])
+    # 新提交接口拒绝未指定仓库的货物；用历史快照模拟升级前待处理申请。
+    c = sqlite3.connect(DB_PATH)
+    c.execute("INSERT INTO request_items (request_id, sort, barcode, name, quantity) VALUES (?, 0, ?, ?, 1)",
+              (r4["id"], "8888001", "测试轴承"))
+    c.commit()
+    c.close()
+    print("legacy no-warehouse request:", r4["reference"])
 
     # 归档单：提交 → 回拨 40 天 → 通过（W1 垫片 5→4）→ 归档
     r2 = req("POST", "/api/requests/", {

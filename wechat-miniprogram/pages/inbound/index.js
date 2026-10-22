@@ -1,5 +1,5 @@
 const { request } = require("../../utils/api");
-const { requireLogin } = require("../../utils/guard");
+const { requireOperator } = require("../../utils/guard");
 const { fmtDateTime, fmtNum } = require("../../utils/format");
 
 function normalizeOrder(order) {
@@ -22,7 +22,7 @@ Page({
     loadingReturn: false
   },
   async onShow() {
-    if (!requireLogin()) return;
+    if (!requireOperator()) return;
     await this.loadOrders();
   },
   onSupplierInput(e) {

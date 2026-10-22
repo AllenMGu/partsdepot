@@ -24,8 +24,8 @@
 
     <view class="card">
       <view class="subtitle" style="margin-bottom: 12rpx;">快捷操作</view>
-      <button class="btn-primary" style="margin-bottom:12rpx;" bindtap="goScan">扫码出入库/盘点</button>
-      <button class="btn-ghost" style="margin-bottom:12rpx;" bindtap="goOrders">单据中心</button>
+      <button wx:if="{{canOperate}}" class="btn-primary" style="margin-bottom:12rpx;" bindtap="goScan">扫码出入库/盘点</button>
+      <button wx:if="{{canOperate}}" class="btn-ghost" style="margin-bottom:12rpx;" bindtap="goOrders">单据中心</button>
       <button class="btn-ghost" style="margin-bottom:12rpx;" bindtap="goStock">查看库存</button>
       <button class="btn-ghost" bindtap="logout">退出登录</button>
     </view>

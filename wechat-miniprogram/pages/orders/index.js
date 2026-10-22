@@ -1,8 +1,8 @@
-const { requireLogin } = require("../../utils/guard");
+const { requireOperator } = require("../../utils/guard");
 
 Page({
   onShow() {
-    requireLogin();
+    requireOperator();
   },
   goInbound() {
     wx.navigateTo({ url: "/pages/inbound/index" });

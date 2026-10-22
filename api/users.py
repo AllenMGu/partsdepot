@@ -9,6 +9,7 @@ from core.models import UserRole, Warehouse, UserWarehouse, User
 from core.schemas import UserCreate, UserResponse, UserUpdate
 from core.security import get_password_hash, get_current_user
 from core.deps import get_db
+from core.access import repair_current_warehouse
 
 router = APIRouter()
 router_post = APIRouter()
@@ -105,21 +106,42 @@ async def switch_user_warehouse(
     # 权限检查：只能切换自己的仓库或管理员操作
     if current_user.id != user_id and current_user.role != UserRole.ADMIN:
         raise HTTPException(status_code=403, detail="无权限操作")
-    
-    # 检查用户是否有权限访问该仓库
-    user_warehouse = db.query(UserWarehouse).filter(
-        UserWarehouse.user_id == user_id,
-        UserWarehouse.warehouse_id == warehouse_id
-    ).first()
-    if not user_warehouse:
-        raise HTTPException(status_code=403, detail="用户无权访问该仓库")
-    
-    # 更新用户当前仓库
+
     user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    if user.role == UserRole.ADMIN:
+        # 管理员跨仓规则统一（评审 P2）：与 require_warehouse 的管理员豁免、
+        # 仓库列表接口的"管理员返回全部仓库"保持一致——不受 user_warehouses
+        # 关联表限制（修复"普通用户升管理员后列表可见仓库、切换却 403"），
+        # 目标仓库须存在且启用。
+        warehouse = db.query(Warehouse).filter(
+            Warehouse.id == warehouse_id, Warehouse.is_active.is_(True)
+        ).first()
+        if not warehouse:
+            raise HTTPException(status_code=404, detail="仓库不存在或已停用")
+    else:
+        # 评审第 5 轮 P2：所有角色都只能切换到已启用仓库——此前非管理员分支仅检查
+        # UserWarehouse 关联，已停用仓库仍可切换成功，随后货物/库存请求才被启用校验
+        # 拒绝，造成前后端仓库状态不一致。
+        warehouse = db.query(Warehouse).filter(
+            Warehouse.id == warehouse_id, Warehouse.is_active.is_(True)
+        ).first()
+        if not warehouse:
+            raise HTTPException(status_code=404, detail="仓库不存在或已停用")
+        # 检查用户是否有权限访问该仓库
+        user_warehouse = db.query(UserWarehouse).filter(
+            UserWarehouse.user_id == user_id,
+            UserWarehouse.warehouse_id == warehouse_id
+        ).first()
+        if not user_warehouse:
+            raise HTTPException(status_code=403, detail="用户无权访问该仓库")
+
+    # 更新用户当前仓库
     user.current_warehouse_id = warehouse_id
     db.commit()
-    
-    warehouse = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
+
     return {
         "message": "仓库切换成功",
         "current_warehouse_id": warehouse_id,
@@ -214,8 +236,21 @@ async def update_user(
     if user_update.full_name is not None:
         user.full_name = user_update.full_name
     if user_update.role is not None:
+        if user.role == UserRole.ADMIN and user_update.role != UserRole.ADMIN and db.query(User).filter(
+            User.role == UserRole.ADMIN, User.is_active.is_(True)
+        ).count() <= 1:
+            raise HTTPException(status_code=409, detail="不能降级最后一名启用的系统管理员")
         user.role = user_update.role
+        # 评审 P2（第 5/6 轮）：降级后"当前仓库"可能不在其启用授权集内（管理员
+        # 切仓豁免关联表检查），继续保留会造成前端显示与服务端选中仓库不一致
+        # （货物查询 403、扫码报错）。统一按"启用授权仓库：默认 → 第一个 → 清空"重指。
+        if user_update.role != UserRole.ADMIN and user.current_warehouse_id:
+            repair_current_warehouse(db, user)
     if user_update.is_active is not None:
+        if user.role == UserRole.ADMIN and not user_update.is_active and db.query(User).filter(
+            User.role == UserRole.ADMIN, User.is_active.is_(True)
+        ).count() <= 1:
+            raise HTTPException(status_code=409, detail="不能禁用最后一名启用的系统管理员")
         user.is_active = user_update.is_active
     if user_update.password:
         user.hashed_password = get_password_hash(user_update.password)
@@ -278,6 +313,11 @@ async def delete_user(
     # 不能删除自己
     if current_user.id == user_id:
         raise HTTPException(status_code=400, detail="不能删除自己的账户")
+    target = db.query(User).filter(User.id == user_id).first()
+    if target and target.role == UserRole.ADMIN and target.is_active and db.query(User).filter(
+        User.role == UserRole.ADMIN, User.is_active.is_(True)
+    ).count() <= 1:
+        raise HTTPException(status_code=409, detail="不能删除最后一名启用的系统管理员")
 
     # 查找用户
     user = db.query(User).filter(User.id == user_id).first()
@@ -314,19 +354,10 @@ async def unassign_warehouse_from_user(
     
     # 如果这是用户的当前仓库，需要重新设置
     user = db.query(User).filter(User.id == user_id).first()
-    if user.current_warehouse_id == warehouse_id:
-        # 尝试找默认仓库，没有就找第一个
-        default = db.query(UserWarehouse).filter(
-            UserWarehouse.user_id == user_id,
-            UserWarehouse.is_default == True
-        ).first()
-        if default:
-            user.current_warehouse_id = default.warehouse_id
-        else:
-            first = db.query(UserWarehouse).filter(
-                UserWarehouse.user_id == user_id
-            ).first()
-            user.current_warehouse_id = first.warehouse_id if first else None
+    if user and user.current_warehouse_id == warehouse_id:
+        # 评审第 6 轮 P2：备用仓库只用启用授权仓库（默认 → 第一个 → 清空），
+        # 避免回退到已停用的仓库
+        repair_current_warehouse(db, user)
     
     db.commit()
     return {"message": "取消分配成功"}

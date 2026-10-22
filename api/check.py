@@ -14,6 +14,7 @@ from core.models import UserRole, Warehouse, UserWarehouse, User, Location, Good
 from core.schemas import CheckCreate, CheckOrderCreate, CheckOrderHeaderResponse, CheckOrderItemResponse, CheckOrderFullResponse, CheckOrderItemCreate
 from core.security import get_current_user
 from core.deps import get_db
+from core.access import require_operator, require_selected_warehouse
 from core.order_utils import lock_stock_row, lock_stock_rows_for_keys, lock_order_header, advisory_lock_stock_key
 
 router = APIRouter()
@@ -28,20 +29,20 @@ async def scan_check(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    require_operator(current_user)
     # 查询货物和库位
-    goods = db.query(Goods).filter(Goods.barcode == check.goods_barcode).first()
     location = db.query(Location).filter(Location.location_code == check.location_code).first()
-    
+    goods = db.query(Goods).filter(Goods.warehouse_id == location.warehouse_id, Goods.barcode == check.goods_barcode).first() if location else None
+
     if not goods or not location:
         raise HTTPException(status_code=404, detail="货物或库位不存在")
-    
-    # 权限校验
-    user_warehouse = db.query(UserWarehouse).filter(
-        UserWarehouse.user_id == current_user.id,
-        UserWarehouse.warehouse_id == location.warehouse_id
-    ).first()
-    if not user_warehouse:
-        raise HTTPException(status_code=403, detail="无权限操作其他仓库库位")
+
+    if not location.is_active:
+        raise HTTPException(status_code=400, detail=f"库位已停用：{check.location_code}")
+
+    # 统一仓库校验：库位仓库须是当前选择的启用仓库，且用户有权限
+    # （与单次扫码出入库、批量扫码一致：仓库停用或多仓跨页时拒绝写入）。
+    require_selected_warehouse(db, current_user, location.warehouse_id)
     
     # 查询实际库存
     warehouse_id = location.warehouse_id
@@ -480,13 +481,13 @@ async def add_check_order_item(
             raise HTTPException(status_code=403, detail="无该仓库权限")
 
     # 查询货物和库位
-    goods = db.query(Goods).filter(Goods.barcode == item.goods_barcode).first()
+    goods = db.query(Goods).filter(Goods.warehouse_id == order.warehouse_id, Goods.barcode == item.goods_barcode).first()
     location = db.query(Location).filter(Location.location_code == item.location_code).first()
 
     if not goods or not location:
         raise HTTPException(status_code=404, detail="货物或库位不存在")
 
-    # 货物为全局主数据，仅校验库位所属仓库
+    # 货物和库位均须属于盘点单仓库
     if location.warehouse_id != order.warehouse_id:
         raise HTTPException(status_code=400, detail="库位不属于该盘点单仓库")
 

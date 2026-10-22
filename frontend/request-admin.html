@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-ZETSLfw3RKLIwUOS4Cveh1XEv9LFpWu2zGUxMEv5mi4='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-V/WzyYZi/T3CRKFgDVJCjZkyE5BH1eQhH9TSwQSzLc8='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 办公用品申请系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -400,6 +400,7 @@
 
             // ---------- 申请单详情（点击申请单展开：表头信息 + 带表头的货物明细表） ----------
             let detailCtx = null;   // {kind: 'recent'|'archive', id, ref}
+            let detailGoodsSearchSeq = 0;
 
             async function reloadOpenRequest() {
                 await loadRecent();
@@ -433,6 +434,7 @@
             }
 
             function closeItemEditor() {
+                detailGoodsSearchSeq += 1;
                 detailEditingItem = null;
                 detailSelectedGoods = null;
                 el('detailItemEditor').classList.add('hidden');
@@ -477,6 +479,8 @@
 
             async function searchDetailGoods(keyword) {
                 const kw = String(keyword || '').trim();
+                const seq = ++detailGoodsSearchSeq;
+                const warehouseId = detailStockWarehouseId;
                 detailSelectedGoods = null;
                 renderSelectedGoods();
                 if (!kw) {
@@ -484,10 +488,14 @@
                     el('detailGoodsSearchStatus').textContent = '输入条码、名称或规格进行模糊查询。';
                     return;
                 }
+                if (!warehouseId) {
+                    el('detailGoodsSearchStatus').textContent = '申请仓库尚未确定，无法查询货物。';
+                    return;
+                }
                 el('detailGoodsSearchStatus').textContent = '查询中…';
                 try {
-                    const rows = await apiFetch('api/goods/?keyword=' + encodeURIComponent(kw));
-                    if (el('detailGoodsKw').value.trim() !== kw) return;
+                    const rows = await apiFetch('api/goods/?warehouse_id=' + encodeURIComponent(warehouseId) + '&keyword=' + encodeURIComponent(kw));
+                    if (seq !== detailGoodsSearchSeq || warehouseId !== detailStockWarehouseId || el('detailGoodsKw').value.trim() !== kw) return;
                     const results = (rows || []).slice(0, 20);
                     el('detailGoodsResults').innerHTML = '';
                     if (!results.length) {
@@ -506,6 +514,7 @@
                         el('detailGoodsResults').appendChild(button);
                     });
                 } catch (error) {
+                    if (seq !== detailGoodsSearchSeq || warehouseId !== detailStockWarehouseId) return;
                     el('detailGoodsSearchStatus').textContent = error.message || '货物查询失败';
                 }
             }
@@ -710,6 +719,8 @@
                 closeItemEditor();
                 detailStockSeq += 1;
                 detailGoodsStockSeq += 1;
+                detailGoodsSearchSeq += 1;
+                detailStockWarehouseId = null;
                 detailCtx = null;
             }
 
@@ -949,8 +960,8 @@
 
             // 初始化：common.js 在 checkLoginStatus() 成功解析用户后回调本函数（与 user.html 同模式）
             function pageInit() {
-                // 权限检查：只有管理员可以访问申请管理页面
-                if (typeof currentUser === 'undefined' || !currentUser || currentUser.role !== 'admin') {
+                // 管理员和仓库主管可处理其授权范围内的申请。
+                if (typeof currentUser === 'undefined' || !currentUser || !['admin', 'supervisor'].includes(currentUser.role)) {
                     const mainEl = document.querySelector('main');
                     if (mainEl) {
                         mainEl.innerHTML =
@@ -958,7 +969,7 @@
                             '<div class="text-center">' +
                             '<i class="fa fa-lock text-6xl text-gray-400 mb-4"></i>' +
                             '<h1 class="text-2xl font-bold text-gray-800 mb-2">无权限访问</h1>' +
-                            '<p class="text-gray-600">只有系统管理员才能访问申请管理页面</p>' +
+                            '<p class="text-gray-600">仅管理员和仓库主管可访问申请管理页面</p>' +
                             '</div></div>';
                     }
                     const requestMenuLink = document.querySelector('a[href="request-admin.html"]');
@@ -971,6 +982,7 @@
                 el('tabRecent').addEventListener('click', function () { switchTab('recent'); });
                 el('tabArchived').addEventListener('click', function () { switchTab('archived'); });
                 el('filterStatus').addEventListener('change', function () { recentPage = 1; loadRecent(); });
+                if (currentUser.role !== 'admin') el('archiveNowBtn').classList.add('hidden');
                 el('archiveNowBtn').addEventListener('click', archiveNow);
                 el('recentPrevPageBtn').addEventListener('click', function () {
                     if (recentPage > 1) { recentPage -= 1; renderRecentPage(); }

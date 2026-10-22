@@ -454,7 +454,9 @@ function renderChrome(activeTab) {
   var tabEl = $("#mTabbar");
   if (tabEl) {
     var inner = "";
+    var user = AUTH.getUser() || {};
     TABS.forEach(function (t) {
+      if (user.role === "viewer" && (t.id === "scan" || t.id === "orders")) return;
       inner += '<a href="' + t.href + '" class="' + (t.id === activeTab ? "on" : "") + '">' +
         '<i class="fa ' + t.icon + '"></i><span>' + t.label + "</span></a>";
     });

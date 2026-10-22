@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-u3LdfG8/8n/Xcr128t1lcQkXNPPkmabMV7IysxC28XA='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-KKWTxp44CEpyvJaXSuHSxn8vCz/CFWeplCJ2r+CySoI='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>库位管理 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -144,7 +144,7 @@
             </div>
             
             <!-- 操作卡片 -->
-            <div class="bg-white rounded-lg shadow p-6 mb-6">
+            <div id="createLocationCard" class="bg-white rounded-lg shadow p-6 mb-6">
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-lg font-semibold text-gray-800">新增库位</h2>
                     <button id="refreshLocations" class="flex items-center text-sm text-primary hover:text-secondary">
@@ -341,6 +341,9 @@
         
         // 页面初始化
         function pageInit() {
+            if (!['admin', 'supervisor'].includes(getCurrentUserRole())) {
+                document.getElementById('createLocationCard').classList.add('hidden');
+            }
             loadWarehouses();
             loadLocations();
             setupLocationEventListeners();
@@ -486,10 +489,9 @@
                             <button data-act="print-location" data-id="${Number(location.id) || 0}" class="text-blue-500 hover:text-blue-600 mr-3">
                                 <i class="fa fa-print"></i> 打印
                             </button>
-                            <button data-act="edit-location" data-id="${Number(location.id) || 0}" class="text-primary hover:text-secondary mr-3">
+                            ${['admin', 'supervisor'].includes(getCurrentUserRole()) ? `<button data-act="edit-location" data-id="${Number(location.id) || 0}" class="text-primary hover:text-secondary mr-3">
                                 <i class="fa fa-edit"></i> 编辑
                             </button>
-                            ${getCurrentUserRole() === 'admin' ? `
                                 <button data-act="delete-location" data-id="${Number(location.id) || 0}" class="text-red-600 hover:text-red-700">
                                     <i class="fa fa-trash"></i> 删除
                                 </button>

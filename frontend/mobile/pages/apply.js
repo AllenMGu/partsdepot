@@ -71,7 +71,9 @@ window.M_PAGES["apply"] = function () {
     state.goodsResults = [];
     elResults.innerHTML = "";
     elSearchStatus.innerHTML = "";
-    refreshStocks(state.warehouseSeq);
+    state.goodsItems = [];
+    renderItems();
+    M.toast("仓库已切换，请重新选择货物");
   }
 
   /* 切仓批量刷新已选货物库存（与小程序一致：POST /public/stock-lookup）

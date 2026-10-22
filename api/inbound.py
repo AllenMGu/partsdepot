@@ -9,6 +9,7 @@ import logging
 from core.models import UserRole, InventoryType, Warehouse, UserWarehouse, User, Location, Goods, Stock, InventoryRecord, InboundOrderHeader, InboundOrderItem, OutboundOrderHeader, OutboundOrderItem
 from core.schemas import InboundOrderItemCreate, InboundOrderItemResponse, InboundOrderHeaderCreate, InboundOrderHeaderResponse, InboundOrderDetailResponse
 from core.security import get_current_user
+from core.access import require_inventory_write
 from core.deps import get_db
 from core.order_utils import format_outbound_order_response, recalculate_outbound_order_total, recalculate_inbound_order_total, lock_stock_row, lock_stock_rows_for_keys, lock_order_header, advisory_lock_stock_key, generate_order_no
 
@@ -28,13 +29,10 @@ async def create_inbound_order(
         if not current_user.current_warehouse_id:
             raise HTTPException(status_code=400, detail="请先选择当前仓库")
         
-        # 检查用户是否有权限操作当前仓库
-        user_warehouse = db.query(UserWarehouse).filter(
-            UserWarehouse.user_id == current_user.id,
-            UserWarehouse.warehouse_id == current_user.current_warehouse_id
-        ).first()
-        if not user_warehouse:
-            raise HTTPException(status_code=403, detail="无权限操作当前仓库")
+        # 统一仓库访问规则（评审第 5 轮 P2）：角色 + 启用状态 + 非管理员仓库授权；
+        # 管理员跨仓豁免（与 switch-warehouse / require_warehouse 一致），
+        # 此前直接查询 UserWarehouse，导致管理员在未分配的启用仓库建单 403
+        require_inventory_write(db, current_user, current_user.current_warehouse_id)
         
         # 生成单号
         order_no = generate_order_no("IN", db)
@@ -92,19 +90,14 @@ async def add_inbound_order_item(
         if not order:
             raise HTTPException(status_code=404, detail="入库单不存在")
         
-        # 检查权限
-        user_warehouse = db.query(UserWarehouse).filter(
-            UserWarehouse.user_id == current_user.id,
-            UserWarehouse.warehouse_id == order.warehouse_id
-        ).first()
-        if not user_warehouse:
-            raise HTTPException(status_code=403, detail="无权限操作此入库单")
+        # 统一仓库访问规则（评审第 5 轮 P2）：非管理员须仓库授权，管理员跨仓豁免
+        require_inventory_write(db, current_user, order.warehouse_id)
         
         if order.status != "DRAFT":
             raise HTTPException(status_code=400, detail="只能向草稿状态的单据添加明细")
         
         # 查询货物和库位
-        goods = db.query(Goods).filter(Goods.barcode == item.goods_barcode).first()
+        goods = db.query(Goods).filter(Goods.warehouse_id == order.warehouse_id, Goods.barcode == item.goods_barcode).first()
         if not goods:
             raise HTTPException(status_code=404, detail="货物不存在")
         
@@ -171,13 +164,8 @@ async def submit_inbound_order(
         if not order:
             raise HTTPException(status_code=404, detail="入库单不存在")
         
-        # 检查权限
-        user_warehouse = db.query(UserWarehouse).filter(
-            UserWarehouse.user_id == current_user.id,
-            UserWarehouse.warehouse_id == order.warehouse_id
-        ).first()
-        if not user_warehouse:
-            raise HTTPException(status_code=403, detail="无权限操作此入库单")
+        # 统一仓库访问规则（评审第 5 轮 P2）：非管理员须仓库授权，管理员跨仓豁免
+        require_inventory_write(db, current_user, order.warehouse_id)
         
         if order.status != "DRAFT":
             raise HTTPException(status_code=400, detail="只能提交草稿状态的单据")
@@ -404,14 +392,7 @@ async def update_inbound_order(
             raise HTTPException(status_code=400, detail="仅允许更新草稿状态的入库单")
 
         # 权限检查
-        if current_user.role != UserRole.ADMIN:
-            # 检查订单是否属于当前用户可操作的仓库
-            user_warehouse = db.query(UserWarehouse).filter(
-                UserWarehouse.user_id == current_user.id,
-                UserWarehouse.warehouse_id == db_order.warehouse_id
-            ).first()
-            if not user_warehouse:
-                raise HTTPException(status_code=403, detail="无权限操作此入库单")
+        require_inventory_write(db, current_user, db_order.warehouse_id)
 
         # 更新订单信息
         db_order.supplier = order.supplier
@@ -464,13 +445,7 @@ async def update_inbound_order_item(
             raise HTTPException(status_code=400, detail="仅允许更新草稿状态的入库单的明细")
 
         # 权限检查
-        if current_user.role != UserRole.ADMIN:
-            user_warehouse = db.query(UserWarehouse).filter(
-                UserWarehouse.user_id == current_user.id,
-                UserWarehouse.warehouse_id == order.warehouse_id
-            ).first()
-            if not user_warehouse:
-                raise HTTPException(status_code=403, detail="无权限操作此入库单")
+        require_inventory_write(db, current_user, order.warehouse_id)
 
         # 查询明细项
         db_item = db.query(InboundOrderItem).filter(
@@ -482,7 +457,7 @@ async def update_inbound_order_item(
             raise HTTPException(status_code=404, detail="入库单明细不存在")
 
         # 查询货物信息
-        goods = db.query(Goods).filter(Goods.barcode == item.goods_barcode).first()
+        goods = db.query(Goods).filter(Goods.warehouse_id == order.warehouse_id, Goods.barcode == item.goods_barcode).first()
         if not goods:
             raise HTTPException(status_code=404, detail="货物不存在")
 
@@ -556,13 +531,7 @@ async def delete_inbound_order_item(
             raise HTTPException(status_code=400, detail="仅允许删除草稿状态的入库单的明细")
 
         # 权限检查
-        if current_user.role != UserRole.ADMIN:
-            user_warehouse = db.query(UserWarehouse).filter(
-                UserWarehouse.user_id == current_user.id,
-                UserWarehouse.warehouse_id == order.warehouse_id
-            ).first()
-            if not user_warehouse:
-                raise HTTPException(status_code=403, detail="无权限操作此入库单")
+        require_inventory_write(db, current_user, order.warehouse_id)
 
         # 查询明细项
         db_item = db.query(InboundOrderItem).filter(
@@ -607,13 +576,7 @@ async def return_inbound_order(
             raise HTTPException(status_code=400, detail="仅允许对已完成的入库单进行退库操作")
 
         # 权限检查
-        if current_user.role != UserRole.ADMIN:
-            user_warehouse = db.query(UserWarehouse).filter(
-                UserWarehouse.user_id == current_user.id,
-                UserWarehouse.warehouse_id == inbound_order.warehouse_id
-            ).first()
-            if not user_warehouse:
-                raise HTTPException(status_code=403, detail="无权限操作此入库单")
+        require_inventory_write(db, current_user, inbound_order.warehouse_id)
 
         # 检查是否已经有退库单（使用英文备注避免编码问题）
         existing_return_order = db.query(OutboundOrderHeader).filter(
@@ -683,7 +646,9 @@ async def delete_inbound_order(
         if order.status != "DRAFT":
             raise HTTPException(status_code=400, detail="仅允许删除草稿状态的入库单")
 
-        # 权限检查
+        # 权限检查（评审第 6 轮 P2：删除同样须有目标仓库授权，管理员跨仓豁免；
+        # 保留原有"仅单据所有人可删"限制，撤销仓库授权后不得再删旧单据）
+        require_inventory_write(db, current_user, order.warehouse_id)
         if current_user.role != UserRole.ADMIN:
             # 检查订单是否属于当前用户
             if order.operator_id != current_user.id:

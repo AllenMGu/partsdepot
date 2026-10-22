@@ -11,6 +11,10 @@
 #       D~G 断言"终态单据不得出现未过账/未扣减的新明细"；H/I 验证跨流程锁顺序：
 #       H 申请审批∥手工出库，I 申请审批∥扫码出库。
 #       新明细要么随提交/完成一起过账，要么被 400 拒绝 —— 二者必居其一，不允许中间态。
+#       J 删除货物∥提交申请（评审 P2）：同 (仓库,条码) 货物行加行级锁互斥，
+#       断言不出现"删除成功+提交成功"的悬空待审批引用，且终态自洽。
+#       K 修改货物条码∥提交申请（评审 P1）：改条码持同行级锁并在同事务内检查
+#       旧条码待审批引用（存在 409），断言不出现指向已改名旧条码的待审批明细。
 #
 # 安全：启动前先过 tests/test_db_guard.py 护栏 —— 目标库必须是可丢弃的空测试库
 #       （黑名单库名硬拒；核心表非空拒；WMS_ALLOW_NONEMPTY_TEST_DB=1 可豁免非空检查）。
@@ -34,7 +38,7 @@ def check(name, cond, detail=""):
     results.append((name, bool(cond), detail))
     print(f"{'PASS' if cond else 'FAIL'} | {name}" + (f" | {detail}" if detail else ""))
 
-def req(method, path, body=None, token=None, form=False):
+def req(method, path, body=None, token=None, form=False, extra_headers=None):
     url = BASE + path
     if body is not None:
         data = (urllib.parse.urlencode(body) if form else json.dumps(body)).encode()
@@ -44,6 +48,9 @@ def req(method, path, body=None, token=None, form=False):
     r.add_header("Content-Type", "application/x-www-form-urlencoded" if form else "application/json")
     if token:
         r.add_header("Authorization", "Bearer " + token)
+    if extra_headers:
+        for k, v in extra_headers.items():
+            r.add_header(k, v)
     try:
         with urllib.request.urlopen(r, timeout=30) as resp:
             raw = resp.read().decode()
@@ -439,6 +446,141 @@ try:
     check("场景I 审批与扫码出库均成功（无号段锁/库存锁死锁）",
           codesI == {"approve": 200, "scan": 200}, f"codes={codesI} bodies={resI}")
     check("场景I 两条路径各扣1，G009 最终为8", qI == 8, f"G009={qI}")
+
+    # ============================================================
+    # 场景 J：删除货物 ∥ 提交申请（同仓库、同条码）—— 评审 P2 并发竞态
+    # RequestItem 无 goods_id 外键（按条码快照引用）。删除路径"查待审批引用→删"
+    # 与提交路径"查货物存在→写明细"若交错，会留下指向已删货物的待审批引用。
+    # 修复：两条路径对同一 (仓库,条码) 货物行加行级锁（SELECT ... FOR UPDATE）。
+    # 断言：
+    #   1) 任何一轮都不得出现 (删除 200 且 提交 201) —— 即悬空引用；
+    #   2) 终态自洽：货物存在 ⇔ 该 (仓库,条码) 有待审批明细。
+    # 每轮使用不同条码 + 不同来源 IP（X-Real-IP，测试服务由 nginx 注入，
+    # 测试脚本可直设），避开公共提交"10 分钟 10 次/IP"限流。
+    # ============================================================
+    print("\n--- 场景 J：N 轮 删除货物 ∥ 提交申请 并发 ---")
+    # 确保管理员选中 W1（前面场景可能改过选择）
+    req("POST", f"/api/users/{aid}/switch-warehouse?warehouse_id={W1}", token=admin)
+    J_ROUNDS = 8
+    def pending_ref_count(bc):
+        r = db("SELECT count(*) FROM request_items ri JOIN requests rq ON ri.request_id=rq.id "
+               "WHERE rq.warehouse_id=:w AND rq.status='pending' AND ri.barcode=:b",
+               {"w": W1, "b": bc}, fetch=True)
+        return r[0][0]
+    def goods_exists(bc):
+        return db("SELECT count(*) FROM goods WHERE barcode=:b AND warehouse_id=:w",
+                  {"b": bc, "w": W1}, fetch=True)[0][0]
+
+    j_codes, j_bad = [], 0
+    for rnd in range(1, J_ROUNDS + 1):
+        bc = f"RACEJ{rnd:02d}"
+        s, gj = req("POST", "/api/goods/", {"barcode": bc, "name": f"竞态物料{rnd}", "price": 1}, admin)
+        if s not in (200, 201):
+            j_bad += 1
+            j_codes.append((rnd, -1, -1))
+            print(f"  [round {rnd}] 建货物失败: {s} {gj}")
+            continue
+        gjid = (gj or {}).get("id")
+        resJ = {}
+        barJ = threading.Barrier(2)
+        ipJ = f"203.0.113.{100 + rnd}"
+        def delJ():
+            barJ.wait()
+            resJ["delete"] = req("DELETE", f"/api/goods/{gjid}", token=admin)
+        def subJ():
+            barJ.wait()
+            resJ["submit"] = req("POST", "/api/requests/", {
+                "applicant_name": "并发竞态测试", "contact": "race@test.local",
+                "description": "场景J 删除∥提交", "warehouse_id": W1,
+                "items": [{"barcode": bc, "quantity": 1}],
+            }, extra_headers={"X-Real-IP": ipJ})
+        t1 = threading.Thread(target=delJ); t2 = threading.Thread(target=subJ)
+        t1.start(); t2.start(); t1.join(); t2.join()
+        dc = (resJ.get("delete") or (-1,))[0]
+        sc = (resJ.get("submit") or (-1,))[0]
+        dangling = (dc == 200 and sc == 201)
+        refs_now = pending_ref_count(bc)
+        consistent = (goods_exists(bc) >= 1) == (refs_now >= 1)
+        j_codes.append((rnd, dc, sc))
+        if dangling or not consistent:
+            j_bad += 1
+            print(f"  [round {rnd}] delete={dc} submit={sc} goods_exists={goods_exists(bc)} pending_refs={refs_now}")
+        # 收敛终态：有待审批单则驳回，有货物则删除（下轮用新条码，互不影响）
+        row = db("SELECT rq.id FROM requests rq JOIN request_items ri ON ri.request_id=rq.id "
+                 "WHERE rq.warehouse_id=:w AND rq.status='pending' AND ri.barcode=:b LIMIT 1",
+                 {"w": W1, "b": bc}, fetch=True)
+        if row:
+            req("POST", f"/api/requests/{row[0][0]}/status", {"status": "rejected"}, admin)
+        if goods_exists(bc) >= 1:
+            req("DELETE", f"/api/goods/{gjid}", token=admin)
+    check("场景J 无一轮出现 删除成功(200)+提交成功(201) 的悬空引用",
+          all(not (dc == 200 and sc == 201) for _, dc, sc in j_codes), f"codes={j_codes}")
+    check("场景J 每轮终态自洽（货物存在 ⇔ 有待审批引用）", j_bad == 0,
+          f"bad_rounds={j_bad}/{J_ROUNDS}")
+
+    # ============================================================
+    # 场景 K：修改货物条码 ∥ 提交申请（同仓库、旧条码）—— 评审 P1 并发竞态
+    # RequestItem 无 goods_id 外键（条码快照引用）。改条码路径"查待审批引用→改名"
+    # 若与提交路径"查货物存在→写明细"交错，会留下指向已改名旧条码的待审批明细
+    # （审批按旧条码找不到本仓档案而卡死）。
+    # 修复：改条码路径与提交路径对同一货物行加行级锁（SELECT ... FOR UPDATE），
+    # 并在同事务内检查旧条码的待审批引用，存在则 409。
+    # 断言：
+    #   1) 任何一轮都不得出现 (改条码 200 且 提交 201) —— 即指向旧条码的待审批引用；
+    #   2) 终态自洽：旧条码货物存在 ⇔ 该条码有待审批明细。
+    # 每轮使用不同条码 + 不同来源 IP（X-Real-IP），避开公共提交限流。
+    # ============================================================
+    print("\n--- 场景 K：N 轮 修改货物条码 ∥ 提交申请 并发 ---")
+    req("POST", f"/api/users/{aid}/switch-warehouse?warehouse_id={W1}", token=admin)
+    K_ROUNDS = 8
+
+    k_codes, k_bad = [], 0
+    for rnd in range(1, K_ROUNDS + 1):
+        bc = f"RACEK{rnd:02d}"
+        new_bc = f"RACEK{rnd:02d}N"
+        s, gk = req("POST", "/api/goods/", {"barcode": bc, "name": f"竞态物料{rnd}", "price": 1}, admin)
+        if s not in (200, 201):
+            k_bad += 1
+            k_codes.append((rnd, -1, -1))
+            print(f"  [round {rnd}] 建货物失败: {s} {gk}")
+            continue
+        gkid = (gk or {}).get("id")
+        resK = {}
+        barK = threading.Barrier(2)
+        ipK = f"203.0.113.{150 + rnd}"
+        def renK():
+            barK.wait()
+            resK["rename"] = req("PUT", f"/api/goods/{gkid}", {"barcode": new_bc}, token=admin)
+        def subK():
+            barK.wait()
+            resK["submit"] = req("POST", "/api/requests/", {
+                "applicant_name": "并发竞态测试", "contact": "race@test.local",
+                "description": "场景K 改条码∥提交", "warehouse_id": W1,
+                "items": [{"barcode": bc, "quantity": 1}],
+            }, extra_headers={"X-Real-IP": ipK})
+        t1 = threading.Thread(target=renK); t2 = threading.Thread(target=subK)
+        t1.start(); t2.start(); t1.join(); t2.join()
+        rc = (resK.get("rename") or (-1,))[0]
+        sc = (resK.get("submit") or (-1,))[0]
+        dangling = (rc == 200 and sc == 201)
+        old_exists = goods_exists(bc) >= 1
+        refs_now = pending_ref_count(bc)
+        consistent = old_exists == (refs_now >= 1)
+        k_codes.append((rnd, rc, sc))
+        if dangling or not consistent:
+            k_bad += 1
+            print(f"  [round {rnd}] rename={rc} submit={sc} old_exists={old_exists} pending_refs={refs_now}")
+        # 收敛终态：有待审批单则驳回；删除货物（改名后 id 不变）
+        row = db("SELECT rq.id FROM requests rq JOIN request_items ri ON ri.request_id=rq.id "
+                 "WHERE rq.warehouse_id=:w AND rq.status='pending' AND ri.barcode=:b LIMIT 1",
+                 {"w": W1, "b": bc}, fetch=True)
+        if row:
+            req("POST", f"/api/requests/{row[0][0]}/status", {"status": "rejected"}, admin)
+        req("DELETE", f"/api/goods/{gkid}", token=admin)
+    check("场景K 无一轮出现 改条码成功(200)+提交成功(201) 的指向旧条码待审批引用",
+          all(not (rc == 200 and sc == 201) for _, rc, sc in k_codes), f"codes={k_codes}")
+    check("场景K 每轮终态自洽（旧条码货物存在 ⇔ 有待审批引用）", k_bad == 0,
+          f"bad_rounds={k_bad}/{K_ROUNDS}")
 
 finally:
     srv.terminate()

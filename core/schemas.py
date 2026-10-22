@@ -20,7 +20,7 @@ class UserCreate(BaseModel):
     password: str
     full_name: str
     warehouse_ids: List[int] = Field(default_factory=list)  # 改为列表
-    role: UserRole = UserRole.OPERATOR
+    role: UserRole = UserRole.VIEWER
     
     class Config:
         json_encoders = {
@@ -95,6 +95,7 @@ class LocationUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class GoodsCreate(BaseModel):
+    warehouse_id: Optional[int] = None  # 旧客户端省略时使用服务端当前仓库
     barcode: str
     name: str
     spec: Optional[str] = ""
@@ -103,11 +104,12 @@ class GoodsCreate(BaseModel):
 
 class GoodsResponse(BaseModel):
     id: int
+    warehouse_id: int
     barcode: str
     name: str
     spec: str
     unit: str
-    price: float
+    price: Optional[float] = None
     create_time: datetime
 
     class Config:
@@ -153,7 +155,7 @@ class StockResponse(BaseModel):
     goods_id: int
     goods_name: str
     goods_barcode: str
-    goods_price: float
+    goods_price: Optional[float] = None
     goods_spec: Optional[str] = ""
     goods_unit: Optional[str] = ""
     location_id: int

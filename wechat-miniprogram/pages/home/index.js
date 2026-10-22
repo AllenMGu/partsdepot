@@ -7,6 +7,7 @@ Page({
   data: {
     loggedIn: false,
     user: {},
+    canOperate: false,
     stockCount: 0,
     totalQty: "0.00",
     logsCount: 0
@@ -14,7 +15,8 @@ Page({
   async onShow() {
     // 首页匿名可用：未登录时不跳转，只显示申请入口与登录入口
     const loggedIn = isLoggedIn();
-    this.setData({ loggedIn, user: loggedIn ? (getUser() || {}) : {} });
+    const user = loggedIn ? (getUser() || {}) : {};
+    this.setData({ loggedIn, user, canOperate: loggedIn && ["admin", "supervisor", "operator"].includes(user.role) });
     if (loggedIn) {
       await this.loadOverview();
     }
@@ -39,9 +41,11 @@ Page({
     }
   },
   goScan() {
+    if (!this.data.canOperate) return;
     wx.switchTab({ url: "/pages/scan/index" });
   },
   goOrders() {
+    if (!this.data.canOperate) return;
     wx.navigateTo({ url: "/pages/orders/index" });
   },
   goStock() {

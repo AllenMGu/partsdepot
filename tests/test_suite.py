@@ -108,6 +108,7 @@ check("创建物料 G001(price=10)", s == 200)
 s, u = req("POST", "/api/users/", {"username": "op1", "password": "Op-Test-2026",
     "full_name": "操作员", "warehouse_ids": [W1], "role": "operator"}, admin)
 check("创建操作员 op1(仅W1)", s == 200, f"status={s}")
+OP1_ID = (u or {}).get("id")
 s, b = req("POST", "/api/token", {"username": "op1", "password": "Op-Test-2026"}, form=True)
 check("op1 登录", s == 200)
 op = b.get("access_token", "")
@@ -395,7 +396,7 @@ check("三轮P1 撤销后未知用户登录仍安全 401", s == 401, f"status={s
 # 15a. 公开搜索端点（免登录，不得暴露单价）
 s, b = req("GET", "/api/public/goods-search?q=")
 check("货物搜索：空关键字 → 400", s == 400, f"status={s}")
-s, hits = req("GET", "/api/public/goods-search?q=G001")
+s, hits = req("GET", "/api/public/goods-search?q=G001&warehouse_id=" + str(W1))
 first = (hits or [None])[0] if isinstance(hits, list) else None
 check("货物搜索：条码模糊命中", s == 200 and isinstance(first, dict) and first.get("barcode") == "G001", f"status={s} hits={hits}")
 check("货物搜索：返回字段仅 barcode/name/spec/unit/available_stock（无单价）",
@@ -403,17 +404,17 @@ check("货物搜索：返回字段仅 barcode/name/spec/unit/available_stock（�
       f"keys={list(first.keys()) if isinstance(first, dict) else first}")
 # 可用库存（产品需求：申请页选备件时显示可用库存）= 该货物全仓库存合计
 s_stock, stock_rows = req("GET", "/api/stock/?goods_barcode=G001", token=admin)
-_total = sum(r.get("quantity", 0) for r in (stock_rows or []) if isinstance(r, dict) and r.get("goods_barcode") == "G001")
+_total = sum(r.get("quantity", 0) for r in (stock_rows or []) if isinstance(r, dict) and r.get("goods_barcode") == "G001" and r.get("warehouse_id") == W1)
 check("货物搜索：available_stock = 当前全仓库存合计",
       isinstance(first, dict) and abs(float(first.get("available_stock") or 0) - _total) < 1e-6,
       f"search={first} stock_total={_total}")
-s, hits = req("GET", "/api/public/goods-search?q=" + urllib.parse.quote("测试物料"))
+s, hits = req("GET", "/api/public/goods-search?q=" + urllib.parse.quote("测试物料") + "&warehouse_id=" + str(W1))
 check("货物搜索：名称搜索命中", s == 200 and isinstance(hits, list) and any(h.get("barcode") == "G001" for h in hits), f"status={s} hits={hits}")
-s, hits = req("GET", "/api/public/goods-search?q=does-not-exist-xyz")
+s, hits = req("GET", "/api/public/goods-search?q=does-not-exist-xyz&warehouse_id=" + str(W1))
 check("货物搜索：无匹配 → 空列表", s == 200 and hits == [], f"status={s} hits={hits}")
 # 15b. 搜索限流：独立 IP 桶（X-Real-IP 模拟另一客户端），1 分钟内 30 次/IP
 _rl_headers = {"X-Real-IP": "9.9.9.99"}
-_rl_codes = [req("GET", "/api/public/goods-search?q=G001", headers=_rl_headers)[0] for _ in range(31)]
+_rl_codes = [req("GET", "/api/public/goods-search?q=G001&warehouse_id=" + str(W1), headers=_rl_headers)[0] for _ in range(31)]
 check("货物搜索限流：同一 IP 第 31 次 → 429", _rl_codes[:30] == [200] * 30 and _rl_codes[30] == 429, f"codes={_rl_codes}")
 # 15c. 带货物提交（免登录，多行明细）+ 管理员可见 + 后端校验
 # 契约：每行只传 条码+数量；名称/规格/单位由后端按条码查库填充（防伪造）
@@ -438,7 +439,7 @@ check("部门固定选项：非指定部门 → 422", s == 422, f"status={s} bod
 
 s, b = req("POST", "/api/requests/", {
     "applicant_name": "货物测试", "contact": "user@example.com",
-    "description": "多行申请", "items": [{"barcode": "G001", "quantity": 1}, {"barcode": "G001", "quantity": 3}]})
+    "description": "多行申请", "warehouse_id": W1, "items": [{"barcode": "G001", "quantity": 1}, {"barcode": "G001", "quantity": 3}]})
 check("带货物提交：2 个明细行 → 201（多行）", s == 201, f"status={s} body={b}")
 _multi_id = (b or {}).get("id")
 s, b = req("POST", "/api/requests/", {
@@ -467,7 +468,7 @@ s, b = req("POST", "/api/requests/", {
 check("带货物提交：不存在的条码 → 422（防假条码）", s == 422, f"status={s} body={b}")
 s, b = req("POST", "/api/requests/", {
     "applicant_name": "货物测试", "contact": "user@example.com",
-    "description": "防伪造", "items": [{"barcode": "G001", "quantity": 1,
+    "description": "防伪造", "warehouse_id": W1, "items": [{"barcode": "G001", "quantity": 1,
     "name": "伪造名称", "spec": "伪造规格", "unit": "伪造单位"}]})
 check("防伪造：真实条码+客户端假名称 → 仍 201（多余字段被忽略）", s == 201, f"status={s} body={b}")
 _spoof_id = (b or {}).get("id")
@@ -578,11 +579,7 @@ s, b = req("POST", "/api/requests/", {
     "applicant_name": "仓库测试", "contact": "wh@test.com",
     "description": "未指定仓库的申请",
     "items": [{"barcode": "G001", "quantity": 1}]}, headers=_H2)
-check("多仓拦截：未指定仓库的申请可提交（201）", s == 201 and isinstance(b, dict) and b.get("id"), f"status={s} body={b}")
-_nowh_id = (b or {}).get("id")
-s, b = req("POST", f"/api/requests/{_nowh_id}/status", {"status": "approved"}, admin)
-check("多仓拦截：多启用仓且未指定仓库 → 通过被拒（400，提示重新提交）",
-      s == 400 and "仓库" in str(b) and "无法确定" in str(b), f"status={s} body={b}")
+check("多仓拦截：带货物申请不指定仓库 → 提交被拒（422）", s == 422, f"status={s} body={b}")
 check("多仓拦截：库存不变", _w1_g001_total() == _w1_floor, f"now={_w1_g001_total()}")
 
 # 驳回：不动库存；重复驳回被拦截（409）
@@ -610,10 +607,12 @@ check("无明细：通过成功（200，仅留痕不动库存）",
 
 # 15g. 按仓库搜索一致性（评审 P1：申请页库存必须与审批扣减仓库一致）
 # 双仓场景：G003 仅在 W2 有库存（W2=5、W1=0）→ 选 W1 搜索必须显示 0，而非全仓合计
+req("POST", f"/api/users/{ADMIN_ID}/switch-warehouse?warehouse_id={W2}", token=admin)
 s, g3 = req("POST", "/api/goods/", {"barcode": "G003", "name": "双仓测试物料", "price": 5}, admin)
 check("双仓：创建 G003", s == 200, f"status={s} body={g3}")
 s, b = req("POST", "/api/inventory/scan", {"goods_barcode": "G003", "location_code": "L2", "type": "入库", "quantity": 5}, admin)
 check("双仓：G003 入库 5 @W2/L2", s == 200, f"status={s} body={b}")
+req("POST", f"/api/users/{ADMIN_ID}/switch-warehouse?warehouse_id={W1}", token=admin)
 def _search_stock(barcode, wid=None):
     url = "/api/public/goods-search?q=" + urllib.parse.quote(barcode)
     if wid is not None:
@@ -624,9 +623,9 @@ def _search_stock(barcode, wid=None):
     hit = next((r for r in rows if isinstance(r, dict) and r.get("barcode") == barcode), None)
     return float(hit.get("available_stock") or 0) if hit else "MISS"
 check("双仓：G003 选 W2 → 可用 5", _search_stock("G003", W2) == 5, f"got={_search_stock('G003', W2)}")
-check("双仓：G003 选 W1 → 可用 0（不得显示全仓合计 5）", _search_stock("G003", W1) == 0, f"got={_search_stock('G003', W1)}")
-check("双仓：G003 不传仓库（兼容旧客户端）→ 全仓合计 5", _search_stock("G003") == 5, f"got={_search_stock('G003')}")
-check("双仓：G001 选 W2 → 可用 0（G001 仅在 W1）", _search_stock("G001", W2) == 0, f"got={_search_stock('G001', W2)}")
+check("双仓：G003 选 W1 → 目录无此货物", _search_stock("G003", W1) == "MISS", f"got={_search_stock('G003', W1)}")
+check("双仓：G003 不传仓库 → 禁止跨部门搜索", _search_stock("G003") == "ERR:400", f"got={_search_stock('G003')}")
+check("双仓：G001 选 W2 → 目录无此货物", _search_stock("G001", W2) == "MISS", f"got={_search_stock('G001', W2)}")
 s, b = req("GET", "/api/public/goods-search?q=G003&warehouse_id=99999")
 check("按仓搜索：不存在的仓库 → 400", s == 400, f"status={s} body={b}")
 
@@ -708,6 +707,9 @@ check("停用：申请单仍为待处理（可改仓重提/再处理）",
       isinstance(_off_row, dict) and _off_row.get("status") == "pending", f"row={_off_row}")
 s, b = req("PUT", f"/api/warehouses/{W1}", {"is_active": True}, admin)
 check("停用：恢复 W1 启用（环境复原）", s == 200 and (b or {}).get("is_active") in (True, 1), f"status={s} body={b}")
+# 评审第 6 轮 P2：W1 停用期间 op1（仅授权 W1）的当前仓库已被同步清空（无可用启用仓库）；
+# 恢复启用后由管理员代为重新选定，模拟用户重新选择仓库。
+req("POST", f"/api/users/{OP1_ID}/switch-warehouse?warehouse_id={W1}", token=admin)
 
 # 15j. 批量按仓库存查询（评审 P2 跟进：切仓批量刷新，1 次调用替代 N 次 goods-search）
 def _lookup(wid, codes):

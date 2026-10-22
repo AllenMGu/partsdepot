@@ -11,6 +11,11 @@ window.M_PAGES["index"] = function () {
 
   if (loggedIn) {
     var u = M.AUTH.getUser() || {};
+    if (u.role === "viewer") {
+      document.querySelectorAll('#mHomeGrid [data-act="goScan"], #mHomeGrid [data-act="goOrders"], #mHomeGrid a[href="check.html"], #mHomeGrid a[href="inbound.html"], #mHomeGrid a[href="outbound.html"]').forEach(function (entry) {
+        entry.classList.add("m-hidden");
+      });
+    }
     var nameEl = document.getElementById("mHomeUserName");
     if (nameEl) nameEl.textContent = u.full_name || u.username || "";
     loadOverview();

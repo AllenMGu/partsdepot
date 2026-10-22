@@ -9,6 +9,7 @@ from core.models import UserRole, UserWarehouse, User, Location
 from core.schemas import LocationCreate, LocationResponse, LocationUpdate
 from core.security import get_current_user
 from core.deps import get_db
+from core.access import require_warehouse
 
 router = APIRouter()
 
@@ -20,9 +21,7 @@ async def create_location(
     current_user: User = Depends(get_current_user), 
     db: Session = Depends(get_db)
 ):
-    # 库位主数据维护仅限管理员（与货物管理一致）
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="库位维护仅限管理员操作")
+    require_warehouse(db, current_user, location.warehouse_id, manage=True)
 
     db_location = db.query(Location).filter(Location.location_code == location.location_code).first()
     if db_location:
@@ -58,7 +57,7 @@ async def get_locations(
                     Location.is_active == True,
                     Location.warehouse_id.in_(user_warehouse_ids)
                 )
-                if warehouse_id and warehouse_id in user_warehouse_ids:
+                if warehouse_id:
                     query = query.filter(Location.warehouse_id == warehouse_id)
                 locations = query.all()
             else:
@@ -92,13 +91,10 @@ async def update_location(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 库位主数据维护仅限管理员（与新增/删除保持一致）
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="库位维护仅限管理员操作")
-
     db_location = db.query(Location).filter(Location.id == id).first()
     if not db_location:
         raise HTTPException(status_code=404, detail="库位未找到")
+    require_warehouse(db, current_user, db_location.warehouse_id, manage=True)
 
     data = location.dict(exclude_unset=True)
     # 禁止通过修改接口变更库位所属仓库（跨仓库移动需删除后重建）
@@ -120,12 +116,10 @@ async def delete_location(
     current_user: User = Depends(get_current_user), 
     db: Session = Depends(get_db)
 ):
-    if current_user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="无权限操作")
-    
     db_location = db.query(Location).filter(Location.id == id).first()
     if not db_location:
         raise HTTPException(status_code=404, detail="库位未找到")
+    require_warehouse(db, current_user, db_location.warehouse_id, manage=True)
     
     db.delete(db_location)
     db.commit()

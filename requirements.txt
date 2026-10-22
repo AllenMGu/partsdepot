@@ -15,3 +15,4 @@ pandas>=2.0.0
 openpyxl>=3.1.0
 xlsxwriter>=3.1.0  # 盘点单 Excel 导出使用 engine='xlsxwriter'
 ldap3>=2.9.1
+httpx2>=2.0.0  # starlette TestClient（仓库隔离回归等进程内集成测试）必需

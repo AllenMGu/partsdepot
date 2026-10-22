@@ -1,6 +1,6 @@
 const { request } = require("../../utils/api");
 const { getUser } = require("../../utils/auth");
-const { requireLogin } = require("../../utils/guard");
+const { requireOperator } = require("../../utils/guard");
 const { fmtNum } = require("../../utils/format");
 
 function normalizeCheckItems(items) {
@@ -92,7 +92,7 @@ Page({
   },
 
   async onShow() {
-    if (!requireLogin()) return;
+    if (!requireOperator()) return;
     const user = getUser() || {};
     this.setData({
       currentWarehouseName: user.current_warehouse_name || "",

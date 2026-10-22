@@ -36,6 +36,11 @@ jobs:
       - name: 安装依赖
         run: pip install -r requirements.txt
 
+      # 快速护栏：CSP 页面内联脚本哈希必须与 script-src 白名单一致。
+      # 修改内联 JS 未更新哈希时浏览器会静默拦截整段脚本（页面失能），API 测试无感知。
+      - name: CSP 内联脚本哈希审计
+        run: python tests/csp_inline_audit.py
+
       # 走 run_regression.sh 的 WMS_DATABASE_URL 分支：
       # 在 PostgreSQL 上跑完整 HTTP 套件 + LDAP 单元测试（咨询锁等 PG 语义真实生效）
       - name: 运行回归测试
@@ -43,8 +48,24 @@ jobs:
           WMS_DATABASE_URL: postgresql+psycopg2://wms:wms_test_ci@localhost:5432/wms_test
         run: bash tests/run_regression.sh
 
+      # 仓库隔离/角色回归（评审 P2 要求纳入 CI 实际执行）：
+      # 独立进程、自带临时 SQLite，覆盖跨仓 403、选仓 400、删除货物被待审批申请 409 拦截等。
+      - name: 运行仓库隔离回归测试（unittest）
+        run: python -m unittest discover -s tests -p test_warehouse_isolation.py -v
+
+      - name: 演练旧库货物迁移
+        env:
+          WMS_DATABASE_URL: postgresql+psycopg2://wms:wms_test_ci@localhost:5432/wms_test
+        run: python tests/migration_goods_rehearsal.py
+
       - name: 运行小程序申请页单元测试
         run: node tests/miniprogram_apply_unit.js
+
+      - name: 验证出入库单选货仓库上下文
+        run: node tests/order_goods_context_unit.js
+
+      - name: 验证小程序角色入口
+        run: node tests/miniprogram_role_unit.js
 
   pg-concurrency:
     name: PostgreSQL 并发专项

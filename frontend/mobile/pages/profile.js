@@ -14,7 +14,7 @@ window.M_PAGES["profile"] = function () {
   function render() {
     var u = M.AUTH.getUser() || {};
     var w = M.AUTH.currentWarehouse();
-    var roleText = { admin: "管理员", operator: "操作员" }[u.role] || (u.role || "");
+    var roleText = { admin: "系统管理员", supervisor: "仓库主管", operator: "操作员", viewer: "普通员工" }[u.role] || (u.role || "");
     elUser.innerHTML =
       '<div class="m-row" style="gap:12px;align-items:center;">' +
       '<div style="width:48px;height:48px;border-radius:50%;background:var(--m-primary);color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;">' +

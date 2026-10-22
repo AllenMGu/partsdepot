@@ -14,6 +14,7 @@ from core.models import UserRole, InventoryType, Warehouse, UserWarehouse, User,
 from core.schemas import InventoryBatchCreate, InventoryCreate, StockResponse
 from core.security import get_current_user
 from core.deps import get_db
+from core.access import require_operator, require_selected_warehouse
 from core.order_utils import lock_stock_row, lock_stock_rows_for_keys, advisory_lock_stock_key, advisory_lock_idempotency_key, generate_order_no
 
 router = APIRouter()
@@ -78,6 +79,7 @@ async def batch_inventory(
         # 批量操作绑定服务端会话的当前仓库，防止多仓用户在仓库 A 页面
         # 携带仓库 B 库位完成真实入库/出库。warehouse_id 兼容旧客户端省略，
         # 但最终仍以 current_warehouse_id 作为安全边界。
+        require_operator(current_user)
         session_warehouse_id = current_user.current_warehouse_id
         if payload.warehouse_id is not None and payload.warehouse_id != session_warehouse_id:
             raise HTTPException(status_code=400, detail="批量操作仓库必须是当前选择的仓库")
@@ -101,7 +103,7 @@ async def batch_inventory(
         for item in payload.items:
             barcode = item.goods_barcode.strip()
             location_code = item.location_code.strip()
-            goods = db.query(Goods).filter(Goods.barcode == barcode).first()
+            goods = db.query(Goods).filter(Goods.warehouse_id == warehouse_id, Goods.barcode == barcode).first()
             if goods is None:
                 raise HTTPException(status_code=404, detail=f"未找到该货物条码：{barcode}")
             location = db.query(Location).filter(Location.location_code == location_code).first()
@@ -293,11 +295,8 @@ async def scan_inventory(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 1. 查询货物
-    goods = db.query(Goods).filter(Goods.barcode == inventory.goods_barcode).first()
-    if not goods:
-        raise HTTPException(status_code=404, detail="货物不存在")
-
+    require_operator(current_user)
+    # 先解析库位，再用库位仓库和条码定位货物。
     # 2. 查询库位并校验所属仓库
     location = db.query(Location).filter(Location.location_code == inventory.location_code).first()
     if not location:
@@ -306,13 +305,13 @@ async def scan_inventory(
     if not location.is_active:
         raise HTTPException(status_code=400, detail=f"库位已停用：{inventory.location_code}")
 
-    # 检查用户是否有权限操作这个仓库
-    user_warehouse = db.query(UserWarehouse).filter(
-        UserWarehouse.user_id == current_user.id,
-        UserWarehouse.warehouse_id == location.warehouse_id
-    ).first()
-    if not user_warehouse:
-        raise HTTPException(status_code=403, detail="无权限操作其他仓库库位")
+    # 统一仓库校验：库位仓库须是当前选择的启用仓库，且用户有权限
+    # （与批量扫码一致：多仓授权用户不能在 A 仓页面扫 B 库位完成出入库）。
+    require_selected_warehouse(db, current_user, location.warehouse_id)
+
+    goods = db.query(Goods).filter(Goods.warehouse_id == location.warehouse_id, Goods.barcode == inventory.goods_barcode).first()
+    if not goods:
+        raise HTTPException(status_code=404, detail="当前仓库货物不存在")
 
     # 3. 处理出入库逻辑（行级锁读取库存行，防止并发超卖/丢失更新）
     warehouse_id = location.warehouse_id
@@ -514,7 +513,7 @@ async def get_stock(
             "goods_id": row.goods_id,
             "goods_name": row.goods_name,
             "goods_barcode": row.goods_barcode,
-            "goods_price": float(row.goods_price or 0),
+            "goods_price": None if current_user.role == UserRole.VIEWER else float(row.goods_price or 0),
             "goods_spec": row.goods_spec or "",
             "goods_unit": row.goods_unit or "",
             "location_id": row.location_id,

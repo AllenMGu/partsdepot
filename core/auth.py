@@ -11,6 +11,7 @@ from core.security import AUTH_COOKIE_NAME, AUTH_COOKIE_SAMESITE, AUTH_COOKIE_SE
 from core.ldap import load_ldap_config_from_db, ldap_authenticate
 from core.auth_state import clear_login_fail_state, ensure_not_locked, handle_login_failure
 from core.deps import get_db
+from core.access import repair_current_warehouse
 
 router = APIRouter()
 
@@ -54,7 +55,7 @@ async def login_for_access_token(
                 username=username,
                 hashed_password=hashed_password,
                 full_name=ldap_user_info.get('full_name', username),
-                role=UserRole.OPERATOR,  # 默认角色为操作员
+                role=UserRole.VIEWER,  # 新 LDAP 用户须显式授权才能操作库存
                 is_ldap_user=True  # 标识为LDAP用户
             )
             db.add(user)
@@ -69,17 +70,43 @@ async def login_for_access_token(
 
     clear_login_fail_state(db, username)
 
+    # 评审第 6 轮 P2：登录时兜底修复当前仓库——仓库被停用/撤销授权后，
+    # current_warehouse_id 可能仍指向不可用仓库（列表已过滤、请求仍被拒）。
+    # 有效则保留，否则按"默认 → 第一个启用授权仓库 → 清空"重选。
+    before_current = user.current_warehouse_id
+    if repair_current_warehouse(db, user) != before_current:
+        db.commit()
+
     # 获取用户所有可管理仓库
-    warehouses = []
-    for uw in db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all():
-        warehouse = db.query(Warehouse).filter(Warehouse.id == uw.warehouse_id).first()
-        if warehouse:
+    # 评审 P2：管理员与 GET /users/{id}/warehouses 的规则保持一致——返回全部启用仓库
+    # （不受 user_warehouses 关联表限制），否则桌面 Web / H5 登录快照里只有历史分配，
+    # 用户被升为管理员后前端仓库列表看不到新增仓库。
+    if user.role == UserRole.ADMIN:
+        uw_by_wh = {uw.warehouse_id: uw for uw in db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all()}
+        warehouses = []
+        for warehouse in db.query(Warehouse).filter(Warehouse.is_active == True).order_by(Warehouse.id).all():
+            uw = uw_by_wh.get(warehouse.id)
             warehouses.append({
                 "id": warehouse.id,
                 "code": warehouse.code,
                 "name": warehouse.name,
-                "is_default": uw.is_default
+                "is_default": uw.is_default if uw else False
             })
+    else:
+        # 评审第 5 轮 P2：非管理员登录快照只包含启用仓库（与仓库列表接口、
+        # switch-warehouse 的启用校验一致），避免已停用仓库出现在前端下拉列表。
+        warehouses = []
+        for uw in db.query(UserWarehouse).filter(UserWarehouse.user_id == user.id).all():
+            warehouse = db.query(Warehouse).filter(
+                Warehouse.id == uw.warehouse_id, Warehouse.is_active.is_(True)
+            ).first()
+            if warehouse:
+                warehouses.append({
+                    "id": warehouse.id,
+                    "code": warehouse.code,
+                    "name": warehouse.name,
+                    "is_default": uw.is_default
+                })
 
     # 获取当前仓库名称
     current_warehouse_name = None

@@ -112,10 +112,15 @@ function checkLoginStatus() {
             });
         }
 
-        // 非 admin 隐藏申请管理菜单（仅管理员可见）
-        if (getCurrentUserRole() !== 'admin') {
+        // 申请管理由管理员和仓库主管处理。
+        if (!['admin', 'supervisor'].includes(getCurrentUserRole())) {
             const requestNavLinks = document.querySelectorAll('a[href="request-admin.html"]');
             requestNavLinks.forEach(link => {
+                link.style.display = 'none';
+            });
+        }
+        if (getCurrentUserRole() === 'viewer') {
+            document.querySelectorAll('a[href="scan.html"], a[href="inbound.html"], a[href="outbound.html"], a[href="check.html"]').forEach(link => {
                 link.style.display = 'none';
             });
         }
