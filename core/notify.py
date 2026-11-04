@@ -7,23 +7,27 @@
 - 审批通过/驳回：优先通知申请人填写的联系邮箱（必须为合法邮箱）；申请人未留邮箱时
   通知该仓主管/管理员。
 
+执行方式（重要）：邮件内容与收件人**在请求内**用当前数据库会话准备好（prepare_*），
+后台任务只做 LDAP 查邮箱与 SMTP 发送（不含任何数据库访问）。这样避免在 SQLite
+单连接（StaticPool）环境下，后台任务另开会话与请求会话共用同一连接导致游标错乱
+（CI 曾出现 RuntimeError: number of values in row ... differ from column processors）。
+
 邮件失败绝不向业务接口抛错：所有异常在后台任务内记录日志。
 """
 
 import logging
 import re
-from typing import List
+from typing import Dict, List, Optional
 
-from core.database import SessionLocal
-from core.ldap import ldap_lookup_email
-from core.models import Goods, Request, RequestItem, User, UserRole, UserWarehouse, Warehouse
 from core import mail
+from core.ldap import load_ldap_config_from_db, ldap_lookup_email
+from core.models import Request, RequestItem, User, UserRole, UserWarehouse, Warehouse
 
 EMAIL_RE = re.compile(r"^[\w.+-]+@[\w-]+(?:\.[\w-]+)+$", re.ASCII)
 STATUS_TEXT = {"approved": "已通过", "rejected": "已驳回"}
 
 
-def _warehouse_name(db, warehouse_id) -> str:
+def _warehouse_name(db, warehouse_id: Optional[int]) -> str:
     if not warehouse_id:
         return "未指定仓库"
     wh = db.query(Warehouse).filter(Warehouse.id == warehouse_id).first()
@@ -36,32 +40,24 @@ def _reference(req: Request) -> str:
     return f"APP-{date_part}-{req.id:04d}"
 
 
-def _emails_for_users(users) -> List[str]:
-    emails: List[str] = []
-    for user in users:
-        if not getattr(user, "is_ldap_user", False):
-            continue
-        email = ldap_lookup_email(user.username)
-        if email and email not in emails:
-            emails.append(email)
-    return emails
-
-
-def _warehouse_recipients(db, warehouse_id) -> List[str]:
-    """该仓主管优先；无则回退该仓管理员；再回退全部启用的管理员。"""
+def _recipient_usernames(db, warehouse_id: Optional[int]) -> List[str]:
+    """该仓主管优先；无则该仓管理员；再回退全部启用的管理员（返回登录名列表）。"""
     if not warehouse_id:
         return []
     base = db.query(User).join(UserWarehouse, UserWarehouse.user_id == User.id).filter(
         UserWarehouse.warehouse_id == warehouse_id, User.is_active.is_(True))
-    supervisors = _emails_for_users(base.filter(User.role == UserRole.SUPERVISOR).all())
+
+    def names(query):
+        return [u.username for u in query.all() if u.is_ldap_user]
+
+    supervisors = names(base.filter(User.role == UserRole.SUPERVISOR))
     if supervisors:
         return supervisors
-    admins = _emails_for_users(base.filter(User.role == UserRole.ADMIN).all())
+    admins = names(base.filter(User.role == UserRole.ADMIN))
     if admins:
         return admins
-    logging.info("仓库 %s 未配置主管/管理员邮箱，回退通知全部管理员", warehouse_id)
-    return _emails_for_users(db.query(User).filter(
-        User.role == UserRole.ADMIN, User.is_active.is_(True)).all())
+    logging.info("仓库 %s 未配置主管/管理员 LDAP 账号，回退通知全部管理员", warehouse_id)
+    return names(db.query(User).filter(User.role == UserRole.ADMIN, User.is_active.is_(True)))
 
 
 def _items_text(db, req: Request) -> str:
@@ -104,54 +100,88 @@ def _base_body(db, req: Request) -> str:
     return "\n".join(lines)
 
 
-def _send(db, recipients: List[str], subject: str, body: str) -> None:
-    if not recipients:
-        logging.info("邮件提醒跳过：无可解析的收件人邮箱（%s）", subject)
-        return
-    mail.load_smtp_config_from_db(db)
-    ok, err = mail.send_mail(recipients, subject, body)
-    if not ok:
-        logging.warning("邮件提醒未发送（%s）：%s", subject, err)
+def prepare_request_created(db, request_id: int) -> Optional[Dict]:
+    """在请求内准备"新申请"邮件（收件人为登录名列表，后台再解析 AD 邮箱）。"""
+    req = db.query(Request).filter(Request.id == request_id).first()
+    if req is None:
+        return None
+    usernames = _recipient_usernames(db, req.warehouse_id)
+    if not usernames:
+        logging.info("申请 %s 无可通知的仓库主管/管理员 LDAP 账号，跳过邮件", request_id)
+        return None
+    return {
+        "usernames": usernames,
+        "subject": f"【备品备件】新申请 {_reference(req)}（{_warehouse_name(db, req.warehouse_id)}）",
+        "body": _base_body(db, req),
+    }
 
 
-def notify_request_created(request_id: int) -> None:
-    """新申请提交后通知该仓主管（后台任务，异常不外抛）。"""
-    db = SessionLocal()
-    try:
-        req = db.query(Request).filter(Request.id == request_id).first()
-        if req is None:
-            logging.warning("邮件提醒：申请单 %s 不存在", request_id)
-            return
-        recipients = _warehouse_recipients(db, req.warehouse_id)
-        subject = f"【备品备件】新申请 {_reference(req)}（{_warehouse_name(db, req.warehouse_id)}）"
-        _send(db, recipients, subject, _base_body(db, req))
-    except Exception:
-        logging.exception("新申请邮件提醒失败（request_id=%s）", request_id)
-    finally:
-        db.close()
-
-
-def notify_request_status(request_id: int, status: str, handler: str = "") -> None:
-    """审批通过/驳回后通知申请人（联系邮箱）；申请人无邮箱时通知该仓主管。"""
-    db = SessionLocal()
-    try:
-        req = db.query(Request).filter(Request.id == request_id).first()
-        if req is None:
-            logging.warning("邮件提醒：申请单 %s 不存在", request_id)
-            return
-        status_text = STATUS_TEXT.get(status, status)
-        contact = (req.contact or "").strip()
-        recipients = [contact] if EMAIL_RE.match(contact) else _warehouse_recipients(db, req.warehouse_id)
-        subject = f"【备品备件】申请 {_reference(req)} {status_text}"
-        body = "\n".join([
+def prepare_request_status(db, request_id: int, status: str, handler: str = "") -> Optional[Dict]:
+    """在请求内准备"审批状态"邮件：优先申请人邮箱，否则该仓主管/管理员。"""
+    req = db.query(Request).filter(Request.id == request_id).first()
+    if req is None:
+        return None
+    status_text = STATUS_TEXT.get(status, status)
+    contact = (req.contact or "").strip()
+    payload: Dict = {
+        "subject": f"【备品备件】申请 {_reference(req)} {status_text}",
+        "body": "\n".join([
             f"您的备件申请{status_text}。",
             "",
             _base_body(db, req),
             f"处理人：{handler or req.handler_name or '-'}",
             f"处理时间：{req.handle_time:%Y-%m-%d %H:%M:%S}" if req.handle_time else "",
-        ])
-        _send(db, recipients, subject, body)
+        ]),
+    }
+    if EMAIL_RE.match(contact):
+        payload["addresses"] = [contact]
+    else:
+        usernames = _recipient_usernames(db, req.warehouse_id)
+        if not usernames:
+            logging.info("申请 %s 无申请人邮箱且无主管/管理员 LDAP 账号，跳过邮件", request_id)
+            return None
+        payload["usernames"] = usernames
+    return payload
+
+
+def deliver_email(payload: Optional[Dict]) -> None:
+    """后台任务：解析 AD 邮箱并发送（不访问数据库；异常只记日志）。"""
+    if not payload:
+        return
+    try:
+        recipients: List[str] = list(payload.get("addresses") or [])
+        for username in payload.get("usernames") or []:
+            email = ldap_lookup_email(username)
+            if email and email not in recipients:
+                recipients.append(email)
+        if not recipients:
+            logging.info("邮件提醒跳过：无可解析的收件人邮箱（%s）", payload.get("subject"))
+            return
+        ok, err = mail.send_mail(recipients, payload.get("subject", ""), payload.get("body", ""))
+        if not ok:
+            logging.warning("邮件提醒未发送（%s）：%s", payload.get("subject"), err)
     except Exception:
-        logging.exception("审批状态邮件提醒失败（request_id=%s）", request_id)
-    finally:
-        db.close()
+        logging.exception("邮件提醒发送失败（%s）", payload.get("subject"))
+
+
+def queue_request_created(db, background_tasks, request_id: int) -> None:
+    """请求内调用：准备内容并排入后台发送（任何异常不影响业务）。"""
+    try:
+        load_ldap_config_from_db(db)
+        mail.load_smtp_config_from_db(db)
+        payload = prepare_request_created(db, request_id)
+        if payload:
+            background_tasks.add_task(deliver_email, payload)
+    except Exception:
+        logging.exception("新申请邮件提醒准备失败（request_id=%s）", request_id)
+
+
+def queue_request_status(db, background_tasks, request_id: int, status: str, handler: str = "") -> None:
+    try:
+        load_ldap_config_from_db(db)
+        mail.load_smtp_config_from_db(db)
+        payload = prepare_request_status(db, request_id, status, handler)
+        if payload:
+            background_tasks.add_task(deliver_email, payload)
+    except Exception:
+        logging.exception("审批状态邮件提醒准备失败（request_id=%s）", request_id)

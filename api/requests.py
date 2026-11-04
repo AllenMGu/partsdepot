@@ -47,7 +47,7 @@ from core.schemas import (
     RequestSubmit,
 )
 from core.security import get_current_user
-from core.notify import notify_request_created, notify_request_status
+from core.notify import queue_request_created, queue_request_status
 from core.deps import get_db
 from core.access import require_warehouse, lock_goods_row, scoped_warehouse_id
 
@@ -316,8 +316,8 @@ def submit_request(
 
     reference = f"APP-{new_request.create_time:%Y%m%d}-{new_request.id:04d}"
     logging.info("收到公共申请 %s（申请人：%s，货物 %d 行）", reference, new_request.applicant_name, len(resolved_items))
-    # 邮件提醒（后台执行，失败不影响申请提交）：通知申请仓库的主管 AD 邮箱
-    background_tasks.add_task(notify_request_created, new_request.id)
+    # 邮件提醒：请求内准备内容，后台只做 LDAP/SMTP（不访问数据库），失败不影响提交
+    queue_request_created(db, background_tasks, new_request.id)
     return {
         "id": new_request.id,
         "reference": reference,
@@ -989,8 +989,8 @@ def set_request_status(
         raise
     db.refresh(req)
     logging.info("申请单 %s 处理为 %s（处理人：%s）", req.id, payload.status, current_user.username)
-    # 邮件提醒（后台执行）：优先申请人联系邮箱，否则该仓主管
-    background_tasks.add_task(notify_request_status, req.id, req.status, current_user.username)
+    # 邮件提醒：优先申请人联系邮箱，否则该仓主管（后台只做 LDAP/SMTP）
+    queue_request_status(db, background_tasks, req.id, req.status, current_user.username)
     # 评审一致性项：返回完整载荷（含真实货物明细 + 申请仓库名称），与列表接口契约一致，
     # 不能直接 return req（那样 items 会退化成空数组）
     grouped = _group_items(db, [req.id])
