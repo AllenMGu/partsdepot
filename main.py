@@ -43,6 +43,7 @@ from core import auth as auth_routes
 from core import ldap as ldap_routes
 from api import users, warehouses, locations, goods, stock, check, inbound, outbound
 from api import requests as requests_routes
+from api import notify as notify_routes
 
 api_router = APIRouter()
 api_router.include_router(auth_routes.router)        # /token /logout
@@ -61,6 +62,7 @@ api_router.include_router(check.router_orders)       # 盘点单管理
 api_router.include_router(inbound.router)
 api_router.include_router(outbound.router)
 api_router.include_router(requests_routes.router)  # 申请单：公共提交（免登录）/管理/归档
+api_router.include_router(notify_routes.router)  # /notify/config、/notify/test（邮件通知）
 
 # 初始管理员自举（见 README）：
 # 设置 ADMIN_USERNAME/ADMIN_PASSWORD 且数据库尚无任何用户时，
