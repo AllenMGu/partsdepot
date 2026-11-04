@@ -544,6 +544,42 @@ with sync_playwright() as p:
         page.locator("#warehouseList div", has_text="一号仓").first.click()
         wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === '一号仓'", timeout_ms=20000)
 
+    # ================= 2f. 评审第 8 轮 P2：申请管理切仓关闭旧详情弹窗 =================
+    _w1_name = _w1.get("name") or "一号仓"
+    _w2_name = _w2.get("name") or "二号仓"
+    _pending = page.evaluate("""async (arg) => {
+        const r = await fetch('/api/requests/', {method:'POST', headers:{'content-type':'application/json'},
+            body: JSON.stringify({applicant_name:'切仓详情测试', department:'质量管理', description:'切仓详情测试',
+                warehouse_id: arg.w2, items:[{barcode:'8888002', quantity:1}]})});
+        return r.status;
+    }""", {"w2": _w2["id"]})
+    check("申请管理：创建二号仓待处理申请", _pending == 201, str(_pending))
+    page.goto(BASE + "/request-admin.html")
+    page.wait_for_selector("#recentBody tr")
+    page.evaluate("() => { window.__switchMarker2 = 'kept'; }")
+    _opened = page.evaluate("""() => {
+        const btn = document.querySelector('#recentBody button[data-act="detail"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+    }""")
+    if _opened:
+        page.wait_for_selector("#detailModal:not(.hidden)", timeout=5000)
+        check("申请管理：详情弹窗已打开", True)
+        page.click("#warehouseSelector")
+        page.wait_for_selector("#warehouseList div", timeout=5000)
+        page.locator("#warehouseList div", has_text=_w2_name).first.click()
+        wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w2_name), timeout_ms=20000)
+        page.wait_for_timeout(600)
+        _det_closed = page.evaluate("() => document.getElementById('detailModal').classList.contains('hidden') && window.__switchMarker2 === 'kept'")
+        check("申请管理：切仓后旧详情弹窗自动关闭且未整页重载", _det_closed)
+        page.click("#warehouseSelector")
+        page.wait_for_selector("#warehouseList div", timeout=5000)
+        page.locator("#warehouseList div", has_text=_w1_name).first.click()
+        wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w1_name), timeout_ms=20000)
+    else:
+        check("申请管理：详情按钮可用", False)
+
     # ================= 3. 申请管理：近期列表 + 详情弹窗 =================
     page.goto(BASE + "/request-admin.html")
     page.wait_for_selector("#recentBody tr")
@@ -895,10 +931,44 @@ with sync_playwright() as p:
         check("盘点页：可创建盘点单（供查看按钮验证）", ck["status"] in (200, 201), ck)
         page.goto(BASE + "/check.html")
         page.wait_for_selector("#checkOrdersTableBody tr", timeout=15000)
+        # 评审第 8 轮 P1 回归：统计卡片必须与接口一致（此前 seq 未定义导致统计永不更新）
+        _today = page.evaluate("() => new Date().toISOString().split('T')[0]")
+        _ck_list = api_call("GET", "api/check-orders/?start_date=%s&end_date=%s" % (_today, _today))
+        _ck_rows = (_ck_list.get("data") or {}).get("data") if isinstance(_ck_list.get("data"), dict) else None
+        _ck_count = len(_ck_rows) if isinstance(_ck_rows, list) else -1
+        _stats_ok = False
+        if _ck_count >= 1:
+            try:
+                wait_js(page, "() => ((document.getElementById('todayCheckOrders')||{}).textContent||'').trim() === " + repr(str(_ck_count)), timeout_ms=8000)
+                _stats_ok = True
+            except Exception:
+                _stats_ok = False
+        _today_card = page.locator("#todayCheckOrders").inner_text().strip()
+        check("盘点页：今日盘点单统计卡片与接口一致（非空且数值匹配）",
+              _stats_ok and _today_card == str(_ck_count), f"card={_today_card} api={_ck_count}")
         page.locator("#checkOrdersTableBody button:has-text('查看')").first.click()
         page.wait_for_timeout(800)
         _ci = page.locator("#currentOrderInfo").inner_text()
         check("盘点页：点'查看'载入单据信息（单号-仓库）", "-" in _ci and len(_ci) > 3, _ci)
+        # 评审第 8 轮 P1：切仓必须关闭旧仓库盘点单详情，且完成按钮禁用
+        page.click("#warehouseSelector")
+        page.wait_for_selector("#warehouseList div", timeout=5000)
+        page.locator("#warehouseList div", has_text=_w2_name).first.click()
+        wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w2_name), timeout_ms=20000)
+        page.wait_for_timeout(600)
+        _chk_cleared = page.evaluate("""() => ({
+            sectionHidden: (document.getElementById('checkOperationSection')||{}).classList.contains('hidden'),
+            completeDisabled: (document.getElementById('completeOrderBtn')||{}).disabled === true,
+            infoEmpty: ((document.getElementById('currentOrderInfo')||{}).textContent || '') === ''
+        })""")
+        check("盘点页：切仓后旧盘点单详情关闭、完成按钮禁用、单号清空",
+              _chk_cleared["sectionHidden"] and _chk_cleared["completeDisabled"] and _chk_cleared["infoEmpty"],
+              str(_chk_cleared))
+        # 切回一号仓（环境复原）
+        page.click("#warehouseSelector")
+        page.wait_for_selector("#warehouseList div", timeout=5000)
+        page.locator("#warehouseList div", has_text=_w1_name).first.click()
+        wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w1_name), timeout_ms=20000)
         # 全程无 CSP 违规（内联事件处理器被拦截的典型报错）
         check("CSP：5 个页面点击操作全程无 CSP 违规", not _csp_errs, _csp_errs[:2])
     finally:

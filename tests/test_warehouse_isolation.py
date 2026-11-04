@@ -406,6 +406,37 @@ class WarehouseIsolationTest(unittest.TestCase):
             self._call("DELETE", f"/users/{self.admin_id}/unassign-warehouse?warehouse_id={wh3}")
             self._call("PUT", f"/warehouses/{wh3}", {"is_active": False})
 
+    def test_check_order_bound_to_current_warehouse(self):
+        # 评审第 8 轮 P1：多仓用户切仓后，旧仓库的盘点单不能再查看/录入/完成，
+        # 避免把盘点结果误写回旧仓库库存；切回后才可继续。
+        op_id = self._call("POST", "/users/", {
+            "username": "scope-chkop", "password": "password2", "full_name": "盘点切仓测试",
+            "role": "operator", "warehouse_ids": [self.wh1, self.wh2],
+        })["id"]
+        auth = self._login("scope-chkop", "password2")["access_token"]
+        self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh1}", auth=auth)
+        order = self._call("POST", "/check-orders/", {"warehouse_id": self.wh1}, auth=auth)
+        self._call("POST", "/check-orders/items/", {
+            "header_id": order["id"], "goods_barcode": "SAME",
+            "location_code": "S-L1", "check_quantity": 3}, auth=auth)
+        # 切到 wh2：旧仓库盘点单的查看/录入/完成/导出全部拒绝
+        self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh2}", auth=auth)
+        self._call("GET", f"/check-orders/{order['id']}", auth=auth, expected=400)
+        self._call("POST", "/check-orders/items/", {
+            "header_id": order["id"], "goods_barcode": "SAME",
+            "location_code": "S-L1", "check_quantity": 4}, auth=auth, expected=400)
+        self._call("POST", f"/check-orders/{order['id']}/complete", auth=auth, expected=400)
+        self._call("GET", f"/check-orders/{order['id']}/export", auth=auth, expected=400)
+        # 旧页面跨仓创建盘点单同样拒绝
+        self._call("POST", "/check-orders/", {"warehouse_id": self.wh1}, auth=auth, expected=400)
+        # 切回 wh1 后恢复正常
+        self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh1}", auth=auth)
+        self._call("POST", "/check-orders/items/", {
+            "header_id": order["id"], "goods_barcode": "SAME",
+            "location_code": "S-L1", "check_quantity": 5}, auth=auth)
+        self._call("POST", f"/check-orders/{order['id']}/complete", auth=auth)
+        self._call("DELETE", f"/users/{op_id}")
+
     def test_deactivating_warehouse_repairs_current_warehouse(self):
         # 评审第 6 轮 P2：管理员直接停用仓库时，须同步修复"当前仓库指向该仓"的用户，
         # 避免重新登录后仓库列表已过滤停用仓、当前仓库却仍指向它；无启用授权仓库

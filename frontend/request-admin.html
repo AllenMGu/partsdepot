@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-+L6QdxRzA+OXkHi1PP009Fwcc6QSEZNUvJjPNXn7xzg='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-0VVzYZbOvWoQfMFUxMbRetLBRu5Pu/IiYHOU0cjQQQ4='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 办公用品申请系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -760,20 +760,23 @@
             }
 
             // ---------- 近期申请（客户端分页：一次取全量、本地切片） ----------
+            // 评审第 8 轮 P2：用请求版本号替代 loading 跳过，避免"切仓时新请求被跳过、
+            // 旧仓响应随后覆盖页面"；切仓后旧响应直接丢弃。
+            let recentSeq = 0;
             async function loadRecent() {
-                if (loading) return;
-                loading = true;
+                const seq = ++recentSeq;
                 try {
                     const params = new URLSearchParams();
                     const status = el('filterStatus').value;
                     if (status) params.set('status', status);
                     const qs = params.toString();
-                    recentAll = await apiFetch('api/requests/' + (qs ? '?' + qs : ''));
+                    const rows = await apiFetch('api/requests/' + (qs ? '?' + qs : ''));
+                    if (seq !== recentSeq) return;
+                    recentAll = rows;
                     renderRecentPage();
                 } catch (error) {
+                    if (seq !== recentSeq) return;
                     notify(error.message, 'error');
-                } finally {
-                    loading = false;
                 }
             }
 
@@ -865,12 +868,15 @@
             }
 
             // ---------- 已归档 ----------
+            let archiveSeq = 0;
             async function loadArchive() {
+                const seq = ++archiveSeq;
                 try {
                     const [rows, meta] = await Promise.all([
                         apiFetch('api/requests/archive/?page=' + archivePage + '&page_size=' + archivePageSize),
                         apiFetch('api/requests/archive/meta').catch(function () { return null; })
                     ]);
+                    if (seq !== archiveSeq) return;
                     renderArchive(rows);
                     if (meta) {
                         archiveTotal = meta.archived_total;
@@ -881,6 +887,7 @@
                     }
                     archivePage = updatePaginationBar('archive', archiveTotal, archivePage, archivePageSize);
                 } catch (error) {
+                    if (seq !== archiveSeq) return;
                     notify(error.message, 'error');
                 }
             }
@@ -1022,6 +1029,8 @@
             // 并把分页复位，保持筛选/标签状态一致。
             if (typeof registerWarehouseSwitchHandler === 'function') {
                 registerWarehouseSwitchHandler(async function () {
+                    // 评审第 8 轮 P2：切仓先关闭旧仓库申请详情并清空其状态，再重载数据
+                    closeDetail();
                     recentPage = 1;
                     archivePage = 1;
                     await loadMeta();
