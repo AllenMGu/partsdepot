@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import Optional
 import zlib
+from urllib.parse import quote
 import pandas as pd
 import io
 
@@ -384,8 +385,9 @@ async def get_check_order_detail(
     if not order:
         raise HTTPException(status_code=404, detail="盘点单不存在")
 
-    # 权限校验（评审第 8 轮 P1）：须有该仓授权且属于"当前选择的仓库"
-    _require_current_warehouse_for_check_order(db, current_user, order)
+    # 只读详情（评审第 9 轮 P2）：校验仓库授权与启用即可，保留跨仓查看能力；
+    # 写操作（录入/完成/创建）才要求属于当前选择的仓库
+    require_warehouse(db, current_user, order.warehouse_id)
 
     # 查询明细
     items = db.query(CheckOrderItem).filter(CheckOrderItem.header_id == order_id).all()
@@ -637,8 +639,9 @@ async def export_check_order(
     if not order:
         raise HTTPException(status_code=404, detail="盘点单不存在")
 
-    # 权限校验（评审第 8 轮 P1）：须有该仓授权且属于"当前选择的仓库"
-    _require_current_warehouse_for_check_order(db, current_user, order)
+    # 只读详情（评审第 9 轮 P2）：校验仓库授权与启用即可，保留跨仓查看能力；
+    # 写操作（录入/完成/创建）才要求属于当前选择的仓库
+    require_warehouse(db, current_user, order.warehouse_id)
 
     # 查询明细
     items = db.query(CheckOrderItem).filter(CheckOrderItem.header_id == order_id).all()
@@ -691,5 +694,8 @@ async def export_check_order(
     return StreamingResponse(
         io.BytesIO(output.getvalue()),
         media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        headers={'Content-Disposition': f'attachment; filename="盘点单_{order.order_no}.xlsx"'}
+        # 评审第 9 轮（测试暴露）：HTTP 头只允许 latin-1，中文文件名必须按 RFC 5987
+        # 用 filename*=UTF-8'' 编码，否则 StreamingResponse 初始化即抛 UnicodeEncodeError（500）
+        headers={'Content-Disposition': "attachment; filename=\"check_order_%s.xlsx\"; filename*=UTF-8''%s"
+                 % (order.order_no, quote(f"盘点单_{order.order_no}.xlsx"))}
     )

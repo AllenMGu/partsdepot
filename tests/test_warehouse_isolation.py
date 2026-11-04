@@ -419,16 +419,28 @@ class WarehouseIsolationTest(unittest.TestCase):
         self._call("POST", "/check-orders/items/", {
             "header_id": order["id"], "goods_barcode": "SAME",
             "location_code": "S-L1", "check_quantity": 3}, auth=auth)
-        # 切到 wh2：旧仓库盘点单的查看/录入/完成/导出全部拒绝
+        # 切到 wh2：旧仓库盘点单"可只读"（授权+启用即可，保留跨仓查看/导出），
+        # 但录入与完成必须拒绝（写操作须属于当前选择的仓库）
         self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh2}", auth=auth)
-        self._call("GET", f"/check-orders/{order['id']}", auth=auth, expected=400)
+        detail = self._call("GET", f"/check-orders/{order['id']}", auth=auth)
+        self.assertEqual(detail["header"]["warehouse_id"], self.wh1)
+        export = self.client.get(f"/api/check-orders/{order['id']}/export",
+                                 headers={"Authorization": "Bearer " + auth})
+        self.assertEqual(export.status_code, 200, export.text[:200])
         self._call("POST", "/check-orders/items/", {
             "header_id": order["id"], "goods_barcode": "SAME",
             "location_code": "S-L1", "check_quantity": 4}, auth=auth, expected=400)
         self._call("POST", f"/check-orders/{order['id']}/complete", auth=auth, expected=400)
-        self._call("GET", f"/check-orders/{order['id']}/export", auth=auth, expected=400)
         # 旧页面跨仓创建盘点单同样拒绝
         self._call("POST", "/check-orders/", {"warehouse_id": self.wh1}, auth=auth, expected=400)
+        # 只读详情仍受仓库授权约束：仅授权 wh2 的用户查看 wh1 盘点单 → 403
+        other_id = self._call("POST", "/users/", {
+            "username": "scope-chkother", "password": "password2", "full_name": "他仓只读测试",
+            "role": "operator", "warehouse_ids": [self.wh2],
+        })["id"]
+        other_auth = self._login("scope-chkother", "password2")["access_token"]
+        self._call("GET", f"/check-orders/{order['id']}", auth=other_auth, expected=403)
+        self._call("DELETE", f"/users/{other_id}")
         # 切回 wh1 后恢复正常
         self._call("POST", f"/users/{op_id}/switch-warehouse?warehouse_id={self.wh1}", auth=auth)
         self._call("POST", "/check-orders/items/", {
