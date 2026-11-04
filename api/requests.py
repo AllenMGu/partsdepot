@@ -48,7 +48,7 @@ from core.schemas import (
 )
 from core.security import get_current_user
 from core.deps import get_db
-from core.access import require_warehouse, lock_goods_row
+from core.access import require_warehouse, lock_goods_row, scoped_warehouse_id
 
 router = APIRouter()
 
@@ -780,14 +780,19 @@ def list_archived_request_item_audits(
 @router.get("/requests/", response_model=List[RequestResponse], summary="近期申请单列表（管理员）")
 def list_requests(
     status: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     _require_manager(current_user)
     query = db.query(Request).order_by(Request.create_time.desc(), Request.id.desc())
+    # 复核问题（2026-11）：仓库主管/操作员只看当前仓库的申请；管理员保留跨仓审批队列
+    # （此前评审 P1 要求"审批扣减仓库 = 申请仓库"，管理页需能看到各仓待办）。
     if current_user.role != UserRole.ADMIN:
-        allowed = db.query(UserWarehouse.warehouse_id).filter(UserWarehouse.user_id == current_user.id)
-        query = query.filter(Request.warehouse_id.in_(allowed))
+        wid = scoped_warehouse_id(db, current_user, warehouse_id)
+        query = query.filter(Request.warehouse_id == wid)
+    elif warehouse_id is not None:
+        query = query.filter(Request.warehouse_id == warehouse_id)
     if status:
         query = query.filter(Request.status == status)
     reqs = query.all()
@@ -988,6 +993,7 @@ def set_request_status(
 @router.get("/requests/archive/", response_model=List[RequestArchiveResponse], summary="归档申请单列表（管理员）")
 def list_archived_requests(
     batch: Optional[str] = None,
+    warehouse_id: Optional[int] = None,
     page: int = 1,
     page_size: int = 50,
     current_user: User = Depends(get_current_user),
@@ -997,9 +1003,12 @@ def list_archived_requests(
     page = max(1, page)
     page_size = min(200, max(1, page_size))
     query = db.query(RequestArchive).order_by(RequestArchive.id.desc())
+    # 复核问题（2026-11）：归档列表同样按角色收敛——主管只看当前仓库，管理员保留跨仓视图
     if current_user.role != UserRole.ADMIN:
-        allowed = db.query(UserWarehouse.warehouse_id).filter(UserWarehouse.user_id == current_user.id)
-        query = query.filter(RequestArchive.warehouse_id.in_(allowed))
+        wid = scoped_warehouse_id(db, current_user, warehouse_id)
+        query = query.filter(RequestArchive.warehouse_id == wid)
+    elif warehouse_id is not None:
+        query = query.filter(RequestArchive.warehouse_id == warehouse_id)
     if batch:
         query = query.filter(RequestArchive.archive_batch == batch)
     rows = query.offset((page - 1) * page_size).limit(page_size).all()

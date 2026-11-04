@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-i9Cnhs5mcKfnc3F7R9q2xvOQ4sBjTTeZ1xmBY28bKho='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-45mKMoqEz2IntZkW+Ov6Ko4UIpzrtYwGF+cV8YDT/9k='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>盘点管理 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -485,6 +485,48 @@
             loadCheckOrderStatistics(); // 加载统计数据
             loadCheckOrders(); // 加载盘点单列表
             setupCheckEventListeners();
+
+            // 评审第 7/8 轮 P1：切仓先丢弃旧仓库盘点单（关闭详情、清空 currentCheckOrder
+            // 与录入表单），再按新仓库重载库位/统计/盘点单，避免继续对旧仓单据录入或完成。
+            if (typeof registerWarehouseSwitchHandler === 'function') {
+                registerWarehouseSwitchHandler(async () => {
+                    resetCheckOrderView();
+                    await loadLocationData();
+                    await loadCheckOrderStatistics();
+                    await loadCheckOrders(1);
+                });
+            }
+        }
+
+        // 切仓/离开时清空当前盘点单视图（评审第 8 轮 P1：防止继续操作旧仓库盘点单）
+        function resetCheckOrderView() {
+            currentCheckOrder = null;
+            // 评审第 9 轮 P1：不同仓库允许同条码但货物独立，切仓必须清空按条码/库位编码
+            // 建立的缓存，否则会显示旧仓库的货物名称/规格
+            goodsCache.clear();
+            locationCache.clear();
+            const section = document.getElementById('checkOperationSection');
+            if (section) section.classList.add('hidden');
+            const info = document.getElementById('currentOrderInfo');
+            if (info) info.textContent = '';
+            const completeBtn = document.getElementById('completeOrderBtn');
+            if (completeBtn) completeBtn.disabled = true;
+            const exportBtn = document.getElementById('exportOrderBtn');
+            if (exportBtn) exportBtn.disabled = true;
+            const items = document.getElementById('checkOrderItems');
+            if (items) items.innerHTML = '';
+            ['goodsBarcode', 'locationCode', 'checkQuantity'].forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            ['goodsInfo', 'locationInfo'].forEach(function (id) {
+                const el = document.getElementById(id);
+                if (el) el.classList.add('hidden');
+            });
+            const resultModal = document.getElementById('resultModal');
+            if (resultModal) resultModal.classList.add('hidden');
+            const nextScanBtn = document.getElementById('nextScanBtn');
+            if (nextScanBtn) nextScanBtn.classList.add('hidden');
         }
 
         // 加载库位数据
@@ -503,7 +545,8 @@
                 if (currentWarehouse) {
                     locationData = locationData.filter(location => location.warehouse_id === currentWarehouse.id);
                 }
-                // 填充库位下拉框
+                // 填充库位下拉框（先清空旧缓存，库位缓存按当前仓库重建）
+                locationCache.clear();
                 const locationSelect = document.getElementById('locationCode');
                 locationSelect.innerHTML = '<option value="">请选择库位</option>';
                 locationData.forEach(location => {
@@ -521,7 +564,9 @@
         }
 
         // 加载盘点单统计
+        let checkStatsLoadSeq = 0;
         async function loadCheckOrderStatistics() {
+            const seq = ++checkStatsLoadSeq;
             try {
                 // 获取今日日期
                 const today = new Date().toISOString().split('T')[0];
@@ -538,6 +583,7 @@
                 }
 
                 const result = await response.json();
+                if (seq !== checkStatsLoadSeq) return;  // 切仓后丢弃旧仓统计响应
                 const orders = result.data || [];
 
                 // 统计数据
@@ -559,7 +605,9 @@
         }
 
         // 加载盘点单列表
+        let checkOrdersLoadSeq = 0;
         async function loadCheckOrders(page = 1) {
+            const seq = ++checkOrdersLoadSeq;
             currentPage = page;
             try {
                 const params = new URLSearchParams();
@@ -598,6 +646,7 @@
                 }
 
                 const result = await response.json();
+                if (seq !== checkOrdersLoadSeq) return;  // 切仓后丢弃旧仓列表响应
                 checkOrders = result.data || [];
                 totalCount = result.total || 0;
                 totalPages = Math.ceil(totalCount / pageSize);
@@ -1027,14 +1076,19 @@
         }
 
         // 验证货物
+        let goodsValidateSeq = 0;
         async function validateGoods(barcode) {
+            const warehouseId = currentWarehouse ? currentWarehouse.id : null;
+            const seq = ++goodsValidateSeq;
             try {
-                // 检查缓存
-                if (goodsCache.has(barcode)) {
-                    showGoodsInfo(goodsCache.get(barcode));
+                // 检查缓存（仅命中当前仓库的档案，评审第 9 轮 P1）
+                const cached = goodsCache.get(barcode);
+                if (cached && (!warehouseId || cached.warehouse_id === warehouseId)) {
+                    showGoodsInfo(cached);
                     updateCurrentStock();
                     return;
                 }
+                if (cached) goodsCache.delete(barcode);
 
                 // 调用API获取货物信息
                 const response = await fetch(`${API_BASE_URL}/goods/`, {
@@ -1046,7 +1100,11 @@
                 }
 
                 const goodsList = await response.json();
-                const goods = goodsList.find(g => g.barcode === barcode);
+                // 切仓后的旧请求结果直接丢弃，不得写回缓存或覆盖新仓展示
+                if (seq !== goodsValidateSeq || !currentWarehouse || currentWarehouse.id !== warehouseId) {
+                    return;
+                }
+                const goods = goodsList.find(g => g.barcode === barcode && (!warehouseId || g.warehouse_id === warehouseId));
 
                 if (goods) {
                     goodsCache.set(barcode, goods);
@@ -1097,6 +1155,7 @@
         }
 
         // 更新当前库存
+        let currentStockSeq = 0;
         async function updateCurrentStock() {
             const goodsBarcode = document.getElementById('goodsBarcode').value.trim();
             const locationCode = document.getElementById('locationCode').value.trim();
@@ -1107,6 +1166,8 @@
                 return;
             }
 
+            const warehouseId = currentWarehouse ? currentWarehouse.id : null;
+            const seq = ++currentStockSeq;
             try {
                 // 调用API获取库存信息
                 const response = await fetch(`${API_BASE_URL}/stock/`, {
@@ -1118,6 +1179,10 @@
                 }
 
                 const stocks = await response.json();
+                // 切仓后旧仓库存响应不得覆盖当前展示
+                if (seq !== currentStockSeq || !currentWarehouse || currentWarehouse.id !== warehouseId) {
+                    return;
+                }
                 const stock = stocks.find(s =>
                     s.goods_barcode === goodsBarcode &&
                     s.location_code === locationCode

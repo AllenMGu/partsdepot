@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import Optional
 import zlib
+from urllib.parse import quote
 import pandas as pd
 import io
 
@@ -14,10 +15,24 @@ from core.models import UserRole, Warehouse, UserWarehouse, User, Location, Good
 from core.schemas import CheckCreate, CheckOrderCreate, CheckOrderHeaderResponse, CheckOrderItemResponse, CheckOrderFullResponse, CheckOrderItemCreate
 from core.security import get_current_user
 from core.deps import get_db
-from core.access import require_operator, require_selected_warehouse
+from core.access import require_operator, require_selected_warehouse, scoped_warehouse_id, require_warehouse
 from core.order_utils import lock_stock_row, lock_stock_rows_for_keys, lock_order_header, advisory_lock_stock_key
 
 router = APIRouter()
+
+
+def _require_current_warehouse_for_check_order(db: Session, user: User, order: CheckOrderHeader) -> None:
+    """盘点单操作必须绑定"当前选择的仓库"（评审第 8 轮 P1）。
+
+    多仓授权用户切仓后，页面上可能仍保留旧仓库的盘点单；若后端只校验"有该仓授权"，
+    录入/完成会照旧作用于旧仓库并改库存。这里同时要求：
+      - 仓库存在且启用、非管理员须有该仓授权（require_warehouse）；
+      - 盘点单仓库 == 用户当前选择的仓库，否则 400 要求先切回。
+    """
+    require_warehouse(db, user, order.warehouse_id)
+    if user.current_warehouse_id != order.warehouse_id:
+        raise HTTPException(status_code=400, detail="该盘点单不属于当前选择的仓库，请先切换仓库")
+
 router_report = APIRouter()
 router_orders = APIRouter()
 
@@ -95,14 +110,9 @@ async def get_check_records(
         User, CheckRecord.operator_id == User.id
     )
 
-    if current_user.role != UserRole.ADMIN:
-        # 操作员仅可查看当前仓库盘点记录
-        if not current_user.current_warehouse_id:
-            return []
-        query = query.filter(CheckRecord.warehouse_id == current_user.current_warehouse_id)
-
-    if warehouse_id:
-        query = query.filter(CheckRecord.warehouse_id == warehouse_id)
+    # 复核问题（2026-11）：盘点记录统一按当前仓库返回（显式 warehouse_id 可用）
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    query = query.filter(CheckRecord.warehouse_id == wid)
 
     if start_date:
         start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
@@ -153,18 +163,9 @@ async def get_check_stats(
         CheckRecord.check_time < end_datetime
     )
 
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse_ids = [
-            uw.warehouse_id for uw in
-            db.query(UserWarehouse).filter(UserWarehouse.user_id == current_user.id).all()
-        ]
-        if user_warehouse_ids:
-            query = query.filter(CheckRecord.warehouse_id.in_(user_warehouse_ids))
-        else:
-            query = query.filter(CheckRecord.warehouse_id == -1)
-
-    if warehouse_id:
-        query = query.filter(CheckRecord.warehouse_id == warehouse_id)
+    # 复核问题（2026-11）：盘点统计同样只统计当前仓库（显式 warehouse_id 可用）
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    query = query.filter(CheckRecord.warehouse_id == wid)
 
     records = query.all()
     matched = sum(1 for record in records if abs(record.check_quantity - record.actual_quantity) < 0.0001)
@@ -204,18 +205,9 @@ async def get_check_diffs(
         User, CheckRecord.operator_id == User.id
     )
 
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse_ids = [
-            uw.warehouse_id for uw in
-            db.query(UserWarehouse).filter(UserWarehouse.user_id == current_user.id).all()
-        ]
-        if user_warehouse_ids:
-            query = query.filter(CheckRecord.warehouse_id.in_(user_warehouse_ids))
-        else:
-            query = query.filter(CheckRecord.warehouse_id == -1)
-
-    if warehouse_id:
-        query = query.filter(CheckRecord.warehouse_id == warehouse_id)
+    # 复核问题（2026-11）：差异报表同样只统计当前仓库（显式 warehouse_id 可用）
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    query = query.filter(CheckRecord.warehouse_id == wid)
 
     if start_datetime and end_datetime:
         query = query.filter(
@@ -264,14 +256,10 @@ async def create_check_order(
     else:
         raise HTTPException(status_code=400, detail="请选择仓库或设置默认仓库")
 
-    # 权限校验
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse = db.query(UserWarehouse).filter(
-            UserWarehouse.user_id == current_user.id,
-            UserWarehouse.warehouse_id == warehouse_id
-        ).first()
-        if not user_warehouse:
-            raise HTTPException(status_code=403, detail="无该仓库权限")
+    # 权限校验（评审第 8 轮 P1）：创建盘点单同样须绑定当前选择的仓库
+    require_warehouse(db, current_user, warehouse_id)
+    if current_user.current_warehouse_id != warehouse_id:
+        raise HTTPException(status_code=400, detail="请先切换到目标仓库再创建盘点单")
 
     # 生成盘点单号（格式：CK + 年月日 + 5位流水号；PostgreSQL 用咨询锁串行化，防止并发撞号）
     today = datetime.now().strftime("%Y%m%d")
@@ -338,20 +326,9 @@ async def get_check_orders(
 ):
     query = db.query(CheckOrderHeader).join(Warehouse, CheckOrderHeader.warehouse_id == Warehouse.id)
 
-    # 权限校验
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse_ids = [
-            uw.warehouse_id for uw in
-            db.query(UserWarehouse).filter(UserWarehouse.user_id == current_user.id).all()
-        ]
-        if user_warehouse_ids:
-            query = query.filter(CheckOrderHeader.warehouse_id.in_(user_warehouse_ids))
-        else:
-            return []
-
-    # 过滤条件
-    if warehouse_id:
-        query = query.filter(CheckOrderHeader.warehouse_id == warehouse_id)
+    # 复核问题（2026-11）：盘点单列表统一按当前仓库返回（显式 warehouse_id 可用）
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    query = query.filter(CheckOrderHeader.warehouse_id == wid)
 
     if status:
         query = query.filter(CheckOrderHeader.status == status)
@@ -408,14 +385,9 @@ async def get_check_order_detail(
     if not order:
         raise HTTPException(status_code=404, detail="盘点单不存在")
 
-    # 权限校验
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse = db.query(UserWarehouse).filter(
-            UserWarehouse.user_id == current_user.id,
-            UserWarehouse.warehouse_id == order.warehouse_id
-        ).first()
-        if not user_warehouse:
-            raise HTTPException(status_code=403, detail="无该仓库权限")
+    # 只读详情（评审第 9 轮 P2）：校验仓库授权与启用即可，保留跨仓查看能力；
+    # 写操作（录入/完成/创建）才要求属于当前选择的仓库
+    require_warehouse(db, current_user, order.warehouse_id)
 
     # 查询明细
     items = db.query(CheckOrderItem).filter(CheckOrderItem.header_id == order_id).all()
@@ -471,14 +443,8 @@ async def add_check_order_item(
     if order.status == "COMPLETED":
         raise HTTPException(status_code=400, detail="盘点单已完成，无法添加明细")
 
-    # 权限校验
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse = db.query(UserWarehouse).filter(
-            UserWarehouse.user_id == current_user.id,
-            UserWarehouse.warehouse_id == order.warehouse_id
-        ).first()
-        if not user_warehouse:
-            raise HTTPException(status_code=403, detail="无该仓库权限")
+    # 权限校验（评审第 8 轮 P1）：须有该仓授权且属于"当前选择的仓库"
+    _require_current_warehouse_for_check_order(db, current_user, order)
 
     # 查询货物和库位
     goods = db.query(Goods).filter(Goods.warehouse_id == order.warehouse_id, Goods.barcode == item.goods_barcode).first()
@@ -582,14 +548,8 @@ async def complete_check_order(
     if order.status == "DRAFT":
         raise HTTPException(status_code=400, detail="盘点单尚未开始，无法完成")
 
-    # 权限校验
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse = db.query(UserWarehouse).filter(
-            UserWarehouse.user_id == current_user.id,
-            UserWarehouse.warehouse_id == order.warehouse_id
-        ).first()
-        if not user_warehouse:
-            raise HTTPException(status_code=403, detail="无该仓库权限")
+    # 权限校验（评审第 8 轮 P1）：须有该仓授权且属于"当前选择的仓库"
+    _require_current_warehouse_for_check_order(db, current_user, order)
 
     # 将盘点差异回写到库存（行级锁，防止并发下丢失更新）
     # 冲突检测：录入时记录的系统库存基线（item.actual_quantity）与当前库存不一致，
@@ -679,14 +639,9 @@ async def export_check_order(
     if not order:
         raise HTTPException(status_code=404, detail="盘点单不存在")
 
-    # 权限校验
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse = db.query(UserWarehouse).filter(
-            UserWarehouse.user_id == current_user.id,
-            UserWarehouse.warehouse_id == order.warehouse_id
-        ).first()
-        if not user_warehouse:
-            raise HTTPException(status_code=403, detail="无该仓库权限")
+    # 只读详情（评审第 9 轮 P2）：校验仓库授权与启用即可，保留跨仓查看能力；
+    # 写操作（录入/完成/创建）才要求属于当前选择的仓库
+    require_warehouse(db, current_user, order.warehouse_id)
 
     # 查询明细
     items = db.query(CheckOrderItem).filter(CheckOrderItem.header_id == order_id).all()
@@ -739,5 +694,8 @@ async def export_check_order(
     return StreamingResponse(
         io.BytesIO(output.getvalue()),
         media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        headers={'Content-Disposition': f'attachment; filename="盘点单_{order.order_no}.xlsx"'}
+        # 评审第 9 轮（测试暴露）：HTTP 头只允许 latin-1，中文文件名必须按 RFC 5987
+        # 用 filename*=UTF-8'' 编码，否则 StreamingResponse 初始化即抛 UnicodeEncodeError（500）
+        headers={'Content-Disposition': "attachment; filename=\"check_order_%s.xlsx\"; filename*=UTF-8''%s"
+                 % (order.order_no, quote(f"盘点单_{order.order_no}.xlsx"))}
     )

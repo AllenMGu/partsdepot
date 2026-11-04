@@ -9,7 +9,7 @@ import logging
 from core.models import UserRole, InventoryType, Warehouse, UserWarehouse, User, Location, Goods, Stock, InventoryRecord, OutboundOrderHeader, OutboundOrderItem
 from core.schemas import OutboundOrderItemCreate, OutboundOrderItemResponse, OutboundOrderHeaderCreate, OutboundOrderHeaderResponse, OutboundOrderDetailResponse
 from core.security import get_current_user
-from core.access import require_inventory_write
+from core.access import require_inventory_write, scoped_warehouse_id
 from core.deps import get_db
 from core.order_utils import format_outbound_order_response, format_outbound_order_item_response, recalculate_outbound_order_total, lock_stock_rows_for_keys, lock_order_header, generate_order_no
 
@@ -243,28 +243,17 @@ async def get_outbound_orders(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    """获取出库单列表（warehouse_id 可选，用于 H5"当前仓库"语义；不传则行为不变）"""
+    """获取出库单列表（复核问题 2026-11：统一按当前仓库返回；显式 warehouse_id 可用）"""
     try:
         query = db.query(OutboundOrderHeader).join(
             Warehouse, OutboundOrderHeader.warehouse_id == Warehouse.id
         ).join(
             User, OutboundOrderHeader.operator_id == User.id
         )
-        
-        if current_user.role != UserRole.ADMIN:
-            # 获取用户有权限的仓库
-            user_warehouse_ids = [
-                uw.warehouse_id for uw in 
-                db.query(UserWarehouse).filter(UserWarehouse.user_id == current_user.id).all()
-            ]
-            if user_warehouse_ids:
-                query = query.filter(OutboundOrderHeader.warehouse_id.in_(user_warehouse_ids))
-            else:
-                query = query.filter(OutboundOrderHeader.warehouse_id == -1)  # 返回空结果
 
-        # 仓库过滤（可选参数，向后兼容）
-        if warehouse_id:
-            query = query.filter(OutboundOrderHeader.warehouse_id == warehouse_id)
+        # 统一作用域：只返回当前仓库的单据（显式 warehouse_id 须有权限且启用）
+        wid = scoped_warehouse_id(db, current_user, warehouse_id)
+        query = query.filter(OutboundOrderHeader.warehouse_id == wid)
 
         if status:
             query = query.filter(OutboundOrderHeader.status == status)
@@ -300,6 +289,9 @@ async def get_outbound_orders(
         
         return result
         
+    except HTTPException:
+        # 评审第 7 轮 P2：未选仓(400)/越权(403)/停用(404) 等业务错误须原样返回
+        raise
     except Exception as e:
         logging.exception("获取出库单列表失败: %s", str(e))
         raise HTTPException(status_code=500, detail="获取出库单列表失败")

@@ -7,6 +7,8 @@ const API_BASE_URL = 'api';
 let currentUser = null;
 let userWarehouses = [];
 let currentWarehouse = null;
+let warehouseSwitchBusy = false;
+let warehouseSwitchPending = null;
 
 // 统一 HTML 转义，避免将用户可控内容注入 innerHTML
 function escapeHTML(value) {
@@ -226,9 +228,35 @@ function updateWarehouseList() {
     });
 }
 
+// 切仓处理函数注册表：页面注册后由 switchWarehouse 统一 await 执行。
+// 评审第 7 轮 P2：函数名探测无法覆盖私有作用域（如 request-admin 的 loadRecent），
+// 也缺少加载态与失败处理；页面显式注册可自行清理筛选、未完成操作等状态。
+window.__warehouseSwitchHandlers = window.__warehouseSwitchHandlers || [];
+function registerWarehouseSwitchHandler(handler) {
+    if (typeof handler === 'function') {
+        window.__warehouseSwitchHandlers.push(handler);
+    }
+}
+window.registerWarehouseSwitchHandler = registerWarehouseSwitchHandler;
+
 // 切换当前仓库
 async function switchWarehouse(warehouseId) {
+    if (warehouseSwitchBusy) {
+        // 评审第 7 轮：切仓过程中再次点击时记录最后一次目标，完成后再切，
+        // 避免"快速 A→B→A"丢失最后一次意图（最终状态必须与用户最后一次选择一致）。
+        warehouseSwitchPending = warehouseId;
+        return;
+    }
+    if (currentUser && currentUser.current_warehouse_id === warehouseId) {
+        const dropdown = document.getElementById('warehouseDropdown');
+        if (dropdown) dropdown.classList.add('hidden');
+        return;
+    }
+    warehouseSwitchBusy = true;
+    const selector = document.getElementById('warehouseSelector');
+    const previousWarehouseId = currentUser ? currentUser.current_warehouse_id : null;
     try {
+        if (selector) selector.classList.add('opacity-50', 'pointer-events-none');
         const params = new URLSearchParams({ warehouse_id: warehouseId });
         const response = await fetch(`${API_BASE_URL}/users/${currentUser.id}/switch-warehouse?${params.toString()}`, {
             method: 'POST',
@@ -255,18 +283,63 @@ async function switchWarehouse(warehouseId) {
         updateWarehouseList();
         document.getElementById('warehouseDropdown').classList.add('hidden');
 
-        showToast('仓库切换成功', 'success');
+        showToast('仓库切换成功，正在刷新数据…', 'success');
 
-        // 通知各业务页面刷新数据
-        if (typeof loadLocations === 'function') loadLocations();
-        if (typeof loadGoods === 'function') loadGoods();
-        if (typeof loadStock === 'function') loadStock();
-        if (typeof loadInboundOrders === 'function') loadInboundOrders();
-        if (typeof loadOutboundOrders === 'function') loadOutboundOrders();
-        if (typeof loadCheckRecords === 'function') loadCheckRecords();
+        // 评审第 7 轮：优先执行页面显式注册的切仓处理函数（等待异步完成、统一处理失败），
+        // 再派发 warehouseChanged 事件兼容旧页面；两者都没有时才做函数名探测兜底。
+        const handlers = (window.__warehouseSwitchHandlers || []).slice();
+        let refreshed = false;
+        if (handlers.length) {
+            refreshed = true;
+            const results = await Promise.allSettled(handlers.map(function (fn) {
+                return Promise.resolve().then(function () { return fn(warehouseId, previousWarehouseId); });
+            }));
+            results.forEach(function (r, i) {
+                if (r.status === 'rejected') {
+                    console.error('切仓后刷新失败（handler ' + i + '）:', r.reason);
+                }
+            });
+        }
+        window.dispatchEvent(new CustomEvent('warehouseChanged', {
+            detail: { warehouseId: warehouseId, previousWarehouseId: previousWarehouseId }
+        }));
+        if (!refreshed) {
+            const reloaders = [
+                'loadWarehouses',
+                'loadLocations', 'loadLocationData',
+                'loadGoods', 'loadGoodsData',
+                'loadStock',
+                'loadInboundOrders', 'loadOutboundOrders',
+                'loadCheckOrders', 'loadCheckOrderStatistics', 'loadCheckRecords',
+                'loadDashboardData',
+                'loadOperationLogs'
+            ];
+            reloaders.forEach(function (fn) {
+                if (typeof window[fn] === 'function') {
+                    try {
+                        window[fn]();
+                        refreshed = true;
+                    } catch (e) {
+                        console.error('切换仓库后刷新失败:', fn, e);
+                    }
+                }
+            });
+            if (!refreshed) {
+                location.reload();
+                return;
+            }
+        }
     } catch (error) {
         console.error('切换仓库失败:', error);
         showToast('切换仓库失败', 'error');
+    } finally {
+        warehouseSwitchBusy = false;
+        if (selector) selector.classList.remove('opacity-50', 'pointer-events-none');
+        const pending = warehouseSwitchPending;
+        warehouseSwitchPending = null;
+        if (pending !== null && (!currentUser || currentUser.current_warehouse_id !== pending)) {
+            switchWarehouse(pending);
+        }
     }
 }
 

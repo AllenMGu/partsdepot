@@ -24,7 +24,7 @@ window.M_PAGES["index"] = function () {
   function loadOverview() {
     var box = document.getElementById("mOverview");
     box.innerHTML = '<div class="m-empty">加载中…</div>';
-    // 按当前仓库查询（后端 /stock/ 对管理员返回全部仓库，前端不能拿全量再猜）
+    // 按当前仓库查询（列表接口已统一按当前仓库返回，这里显式传仓更稳妥）
     var w = M.AUTH.currentWarehouse();
     var wh = (w && w.id) ? "?warehouse_id=" + w.id : "";
     // 注意：/inventory/logs 自带 ?limit=10，追加参数必须用 &

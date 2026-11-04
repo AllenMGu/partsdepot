@@ -505,9 +505,12 @@ from datetime import datetime as _dt, timedelta as _td
 _old = (_dt.now() - _td(days=40)).strftime("%Y-%m-%d %H:%M:%S")
 
 def _w1_g001_total():
-    s_r, r_rows = req("GET", "/api/stock/?goods_barcode=G001", token=admin)
-    return sum(r.get("quantity", 0) for r in (r_rows or [])
-               if isinstance(r, dict) and r.get("goods_barcode") == "G001" and r.get("warehouse_id") == W1)
+    # 复核问题（2026-11）：列表接口按"当前仓库"返回，停用仓库期间不可再经 API 查询；
+    # 库存核对改用 DB 直查（与列表作用域无关，稳定可靠）。
+    rows = db_execute(
+        "SELECT coalesce(sum(s.quantity), 0) FROM stock s JOIN goods g ON g.id = s.goods_id "
+        "WHERE s.warehouse_id = :w AND g.barcode = :b", {"w": W1, "b": "G001"})
+    return float(rows[0][0]) if rows else 0.0
 
 _w1_before = _w1_g001_total()
 check("扣库存前置：W1 现有 G001 库存 ≥ 2（该申请可通过）", _w1_before >= 2, f"w1_total={_w1_before}")
@@ -636,9 +639,11 @@ check("按仓搜索：不存在的仓库 → 400", s == 400, f"status={s} body={
 s, b = req("POST", "/api/inventory/scan", {"goods_barcode": "G001", "location_code": "L1", "type": "入库", "quantity": 10}, admin)
 check("反序并发：前置补库 G001@W1 +10", s == 200, f"status={s} body={b}")
 def _w1_g002_total():
-    s_r, r_rows = req("GET", "/api/stock/?goods_barcode=G002", token=admin)
-    return sum(r.get("quantity", 0) for r in (r_rows or [])
-               if isinstance(r, dict) and r.get("goods_barcode") == "G002" and r.get("warehouse_id") == W1)
+    # 同上：库存核对一律 DB 直查，避免依赖列表接口的仓库作用域
+    rows = db_execute(
+        "SELECT coalesce(sum(s.quantity), 0) FROM stock s JOIN goods g ON g.id = s.goods_id "
+        "WHERE s.warehouse_id = :w AND g.barcode = :b", {"w": W1, "b": "G002"})
+    return float(rows[0][0]) if rows else 0.0
 _g1_before = _w1_g001_total()
 _g2_before = _w1_g002_total()
 check("反序并发：前置 W1 库存充足（G001≥2 且 G002≥2）", _g1_before >= 2 and _g2_before >= 2,
@@ -701,15 +706,17 @@ check("停用：审批被拒（400，提示已停用）", s == 400 and "停用" 
 check("停用：库存不变", _w1_g001_total() == _floor_i, f"now={_w1_g001_total()} floor={_floor_i}")
 s, b = req("GET", "/api/public/goods-search?q=G001&warehouse_id=" + str(W1))
 check("停用：按停用仓库搜索 → 400", s == 400, f"status={s} body={b}")
-s, rows = req("GET", "/api/requests/", token=admin)
-_off_row = next((r for r in (rows or []) if isinstance(r, dict) and r.get("id") == _off_id), None)
-check("停用：申请单仍为待处理（可改仓重提/再处理）",
-      isinstance(_off_row, dict) and _off_row.get("status") == "pending", f"row={_off_row}")
 s, b = req("PUT", f"/api/warehouses/{W1}", {"is_active": True}, admin)
 check("停用：恢复 W1 启用（环境复原）", s == 200 and (b or {}).get("is_active") in (True, 1), f"status={s} body={b}")
 # 评审第 6 轮 P2：W1 停用期间 op1（仅授权 W1）的当前仓库已被同步清空（无可用启用仓库）；
 # 恢复启用后由管理员代为重新选定，模拟用户重新选择仓库。
 req("POST", f"/api/users/{OP1_ID}/switch-warehouse?warehouse_id={W1}", token=admin)
+# 复核问题（2026-11）：列表按当前仓库返回，管理员恢复 W1 后切回再核对申请单仍待处理
+req("POST", f"/api/users/{ADMIN_ID}/switch-warehouse?warehouse_id={W1}", token=admin)
+s, rows = req("GET", "/api/requests/", token=admin)
+_off_row = next((r for r in (rows or []) if isinstance(r, dict) and r.get("id") == _off_id), None)
+check("停用：申请单仍为待处理（可改仓重提/再处理）",
+      isinstance(_off_row, dict) and _off_row.get("status") == "pending", f"row={_off_row}")
 
 # 15j. 批量按仓库存查询（评审 P2 跟进：切仓批量刷新，1 次调用替代 N 次 goods-search）
 def _lookup(wid, codes):

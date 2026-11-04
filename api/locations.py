@@ -9,7 +9,7 @@ from core.models import UserRole, UserWarehouse, User, Location
 from core.schemas import LocationCreate, LocationResponse, LocationUpdate
 from core.security import get_current_user
 from core.deps import get_db
-from core.access import require_warehouse
+from core.access import require_warehouse, scoped_warehouse_id
 
 router = APIRouter()
 
@@ -40,29 +40,17 @@ async def get_locations(
     db: Session = Depends(get_db)
 ):
     try:
-        # 如果是管理员，返回所有库位，包括禁用的
+        # 复核问题（2026-11）：库位列表统一按"当前仓库"返回（管理员同样按当前仓库，
+        # 显式 warehouse_id 可查询任意已授权/启用仓库），避免切仓后混入其它仓库。
+        wid = scoped_warehouse_id(db, current_user, warehouse_id)
         if current_user.role == UserRole.ADMIN:
-            if warehouse_id:
-                locations = db.query(Location).filter(Location.warehouse_id == warehouse_id).all()
-            else:
-                locations = db.query(Location).all()
+            # 管理员可见当前仓库的全部库位（含已停用），便于维护
+            locations = db.query(Location).filter(Location.warehouse_id == wid).all()
         else:
-            # 非管理员，获取用户可管理的所有仓库ID，只返回启用的库位
-            user_warehouse_ids = [
-                uw.warehouse_id for uw in
-                db.query(UserWarehouse).filter(UserWarehouse.user_id == current_user.id).all()
-            ]
-            if user_warehouse_ids:
-                query = db.query(Location).filter(
-                    Location.is_active == True,
-                    Location.warehouse_id.in_(user_warehouse_ids)
-                )
-                if warehouse_id:
-                    query = query.filter(Location.warehouse_id == warehouse_id)
-                locations = query.all()
-            else:
-                # 用户没有分配任何仓库，返回空列表
-                locations = []
+            # 非管理员只能看到当前仓库的启用库位
+            locations = db.query(Location).filter(
+                Location.warehouse_id == wid, Location.is_active == True
+            ).all()
 
         # 确保返回正确的字段
         result = []
@@ -76,6 +64,10 @@ async def get_locations(
                 "create_time": loc.create_time
             })
         return result
+    except HTTPException:
+        # 评审第 7 轮 P2：未选仓(400)/越权(403)/停用(404) 等业务错误须原样返回，
+        # 不能被通用异常处理改写成 500
+        raise
     except Exception as e:
         # 记录错误日志
         logging.exception("获取库位列表出错: %s", str(e))

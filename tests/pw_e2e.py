@@ -396,6 +396,267 @@ with sync_playwright() as p:
                     return r.status;
                 }""", pid)
 
+    # ================= 2c. 复核问题（2026-11）：切仓自动刷新 + 列表跟随当前仓库 =================
+    # 1) 库存页仅显示"当前仓库"数据（此前多仓授权用户会同时看到两个仓库）；
+    # 2) 右上角切换仓库后页面数据自动刷新（无需手动刷新浏览器）。
+    page.goto(BASE + "/stock.html")
+    page.wait_for_selector("#stockTableBody tr")
+    wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888001'))")
+    _rows_before = page.evaluate("() => Array.from(document.querySelectorAll('#stockTableBody tr')).map(tr => tr.innerText)")
+    _data_before = [t for t in _rows_before if "8888" in t]
+    check("切仓刷新：库存页初始只显示一号仓数据（含 8888001，不含 8888002）",
+          bool(_data_before) and all("8888001" in t or "8888003" in t for t in _data_before)
+          and not any("8888002" in t for t in _data_before)
+          and all("一号仓" in t for t in _data_before),
+          str(_rows_before))
+    page.click("#warehouseSelector")
+    page.wait_for_selector("#warehouseList div", timeout=5000)
+    page.locator("#warehouseList div", has_text="二号仓").first.click()
+    wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888002'))")
+    _rows_after = page.evaluate("() => Array.from(document.querySelectorAll('#stockTableBody tr')).map(tr => tr.innerText)")
+    _data_after = [t for t in _rows_after if "8888" in t]
+    check("切仓刷新：切换后库存页自动刷新为二号仓数据（含 8888002，不含 8888001）",
+          bool(_data_after) and any("8888002" in t for t in _data_after)
+          and not any("8888001" in t for t in _data_after)
+          and all("二号仓" in t for t in _data_after),
+          str(_rows_after))
+    check("切仓刷新：数据刷新未触发整页跳转（仍停留在库存页）", page.url.rstrip("/").endswith("/stock.html"), page.url)
+    # 切回一号仓（环境复原），并确认刷新回一号仓数据
+    page.click("#warehouseSelector")
+    page.wait_for_selector("#warehouseList div", timeout=5000)
+    page.locator("#warehouseList div", has_text="一号仓").first.click()
+    wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888001'))")
+
+    # ================= 2d. 评审第 7 轮 P1：扫码页切仓必须清空旧货物 =================
+    # 两个仓库存在相同条码但不同货物时，切仓后旧扫描结果不能残留，否则可能按新仓
+    # 条码误提交。这里在二号仓补一个与一号仓同条码的货物，验证切仓即清空。
+    _dup = page.evaluate("""async (arg) => {
+        // 种子数据两仓都有 8888001（同名"测试轴承"）；临时把二号仓的档案改名，
+        // 以构造"同条码、不同货物"的扫码场景（完成后恢复原名）。
+        const sw = async (w) => { await fetch('/api/users/' + arg.uid + '/switch-warehouse?warehouse_id=' + w, {method:'POST'}); };
+        await sw(arg.w2);
+        const rows = await (await fetch('/api/goods/')).json();
+        const g = (rows || []).find(x => x.barcode === '8888001');
+        if (!g) { await sw(arg.w1); return {status: 0, id: null}; }
+        const r = await fetch('/api/goods/' + g.id, {method:'PUT', headers:{'content-type':'application/json'},
+            body: JSON.stringify({name: '二号仓-测试轴承'})});
+        const d = await r.json();
+        await sw(arg.w1);
+        return {status: r.status, id: g.id, name: d.name};
+    }""", {"w1": _w1["id"], "w2": _w2["id"],
+           "uid": page.evaluate("() => (typeof currentUser !== 'undefined' && currentUser ? currentUser.id : null)")})
+    check("扫码切仓：改造二号仓同条码货物名称（8888001）", _dup.get("status") == 200 and bool(_dup.get("id")), str(_dup))
+    if _dup.get("id"):
+        try:
+            page.goto(BASE + "/scan.html")
+            page.wait_for_selector("#manualInputBtn")
+            page.click("#manualInputBtn")
+            page.fill("#manualGoodsBarcode", "8888001")
+            page.fill("#manualLocationCode", "A1")
+            page.click("#manualSubmitBtn")
+            wait_js(page, "() => (document.getElementById('goodsName')||{}).value === '测试轴承'")
+            check("扫码切仓：一号仓扫同条码显示一号仓货物", True)
+            # 切到二号仓：旧货物名称/扫描结果/提交按钮必须全部清空
+            page.click("#warehouseSelector")
+            page.wait_for_selector("#warehouseList div", timeout=5000)
+            page.locator("#warehouseList div", has_text="二号仓").first.click()
+            wait_js(page, "() => (document.getElementById('goodsName')||{}).value === '' && (document.getElementById('submitBtn')||{}).disabled === true")
+            _scan_cleared = page.evaluate("""() => ({
+                name: (document.getElementById('goodsName')||{}).value || '',
+                resultHidden: (document.getElementById('scanResult')||{}).classList.contains('hidden'),
+                submitDisabled: (document.getElementById('submitBtn')||{}).disabled === true
+            })""")
+            check("扫码切仓：切到二号仓后旧货物名称/扫描结果/提交状态已清空",
+                  _scan_cleared["name"] == "" and _scan_cleared["resultHidden"] and _scan_cleared["submitDisabled"],
+                  str(_scan_cleared))
+            # 在二号仓重新扫描同条码 → 显示二号仓货物（数据确实按仓隔离）
+            page.fill("#manualGoodsBarcode", "8888001")
+            page.fill("#manualLocationCode", "A2")
+            page.click("#manualSubmitBtn")
+            wait_js(page, "() => (document.getElementById('goodsName')||{}).value === '二号仓-测试轴承'")
+            check("扫码切仓：二号仓重新扫描同条码显示二号仓货物", True)
+            page.click("#warehouseSelector")
+            page.wait_for_selector("#warehouseList div", timeout=5000)
+            page.locator("#warehouseList div", has_text="一号仓").first.click()
+            wait_js(page, "() => (document.getElementById('goodsName')||{}).value === ''")
+        finally:
+            _del = page.evaluate("""async (arg) => {
+                // 恢复二号仓档案原名（改名前需切到目标仓库，完成后切回一号仓）
+                const sw = async (w) => { await fetch('/api/users/' + arg.uid + '/switch-warehouse?warehouse_id=' + w, {method:'POST'}); };
+                await sw(arg.w2);
+                const r = await fetch('/api/goods/' + arg.id, {method:'PUT', headers:{'content-type':'application/json'},
+                    body: JSON.stringify({name: '测试轴承'})});
+                await sw(arg.w1);
+                return r.status;
+            }""", {"w1": _w1["id"], "w2": _w2["id"], "id": _dup["id"],
+                   "uid": page.evaluate("() => (typeof currentUser !== 'undefined' && currentUser ? currentUser.id : null)")})
+            check("扫码切仓：恢复二号仓货物原名", _del == 200, str(_del))
+
+    # ================= 2e. 评审第 7 轮 P2：筛选竞态与连续切仓 =================
+    page.goto(BASE + "/stock.html")
+    page.wait_for_selector("#stockTableBody tr")
+    wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888001'))")
+    _sel = page.evaluate("""() => {
+        const fw = document.getElementById('filterWarehouse');
+        const fl = document.getElementById('filterLocation');
+        return {fw: fw ? fw.options.length : 0, fl: fl ? fl.options.length : 0};
+    }""")
+    page.select_option("#filterWarehouse", index=1)
+    if _sel["fl"] > 1:
+        page.select_option("#filterLocation", index=1)
+    page.click("#warehouseSelector")
+    page.wait_for_selector("#warehouseList div", timeout=5000)
+    page.locator("#warehouseList div", has_text="二号仓").first.click()
+    wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888002'))")
+    _data_after_filter = page.evaluate("() => Array.from(document.querySelectorAll('#stockTableBody tr')).map(tr => tr.innerText).filter(t => t.includes('8888'))")
+    check("切仓竞态：带筛选条件切仓后仍显示新仓数据（不被旧筛选过滤为空）",
+          bool(_data_after_filter) and any("8888002" in t for t in _data_after_filter),
+          str(_data_after_filter))
+    # 快速连续切换 A→B→A：最终必须停留在一号仓且列表为一号仓数据
+    page.evaluate("""(ids) => {
+        window.switchWarehouse(ids.w1);
+        window.switchWarehouse(ids.w2);
+        window.switchWarehouse(ids.w1);
+    }""", {"w1": _w1["id"], "w2": _w2["id"]})
+    wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === '一号仓'", timeout_ms=20000)
+    wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888001'))")
+    _data_final = page.evaluate("() => Array.from(document.querySelectorAll('#stockTableBody tr')).map(tr => tr.innerText).filter(t => t.includes('8888'))")
+    check("切仓竞态：快速 A→B→A 后最终停留一号仓且无旧仓数据覆盖",
+          bool(_data_final) and any("8888001" in t for t in _data_final)
+          and not any("8888002" in t for t in _data_final)
+          and all("一号仓" in t for t in _data_final),
+          str(_data_final))
+
+    # 切仓刷新不整页重载：盘点/申请管理/入库单/出库单页面保留页面内状态
+    for _path in ("/check.html", "/request-admin.html", "/inbound.html", "/outbound.html"):
+        page.goto(BASE + _path)
+        page.wait_for_timeout(500)
+        page.evaluate("() => { window.__switchMarker = 'kept'; }")
+        page.click("#warehouseSelector")
+        page.wait_for_selector("#warehouseList div", timeout=5000)
+        page.locator("#warehouseList div", has_text="二号仓").first.click()
+        wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === '二号仓'", timeout_ms=20000)
+        page.wait_for_timeout(800)
+        _kept = page.evaluate("() => window.__switchMarker === 'kept'")
+        check("切仓刷新：%s 切仓后未整页重载（保留页面内状态）" % _path, _kept)
+        page.click("#warehouseSelector")
+        page.wait_for_selector("#warehouseList div", timeout=5000)
+        page.locator("#warehouseList div", has_text="一号仓").first.click()
+        wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === '一号仓'", timeout_ms=20000)
+
+    # ================= 2f. 评审第 8 轮 P2：申请管理切仓关闭旧详情弹窗 =================
+    _w1_name = _w1.get("name") or "一号仓"
+    _w2_name = _w2.get("name") or "二号仓"
+    _pending = page.evaluate("""async (arg) => {
+        const r = await fetch('/api/requests/', {method:'POST', headers:{'content-type':'application/json'},
+            body: JSON.stringify({applicant_name:'切仓详情测试', department:'质量管理', description:'切仓详情测试',
+                warehouse_id: arg.w2, items:[{barcode:'8888002', quantity:1}]})});
+        return r.status;
+    }""", {"w2": _w2["id"]})
+    check("申请管理：创建二号仓待处理申请", _pending == 201, str(_pending))
+    page.goto(BASE + "/request-admin.html")
+    page.wait_for_selector("#recentBody tr")
+    page.evaluate("() => { window.__switchMarker2 = 'kept'; }")
+    _opened = page.evaluate("""() => {
+        const btn = document.querySelector('#recentBody button[data-act="detail"]');
+        if (!btn) return false;
+        btn.click();
+        return true;
+    }""")
+    if _opened:
+        page.wait_for_selector("#detailModal:not(.hidden)", timeout=5000)
+        check("申请管理：详情弹窗已打开", True)
+        page.click("#warehouseSelector")
+        page.wait_for_selector("#warehouseList div", timeout=5000)
+        page.locator("#warehouseList div", has_text=_w2_name).first.click()
+        wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w2_name), timeout_ms=20000)
+        page.wait_for_timeout(600)
+        _det_closed = page.evaluate("() => document.getElementById('detailModal').classList.contains('hidden') && window.__switchMarker2 === 'kept'")
+        check("申请管理：切仓后旧详情弹窗自动关闭且未整页重载", _det_closed)
+        page.click("#warehouseSelector")
+        page.wait_for_selector("#warehouseList div", timeout=5000)
+        page.locator("#warehouseList div", has_text=_w1_name).first.click()
+        wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w1_name), timeout_ms=20000)
+    else:
+        check("申请管理：详情按钮可用", False)
+
+    # ================= 2g. 评审第 9 轮 P1：盘点页货物缓存按仓库隔离 =================
+    # 两仓同条码不同货物时，切仓后缓存不能复用旧仓档案（此前 goodsCache 仅按条码缓存）。
+    _chk_dup = page.evaluate("""async (arg) => {
+        const sw = async (w) => { await fetch('/api/users/' + arg.uid + '/switch-warehouse?warehouse_id=' + w, {method:'POST'}); };
+        const mk = async (w) => {
+            const r = await fetch('/api/check-orders/', {method:'POST', headers:{'content-type':'application/json'},
+                body: JSON.stringify({warehouse_id: w})});
+            const d = await r.json();
+            return d.id;
+        };
+        await sw(arg.w2);
+        const rows = await (await fetch('/api/goods/')).json();
+        const g = (rows || []).find(x => x.barcode === '8888001');
+        if (!g) { await sw(arg.w1); return {status: 0, id: null}; }
+        const r = await fetch('/api/goods/' + g.id, {method:'PUT', headers:{'content-type':'application/json'},
+            body: JSON.stringify({name: '二号仓-盘点轴承'})});
+        // 两个仓库各建一张盘点单（打开详情后操作区才可见）
+        const w2_order = await mk(arg.w2);
+        await sw(arg.w1);
+        const w1_order = await mk(arg.w1);
+        return {status: r.status, id: g.id, w1Order: w1_order, w2Order: w2_order};
+    }""", {"w1": _w1["id"], "w2": _w2["id"],
+           "uid": page.evaluate("() => (typeof currentUser !== 'undefined' && currentUser ? currentUser.id : null)")})
+    check("盘点页缓存：改造二号仓同条码货物名称并各建盘点单",
+          _chk_dup.get("status") == 200 and bool(_chk_dup.get("id")) and bool(_chk_dup.get("w1Order")), str(_chk_dup))
+    if _chk_dup.get("id"):
+        try:
+            page.goto(BASE + "/check.html")
+            wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w1_name), timeout_ms=15000)
+            page.wait_for_selector("#checkOrdersTableBody tr", timeout=15000)
+            page.locator("#checkOrdersTableBody button:has-text('查看')").first.click()
+            page.wait_for_selector("#checkOperationSection:not(.hidden)", timeout=5000)
+            page.fill("#goodsBarcode", "8888001")
+            wait_js(page, "() => (document.getElementById('goodsName')||{}).textContent === '测试轴承'")
+            check("盘点页缓存：一号仓扫描同条码显示一号仓货物", True)
+            # 切到二号仓：盘点详情关闭、旧货物信息隐藏、输入清空（缓存必须清空）
+            page.click("#warehouseSelector")
+            page.wait_for_selector("#warehouseList div", timeout=5000)
+            page.locator("#warehouseList div", has_text=_w2_name).first.click()
+            wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w2_name), timeout_ms=20000)
+            page.wait_for_timeout(600)
+            _cache_cleared = page.evaluate("""() => ({
+                hidden: document.getElementById('goodsInfo').classList.contains('hidden'),
+                barcode: (document.getElementById('goodsBarcode')||{}).value || '',
+                sectionHidden: document.getElementById('checkOperationSection').classList.contains('hidden')
+            })""")
+            check("盘点页缓存：切仓后旧货物信息隐藏、输入清空、详情关闭",
+                  _cache_cleared["hidden"] and _cache_cleared["barcode"] == "" and _cache_cleared["sectionHidden"],
+                  str(_cache_cleared))
+            # 打开二号仓盘点单后再次输入同条码：必须显示二号仓货物（缓存未跨仓复用）
+            page.evaluate("() => loadCheckOrders(1)")
+            page.wait_for_timeout(800)
+            page.locator("#checkOrdersTableBody button:has-text('查看')").first.click()
+            page.wait_for_selector("#checkOperationSection:not(.hidden)", timeout=5000)
+            page.fill("#goodsBarcode", "8888001")
+            wait_js(page, "() => (document.getElementById('goodsName')||{}).textContent === '二号仓-盘点轴承'")
+            check("盘点页缓存：二号仓扫描同条码显示二号仓货物（缓存未跨仓复用）", True)
+        finally:
+            _chk_restore = page.evaluate("""async (arg) => {
+                const sw = async (w) => { await fetch('/api/users/' + arg.uid + '/switch-warehouse?warehouse_id=' + w, {method:'POST'}); };
+                await sw(arg.w2);
+                const r = await fetch('/api/goods/' + arg.id, {method:'PUT', headers:{'content-type':'application/json'},
+                    body: JSON.stringify({name: '测试轴承'})});
+                await sw(arg.w1);
+                return r.status;
+            }""", {"w1": _w1["id"], "w2": _w2["id"], "id": _chk_dup["id"],
+                   "uid": page.evaluate("() => (typeof currentUser !== 'undefined' && currentUser ? currentUser.id : null)")})
+            check("盘点页缓存：恢复二号仓货物原名", _chk_restore == 200, str(_chk_restore))
+            # 页面存储仍停在二号仓（UI 切过），切回一号仓保持前后端一致
+            try:
+                page.click("#warehouseSelector")
+                page.wait_for_selector("#warehouseList div", timeout=5000)
+                page.locator("#warehouseList div", has_text=_w1_name).first.click()
+                wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w1_name), timeout_ms=20000)
+            except Exception as e:
+                check("盘点页缓存：切回一号仓", False, str(e))
+
     # ================= 3. 申请管理：近期列表 + 详情弹窗 =================
     page.goto(BASE + "/request-admin.html")
     page.wait_for_selector("#recentBody tr")
@@ -747,10 +1008,44 @@ with sync_playwright() as p:
         check("盘点页：可创建盘点单（供查看按钮验证）", ck["status"] in (200, 201), ck)
         page.goto(BASE + "/check.html")
         page.wait_for_selector("#checkOrdersTableBody tr", timeout=15000)
+        # 评审第 8 轮 P1 回归：统计卡片必须与接口一致（此前 seq 未定义导致统计永不更新）
+        _today = page.evaluate("() => new Date().toISOString().split('T')[0]")
+        _ck_list = api_call("GET", "api/check-orders/?start_date=%s&end_date=%s" % (_today, _today))
+        _ck_rows = (_ck_list.get("data") or {}).get("data") if isinstance(_ck_list.get("data"), dict) else None
+        _ck_count = len(_ck_rows) if isinstance(_ck_rows, list) else -1
+        _stats_ok = False
+        if _ck_count >= 1:
+            try:
+                wait_js(page, "() => ((document.getElementById('todayCheckOrders')||{}).textContent||'').trim() === " + repr(str(_ck_count)), timeout_ms=8000)
+                _stats_ok = True
+            except Exception:
+                _stats_ok = False
+        _today_card = page.locator("#todayCheckOrders").inner_text().strip()
+        check("盘点页：今日盘点单统计卡片与接口一致（非空且数值匹配）",
+              _stats_ok and _today_card == str(_ck_count), f"card={_today_card} api={_ck_count}")
         page.locator("#checkOrdersTableBody button:has-text('查看')").first.click()
         page.wait_for_timeout(800)
         _ci = page.locator("#currentOrderInfo").inner_text()
         check("盘点页：点'查看'载入单据信息（单号-仓库）", "-" in _ci and len(_ci) > 3, _ci)
+        # 评审第 8 轮 P1：切仓必须关闭旧仓库盘点单详情，且完成按钮禁用
+        page.click("#warehouseSelector")
+        page.wait_for_selector("#warehouseList div", timeout=5000)
+        page.locator("#warehouseList div", has_text=_w2_name).first.click()
+        wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w2_name), timeout_ms=20000)
+        page.wait_for_timeout(600)
+        _chk_cleared = page.evaluate("""() => ({
+            sectionHidden: (document.getElementById('checkOperationSection')||{}).classList.contains('hidden'),
+            completeDisabled: (document.getElementById('completeOrderBtn')||{}).disabled === true,
+            infoEmpty: ((document.getElementById('currentOrderInfo')||{}).textContent || '') === ''
+        })""")
+        check("盘点页：切仓后旧盘点单详情关闭、完成按钮禁用、单号清空",
+              _chk_cleared["sectionHidden"] and _chk_cleared["completeDisabled"] and _chk_cleared["infoEmpty"],
+              str(_chk_cleared))
+        # 切回一号仓（环境复原）
+        page.click("#warehouseSelector")
+        page.wait_for_selector("#warehouseList div", timeout=5000)
+        page.locator("#warehouseList div", has_text=_w1_name).first.click()
+        wait_js(page, "() => (document.getElementById('currentWarehouse')||{}).textContent === " + repr(_w1_name), timeout_ms=20000)
         # 全程无 CSP 违规（内联事件处理器被拦截的典型报错）
         check("CSP：5 个页面点击操作全程无 CSP 违规", not _csp_errs, _csp_errs[:2])
     finally:
