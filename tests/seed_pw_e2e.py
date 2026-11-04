@@ -66,8 +66,10 @@ def main():
     wid2 = req("POST", "/api/warehouses/", {"code": "W2", "name": "二号仓"}, cookie)[0]["id"]
     req("POST", "/api/locations/", {"warehouse_id": wid2, "location_code": "A2", "name": "库位A2"}, cookie)
 
-    req("POST", "/api/goods/", {"barcode": "8888001", "name": "测试轴承", "spec": "6204", "unit": "个", "price": 10}, cookie)
-    req("POST", "/api/goods/", {"barcode": "8888002", "name": "测试密封圈", "spec": "NBR-35", "unit": "件", "price": 5}, cookie)
+    req("POST", "/api/goods/", {"barcode": "8888001", "name": "测试轴承", "spec": "6204", "unit": "个", "price": 10,
+                               "stock_alert_enabled": True, "min_stock_quantity": 20}, cookie)
+    req("POST", "/api/goods/", {"barcode": "8888002", "name": "测试密封圈", "spec": "NBR-35", "unit": "件", "price": 5,
+                               "stock_alert_enabled": True, "min_stock_quantity": 0}, cookie)
     req("POST", "/api/goods/", {"barcode": "8888003", "name": "测试垫片", "spec": "DN50", "unit": "片", "price": 8}, cookie)
     # 各仓独立档案：测试同条码可重复建档，但库存互不串仓。
     req("POST", "/api/users/%d/switch-warehouse?warehouse_id=" % admin_id + str(wid2), None, cookie)

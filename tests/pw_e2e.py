@@ -7,6 +7,7 @@
 3b. v2 通过即扣库存：扣减金额核对 / 状态机（重复通过/驳回拦截）/ 库存不足拦截 / 驳回不动库存 / 无明细仅留痕
 4. 归档 Tab 点击归档单 → 只读详情（含申请仓库）
 """
+import csv
 import os
 import sys
 import tempfile
@@ -320,6 +321,10 @@ with sync_playwright() as p:
     page.click("#loginForm button[type=submit], #loginForm [type=submit]")
     page.wait_for_url("**/dashboard*.html", timeout=15000)
     check("登录：跳转仪表盘", "dashboard" in page.url)
+    dashboard = page.frame_locator("#spaViewFrame")
+    counts = dashboard.locator("#alertCounts", has_text="启用预警 2")
+    counts.wait_for()
+    check("仪表盘显示本仓启用、低库存和零库存统计", "低库存 1 · 零库存 1" in counts.inner_text())
 
     # ================= 2b. 评审 P2：管理员升降级后的前端仓库状态（真实 UI 登录） =================
     # 桌面 Web 与 H5 的仓库列表/当前仓库均来自登录响应的 user 快照：
@@ -402,6 +407,37 @@ with sync_playwright() as p:
     page.goto(BASE + "/stock.html")
     page.wait_for_selector("#stockTableBody tr")
     wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888001'))")
+    wait_js(page, "() => document.querySelector('#stockAlertRows').textContent.includes('8888002')")
+    check("预警清单包含无库存行的货物", "零库存 1" in page.locator("#stockAlertCounts").text_content())
+    page.select_option("#filterAlertStatus", "out_of_stock")
+    missing_row = page.locator("#stockTableBody tr", has_text="8888002")
+    check("缺货筛选显示从未入库的货物且无库存详情入口",
+          missing_row.count() == 1 and "无库存记录" in missing_row.inner_text()
+          and missing_row.locator('[data-act="view-stock"]').count() == 0)
+    check("无库存记录的最后更新时间显示为破折号", missing_row.locator("td").nth(5).inner_text() == "—")
+    with page.expect_download() as download_info:
+        page.click("#exportStockBtn")
+    missing_export = download_info.value
+    if missing_export.suggested_filename.endswith(".xlsx"):
+        from openpyxl import load_workbook
+
+        with open(missing_export.path(), "rb") as stream:
+            workbook = load_workbook(stream, read_only=True)
+            headers, *values = workbook.active.values
+            exported_rows = [dict(zip(headers, row)) for row in values]
+            workbook.close()
+    else:
+        with open(missing_export.path(), encoding="utf-8-sig", newline="") as stream:
+            exported_rows = list(csv.DictReader(stream))
+    check("库存导出中无库存记录的最后更新时间显示为破折号",
+          [row["最后更新"] for row in exported_rows if row["货物条码"] == "8888002"] == ["—"])
+    page.select_option("#filterLocation", label="A1 - 库位A1")
+    check("按库位筛选排除没有库位的缺货货物", missing_row.count() == 0)
+    page.select_option("#filterLocation", "")
+    page.select_option("#filterAlertStatus", "low")
+    check("库存预警筛选只保留低库存", "8888001" in page.locator("#stockTableBody").inner_text()
+          and "8888003" not in page.locator("#stockTableBody").inner_text())
+    page.select_option("#filterAlertStatus", "")
     _rows_before = page.evaluate("() => Array.from(document.querySelectorAll('#stockTableBody tr')).map(tr => tr.innerText)")
     _data_before = [t for t in _rows_before if "8888" in t]
     check("切仓刷新：库存页初始只显示一号仓数据（含 8888001，不含 8888002）",
@@ -409,10 +445,14 @@ with sync_playwright() as p:
           and not any("8888002" in t for t in _data_before)
           and all("一号仓" in t for t in _data_before),
           str(_rows_before))
+    page.select_option("#filterAlertStatus", "low")
     page.click("#warehouseSelector")
     page.wait_for_selector("#warehouseList div", timeout=5000)
     page.locator("#warehouseList div", has_text="二号仓").first.click()
     wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888002'))")
+    wait_js(page, "() => document.querySelector('#stockAlertCounts').textContent.includes('启用预警 0')")
+    check("切仓清空预警筛选和清单", page.locator("#filterAlertStatus").input_value() == ""
+          and page.locator("#stockAlertRows").text_content().strip() == "")
     _rows_after = page.evaluate("() => Array.from(document.querySelectorAll('#stockTableBody tr')).map(tr => tr.innerText)")
     _data_after = [t for t in _rows_after if "8888" in t]
     check("切仓刷新：切换后库存页自动刷新为二号仓数据（含 8888002，不含 8888001）",

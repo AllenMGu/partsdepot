@@ -15,6 +15,7 @@ from core.schemas import InventoryBatchCreate, InventoryCreate, StockResponse
 from core.security import get_current_user
 from core.deps import get_db
 from core.access import require_operator, require_selected_warehouse, scoped_warehouse_id
+from core.stock_alerts import alert_status, stock_totals
 from core.order_utils import lock_stock_row, lock_stock_rows_for_keys, advisory_lock_stock_key, advisory_lock_idempotency_key, generate_order_no
 
 router = APIRouter()
@@ -419,6 +420,35 @@ async def scan_inventory(
 
 # ===== 原 main.py 块: 库存查询 =====
 # ------------------- 库存查询接口（带仓库+库位） -------------------
+@router_query.get("/stock/alerts", summary="仓库最低库存预警")
+async def get_stock_alerts(
+    warehouse_id: Optional[int] = None,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    totals = stock_totals(db, wid)
+    quantity = func.coalesce(totals.c.quantity, 0)
+    rows = (
+        db.query(Goods.id, Goods.barcode, Goods.name, Goods.spec, Goods.unit,
+                 Goods.min_stock_quantity, quantity.label("quantity"),
+                 alert_status(quantity).label("status"))
+        .outerjoin(totals, totals.c.goods_id == Goods.id)
+        .filter(Goods.warehouse_id == wid, Goods.stock_alert_enabled.is_(True),
+                Goods.min_stock_quantity >= 0)
+        .order_by(Goods.barcode, Goods.id)
+        .all()
+    )
+    alerts = []
+    counts = {"enabled": len(rows), "low": 0, "out_of_stock": 0}
+    for row in rows:
+        if row.status in ("low", "out_of_stock"):
+            counts[row.status] += 1
+            alerts.append(dict(row._mapping, warehouse_id=wid,
+                               shortage=max(0, row.min_stock_quantity - row.quantity)))
+    return {"warehouse_id": wid, "counts": counts, "alerts": alerts}
+
+
 @router_query.get("/stock/", response_model=List[StockResponse], summary="库存查询（带仓库库位）")
 async def get_stock(
     warehouse_id: Optional[int] = Query(None, description="按仓库ID过滤"),
@@ -430,8 +460,12 @@ async def get_stock(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    totals = stock_totals(db, wid)
+    status = alert_status(func.coalesce(totals.c.quantity, 0))
     query = (
         db.query(
+            status.label("alert_status"),
             func.min(Stock.id).label("id"),
             Stock.warehouse_id.label("warehouse_id"),
             Warehouse.name.label("warehouse_name"),
@@ -450,12 +484,12 @@ async def get_stock(
         .join(Warehouse, Stock.warehouse_id == Warehouse.id)
         .join(Goods, Stock.goods_id == Goods.id)
         .join(Location, Stock.location_id == Location.id)
+        .outerjoin(totals, totals.c.goods_id == Goods.id)
     )
 
     # 复核问题（2026-11）：列表统一收敛到"当前仓库"，切仓后不再混入其它仓库数据；
     # 显式 warehouse_id 仍可用（须有权限且启用），供单据表单/导出等场景。
-    wid = scoped_warehouse_id(db, current_user, warehouse_id)
-    query = query.filter(Stock.warehouse_id == wid)
+    query = query.filter(Stock.warehouse_id == wid, Goods.warehouse_id == wid, Location.warehouse_id == wid)
 
     if location_id is not None:
         query = query.filter(Stock.location_id == location_id)
@@ -475,6 +509,9 @@ async def get_stock(
         )
 
     query = query.group_by(
+        Goods.stock_alert_enabled,
+        Goods.min_stock_quantity,
+        totals.c.quantity,
         Stock.warehouse_id,
         Warehouse.name,
         Stock.goods_id,
@@ -498,6 +535,7 @@ async def get_stock(
     rows = query.all()
     return [
         {
+            "alert_status": row.alert_status,
             "id": row.id,
             "warehouse_id": row.warehouse_id,
             "warehouse_name": row.warehouse_name,

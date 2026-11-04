@@ -1,4 +1,6 @@
 """Fresh SQLite integration checks for warehouse-scoped catalogs and roles."""
+import io
+import json
 import os
 import tempfile
 import unittest
@@ -516,21 +518,134 @@ class WarehouseIsolationTest(unittest.TestCase):
         nowh = self._login("scope-nowh", "password2")
         self.assertIsNone(nowh["user"]["current_warehouse_id"])
         nowh_auth = nowh["access_token"]
-        for path in ("/stock/", "/inbound-orders/", "/outbound-orders/", "/locations/",
+        for path in ("/stock/", "/stock/alerts", "/inbound-orders/", "/outbound-orders/", "/locations/",
                      "/check-orders/", "/inventory/logs"):
             self._call("GET", path, auth=nowh_auth, expected=400)
         # 越权：仓库主管仅授权 wh1，显式查询 wh2 → 403（不是 500）
-        for path in ("/stock/", "/inbound-orders/", "/outbound-orders/", "/locations/", "/check-orders/"):
+        for path in ("/stock/", "/stock/alerts", "/inbound-orders/", "/outbound-orders/", "/locations/", "/check-orders/"):
             self._call("GET", f"{path}?warehouse_id={self.wh2}", auth=self.supervisor_auth, expected=403)
         # 不存在的仓库 → 404
-        for path in ("/stock/", "/inbound-orders/", "/outbound-orders/", "/locations/", "/check-orders/"):
+        for path in ("/stock/", "/stock/alerts", "/inbound-orders/", "/outbound-orders/", "/locations/", "/check-orders/"):
             self._call("GET", f"{path}?warehouse_id=999999", expected=404)
         # 已停用仓库 → 404
         wh5 = self._call("POST", "/warehouses/", {"code": "S5", "name": "错误码测试"})["id"]
         self._call("PUT", f"/warehouses/{wh5}", {"is_active": False})
-        for path in ("/stock/", "/inbound-orders/", "/outbound-orders/", "/locations/", "/check-orders/"):
+        for path in ("/stock/", "/stock/alerts", "/inbound-orders/", "/outbound-orders/", "/locations/", "/check-orders/"):
             self._call("GET", f"{path}?warehouse_id={wh5}", expected=404)
         self._call("DELETE", f"/users/{nowh_id}")
+
+
+    def test_stock_alerts_follow_live_warehouse_totals(self):
+        from core.database import SessionLocal
+        from core.models import GoodsStockAlertAudit
+
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+        payload = {"barcode": "ALERT-TEST", "name": "A仓预警", "price": 12}
+        goods = self._call("POST", "/goods/", payload)
+        goods_path = f"/goods/{goods['id']}"
+        self.assertFalse(goods["stock_alert_enabled"])
+
+        def alerts(auth=None):
+            data = self._call("GET", "/stock/alerts", auth=auth)
+            return [row for row in data["alerts"] if row["barcode"] == payload["barcode"]]
+
+        def scan(kind, quantity, location="S-L1"):
+            self._call("POST", "/inventory/scan", {
+                "goods_barcode": payload["barcode"], "location_code": location,
+                "type": kind, "quantity": quantity,
+            })
+
+        self.assertEqual(alerts(), [])
+        self._call("PUT", goods_path, {"stock_alert_enabled": True}, expected=422)
+        self._call("PUT", goods_path, {"min_stock_quantity": -1}, expected=422)
+        self._call("PUT", goods_path, {"stock_alert_enabled": True, "min_stock_quantity": 10},
+                   auth=self.viewer_auth, expected=403)
+        operator = self._call("POST", "/users/", {"username": "stock-alert-op", "password": "password2",
+                              "full_name": "操作员", "role": "operator", "warehouse_ids": [self.wh1]})
+        operator_auth = self._login("stock-alert-op", "password2")["access_token"]
+        self._call("PUT", goods_path, {"min_stock_quantity": 10}, auth=operator_auth, expected=403)
+        self._call("PUT", goods_path, {"stock_alert_enabled": True, "min_stock_quantity": 10},
+                   auth=self.supervisor_auth)
+        zero = alerts(self.viewer_auth)
+        self.assertEqual([(row["quantity"], row["status"]) for row in zero], [(0, "out_of_stock")])
+        self.assertNotIn("price", zero[0])
+
+        second = self._call("POST", "/locations/", {
+            "warehouse_id": self.wh1, "location_code": "ALERT-L2", "name": "第二库位",
+        })
+        scan("入库", 3)
+        scan("入库", 3, second["location_code"])
+        self.assertEqual([(row["quantity"], row["shortage"]) for row in alerts()], [(6, 4)])
+        scan("入库", 4)
+        self.assertEqual([(row["quantity"], row["status"]) for row in alerts()], [(10, "low")])
+        scan("入库", 1)
+        self.assertEqual(alerts(), [])
+        scan("出库", 1)
+        self.assertEqual(alerts()[0]["status"], "low")
+        self.assertEqual({row["alert_status"] for row in self._call(
+            "GET", "/stock/?goods_barcode=ALERT-TEST&limit=1")}, {"low"})
+
+        scan("入库", 1)
+        request = self._call("POST", "/requests/", {
+            "applicant_name": "预警测试", "description": "审批扣减", "warehouse_id": self.wh1,
+            "items": [{"barcode": payload["barcode"], "quantity": 2}],
+        }, expected=201)
+        self._call("POST", f"/requests/{request['id']}/status", {"status": "approved"})
+        self.assertEqual(alerts()[0]["quantity"], 9)
+        order = self._call("POST", "/check-orders/", {"warehouse_id": self.wh1})
+        self._call("POST", "/check-orders/items/", {"header_id": order["id"],
+                   "goods_barcode": payload["barcode"], "location_code": "S-L1", "check_quantity": 11})
+        self._call("POST", f"/check-orders/{order['id']}/complete")
+        self.assertEqual(alerts(), [])
+
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh2}")
+        self._call("POST", "/goods/", {**payload, "name": "B仓预警", "stock_alert_enabled": True,
+                                     "min_stock_quantity": 0})
+        self.assertEqual([(r["name"], r["status"]) for r in alerts()], [("B仓预警", "out_of_stock")])
+        scan("入库", 1, "S-L2")
+        self.assertEqual(alerts(), [])
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+
+        with SessionLocal() as db:
+            audit = db.query(GoodsStockAlertAudit).filter_by(goods_id=goods["id"]).one()
+            self.assertEqual(audit.operator_id, self.supervisor)
+            self.assertFalse(json.loads(audit.before_json)["stock_alert_enabled"])
+            self.assertEqual(json.loads(audit.after_json)["min_stock_quantity"], 10)
+
+    def test_stock_alert_excel_legacy_and_config_only_updates(self):
+        from openpyxl import Workbook
+
+        def upload(columns, rows):
+            workbook = Workbook()
+            workbook.active.append(["条码", "货物名称", "规格型号", "单位", "单价"] + columns)
+            for code, *values in rows:
+                workbook.active.append([code, "导入货物", "", "个", 6] + values)
+            stream = io.BytesIO()
+            workbook.save(stream)
+            response = self.client.post("/api/goods/import", files={"file": ("goods.xlsx", stream.getvalue())},
+                                        headers={"Authorization": "Bearer " + self.admin["access_token"]})
+            self.assertEqual(response.status_code, 200, response.text)
+            return response.json()
+
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+        goods = self._call("POST", "/goods/", {"barcode": "ALERT-XLS", "name": "保留名称", "price": 9,
+                                             "stock_alert_enabled": True, "min_stock_quantity": 10})
+        path = f"/goods/{goods['id']}"
+        legacy = upload([], [("ALERT-XLS",), ("ALERT-LEGACY",)])
+        self.assertEqual((legacy["success_count"], legacy["error_count"]), (1, 1))
+        self.assertEqual(self._call("GET", path)["min_stock_quantity"], 10)
+        result = upload(["是否预警", "最低库存"], [
+            ("ALERT-XLS", "否", None), ("ALERT-NEW", "是", 0),
+            ("ALERT-BAD1", "是", None), ("ALERT-BAD2", "否", -1),
+            ("ALERT-BAD3", "是", "NaN"), ("ALERT-BAD4", "错误开关", 0),
+        ])
+        self.assertEqual((result["success_count"], result["error_count"]), (2, 4))
+        updated = self._call("GET", path)
+        self.assertEqual((updated["name"], updated["price"], updated["min_stock_quantity"]),
+                         ("保留名称", 9, 10))
+        self.assertFalse(updated["stock_alert_enabled"])
+        self.assertFalse(self._call("GET", "/goods/?keyword=ALERT-LEGACY")[0]["stock_alert_enabled"])
+        self.assertEqual(self._call("GET", "/goods/?keyword=ALERT-NEW")[0]["min_stock_quantity"], 0)
 
 
 if __name__ == "__main__":
