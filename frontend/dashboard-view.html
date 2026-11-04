@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-Upx7T9PohWqSAclPBO+VnqM81pQH5B6sFHdRoQaKCrI='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-vzxFwSDYm4c92e+6FRjOLs3LWUfxM2npIS35x3rPC98='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>仪表盘 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -449,57 +449,7 @@
             // 加载仪表盘数据
             loadDashboardData();
 
-            async function loadDashboardAlerts(warehouseId, seq) {
-            try {
-                const alerts = await fetch(`${API_BASE_URL}/stock/alerts?warehouse_id=${encodeURIComponent(warehouseId)}`, {
-                    headers: getAuthHeaders()
-                }).then(handleResponse);
-                if (seq !== dashboardLoadSeq || warehouseId !== currentWarehouseId) return;
-                const { enabled, low, out_of_stock } = alerts.counts;
-                document.getElementById('alertCounts').textContent =
-                    `启用预警 ${enabled} · 低库存 ${low} · 零库存 ${out_of_stock}`;
-                const alertStocks = alerts.alerts.slice(0, 5);
-                const stockAlertTable = document.getElementById('stockAlertTable');
-                if (alertStocks.length === 0) {
-                    stockAlertTable.innerHTML = `
-                        <tr>
-                            <td colspan="4" class="px-4 py-6 text-center text-gray-500">
-                                当前暂无库存预警
-                            </td>
-                        </tr>
-                    `;
-                } else {
-                    stockAlertTable.innerHTML = alertStocks.map(stock => {
-                        const status = stock.quantity === 0 ? '缺货' : '低库存';
-                        const statusClass = stock.quantity === 0 ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800';
-                        return `
-                            <tr>
-                                <td class="px-4 py-3 whitespace-nowrap">
-                                    <div class="text-sm font-medium text-gray-900">${escapeHTML(stock.name)}</div>
-                                    <div class="text-xs text-gray-500">SKU: ${escapeHTML(stock.barcode)}</div>
-                                </td>
-                                <td class="px-4 py-3 whitespace-nowrap">
-                                    <div class="text-sm text-gray-900">${stock.quantity}</div>
-                                </td>
-                                <td class="px-4 py-3 whitespace-nowrap">
-                                    <div class="text-sm text-gray-900">${stock.min_stock_quantity}</div>
-                                </td>
-                                <td class="px-4 py-3 whitespace-nowrap">
-                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}">
-                                        ${status}
-                                    </span>
-                                </td>
-                            </tr>
-                        `;
-                    }).join('');
-                }
-            } catch (error) {
-                if (seq !== dashboardLoadSeq) return;
-                document.getElementById('alertCounts').textContent = '预警加载失败';
-            }
-        }
-
-        // 初始化图表
+            // 初始化图表
             initCharts();
 
             // 设置事件监听器
@@ -710,6 +660,56 @@
             }
         }
         
+        async function loadDashboardAlerts(warehouseId, seq) {
+            try {
+                const alerts = await fetch(`${API_BASE_URL}/stock/alerts?warehouse_id=${encodeURIComponent(warehouseId)}`, {
+                    headers: getAuthHeaders()
+                }).then(handleResponse);
+                if (seq !== dashboardLoadSeq || warehouseId !== currentWarehouseId) return;
+                const { enabled, low, out_of_stock } = alerts.counts;
+                document.getElementById('alertCounts').textContent =
+                    `启用预警 ${enabled} · 低库存 ${low} · 零库存 ${out_of_stock}`;
+                const alertStocks = alerts.alerts.slice(0, 5);
+                const stockAlertTable = document.getElementById('stockAlertTable');
+                if (alertStocks.length === 0) {
+                    stockAlertTable.innerHTML = `
+                        <tr>
+                            <td colspan="4" class="px-4 py-6 text-center text-gray-500">
+                                当前暂无库存预警
+                            </td>
+                        </tr>
+                    `;
+                } else {
+                    stockAlertTable.innerHTML = alertStocks.map(stock => {
+                        const status = stock.quantity === 0 ? '缺货' : '低库存';
+                        const statusClass = stock.quantity === 0 ? 'bg-red-100 text-red-800' : 'bg-yellow-100 text-yellow-800';
+                        return `
+                            <tr>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    <div class="text-sm font-medium text-gray-900">${escapeHTML(stock.name)}</div>
+                                    <div class="text-xs text-gray-500">SKU: ${escapeHTML(stock.barcode)}</div>
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    <div class="text-sm text-gray-900">${stock.quantity}</div>
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    <div class="text-sm text-gray-900">${stock.min_stock_quantity}</div>
+                                </td>
+                                <td class="px-4 py-3 whitespace-nowrap">
+                                    <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${statusClass}">
+                                        ${status}
+                                    </span>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            } catch (error) {
+                if (seq !== dashboardLoadSeq) return;
+                document.getElementById('alertCounts').textContent = '预警加载失败';
+            }
+        }
+
         // 初始化图表
         function initCharts() {
             renderCharts();
