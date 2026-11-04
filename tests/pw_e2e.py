@@ -7,6 +7,7 @@
 3b. v2 通过即扣库存：扣减金额核对 / 状态机（重复通过/驳回拦截）/ 库存不足拦截 / 驳回不动库存 / 无明细仅留痕
 4. 归档 Tab 点击归档单 → 只读详情（含申请仓库）
 """
+import csv
 import os
 import sys
 import tempfile
@@ -413,6 +414,23 @@ with sync_playwright() as p:
     check("缺货筛选显示从未入库的货物且无库存详情入口",
           missing_row.count() == 1 and "无库存记录" in missing_row.inner_text()
           and missing_row.locator('[data-act="view-stock"]').count() == 0)
+    check("无库存记录的最后更新时间显示为破折号", missing_row.locator("td").nth(5).inner_text() == "—")
+    with page.expect_download() as download_info:
+        page.click("#exportStockBtn")
+    missing_export = download_info.value
+    if missing_export.suggested_filename.endswith(".xlsx"):
+        from openpyxl import load_workbook
+
+        with open(missing_export.path(), "rb") as stream:
+            workbook = load_workbook(stream, read_only=True)
+            headers, *values = workbook.active.values
+            exported_rows = [dict(zip(headers, row)) for row in values]
+            workbook.close()
+    else:
+        with open(missing_export.path(), encoding="utf-8-sig", newline="") as stream:
+            exported_rows = list(csv.DictReader(stream))
+    check("库存导出中无库存记录的最后更新时间显示为破折号",
+          [row["最后更新"] for row in exported_rows if row["货物条码"] == "8888002"] == ["—"])
     page.select_option("#filterLocation", label="A1 - 库位A1")
     check("按库位筛选排除没有库位的缺货货物", missing_row.count() == 0)
     page.select_option("#filterLocation", "")
