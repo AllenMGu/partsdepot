@@ -40,8 +40,8 @@ def _reference(req: Request) -> str:
     return f"APP-{date_part}-{req.id:04d}"
 
 
-def _recipient_usernames(db, warehouse_id: Optional[int]) -> List[str]:
-    """该仓主管优先；无则该仓管理员；再回退全部启用的管理员（返回登录名列表）。"""
+def _recipient_groups(db, warehouse_id: Optional[int]) -> List[List[str]]:
+    """按该仓主管、该仓管理员、其余管理员的顺序收集 LDAP 登录名。"""
     if not warehouse_id:
         return []
     base = db.query(User).join(UserWarehouse, UserWarehouse.user_id == User.id).filter(
@@ -51,13 +51,11 @@ def _recipient_usernames(db, warehouse_id: Optional[int]) -> List[str]:
         return [u.username for u in query.all() if u.is_ldap_user]
 
     supervisors = names(base.filter(User.role == UserRole.SUPERVISOR))
-    if supervisors:
-        return supervisors
-    admins = names(base.filter(User.role == UserRole.ADMIN))
-    if admins:
-        return admins
-    logging.info("仓库 %s 未配置主管/管理员 LDAP 账号，回退通知全部管理员", warehouse_id)
-    return names(db.query(User).filter(User.role == UserRole.ADMIN, User.is_active.is_(True)))
+    warehouse_admins = names(base.filter(User.role == UserRole.ADMIN))
+    all_admins = names(db.query(User).filter(User.role == UserRole.ADMIN, User.is_active.is_(True)))
+    warehouse_admin_names = set(warehouse_admins)
+    other_admins = [name for name in all_admins if name not in warehouse_admin_names]
+    return [supervisors, warehouse_admins, other_admins]
 
 
 def _items_text(db, req: Request) -> str:
@@ -101,16 +99,16 @@ def _base_body(db, req: Request) -> str:
 
 
 def prepare_request_created(db, request_id: int) -> Optional[Dict]:
-    """在请求内准备"新申请"邮件（收件人为登录名列表，后台再解析 AD 邮箱）。"""
+    """在请求内准备"新申请"邮件（按优先级准备候选账号，后台再解析 AD 邮箱）。"""
     req = db.query(Request).filter(Request.id == request_id).first()
     if req is None:
         return None
-    usernames = _recipient_usernames(db, req.warehouse_id)
-    if not usernames:
+    recipient_groups = _recipient_groups(db, req.warehouse_id)
+    if not any(recipient_groups):
         logging.info("申请 %s 无可通知的仓库主管/管理员 LDAP 账号，跳过邮件", request_id)
         return None
     return {
-        "usernames": usernames,
+        "recipient_groups": recipient_groups,
         "subject": f"【备品备件】新申请 {_reference(req)}（{_warehouse_name(db, req.warehouse_id)}）",
         "body": _base_body(db, req),
     }
@@ -136,11 +134,11 @@ def prepare_request_status(db, request_id: int, status: str, handler: str = "") 
     if EMAIL_RE.match(contact):
         payload["addresses"] = [contact]
     else:
-        usernames = _recipient_usernames(db, req.warehouse_id)
-        if not usernames:
+        recipient_groups = _recipient_groups(db, req.warehouse_id)
+        if not any(recipient_groups):
             logging.info("申请 %s 无申请人邮箱且无主管/管理员 LDAP 账号，跳过邮件", request_id)
             return None
-        payload["usernames"] = usernames
+        payload["recipient_groups"] = recipient_groups
     return payload
 
 
@@ -150,10 +148,16 @@ def deliver_email(payload: Optional[Dict]) -> None:
         return
     try:
         recipients: List[str] = list(payload.get("addresses") or [])
-        for username in payload.get("usernames") or []:
-            email = ldap_lookup_email(username)
-            if email and email not in recipients:
-                recipients.append(email)
+        if not recipients:
+            for priority, usernames in enumerate(payload.get("recipient_groups") or []):
+                for username in usernames:
+                    email = (ldap_lookup_email(username) or "").strip()
+                    if EMAIL_RE.fullmatch(email) and email not in recipients:
+                        recipients.append(email)
+                if recipients:
+                    if priority:
+                        logging.info("邮件提醒回退至管理员（优先级 %s，%s）", priority, payload.get("subject"))
+                    break
         if not recipients:
             logging.info("邮件提醒跳过：无可解析的收件人邮箱（%s）", payload.get("subject"))
             return

@@ -90,12 +90,12 @@ def save_smtp_config(db, data: Dict[str, Any]) -> None:
     from datetime import datetime
 
     for name, db_key in _DB_KEYS.items():
-        if name not in data:
+        if db_key not in data:
             continue
-        value = data.get(name)
-        if name == "password" and (value is None or value == "******"):
+        raw_value = data[db_key]
+        value = "" if raw_value is None else str(raw_value).strip()
+        if name == "password" and value in ("", "******"):
             continue
-        value = "" if value is None else str(value).strip()
         row = db.query(Config).filter(Config.key == db_key).first()
         if row:
             row.value = value
