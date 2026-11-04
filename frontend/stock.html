@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-VlkQghTIMHgbv+bqrVYOfqndA6xEzQVzyensfgdVwSA='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-juH3thTQAVhHJhjkj91IxC/NxvV1HmLieNDafuZFuj4='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>库存查询 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -346,6 +346,9 @@
         let pageSize = 10;
         let distributionChart = null;
         let trendChart = null;
+        // 评审第 7 轮 P2：切仓/筛选并发时，丢弃过期响应，避免旧仓数据覆盖新仓列表
+        let stockLoadSeq = 0;
+        let locationLoadSeq = 0;
         
         // 页面初始化
         function pageInit() {
@@ -353,6 +356,23 @@
             loadLocations();
             loadStock();
             setupStockEventListeners();
+
+            // 评审第 7 轮 P2：切仓时先复位仓库/库位筛选与页码，再按新仓加载；
+            // 配合下方请求序号，防止旧仓库的响应把新仓库列表覆盖成空。
+            if (typeof registerWarehouseSwitchHandler === 'function') {
+                registerWarehouseSwitchHandler(async () => {
+                    const filterWarehouse = document.getElementById('filterWarehouse');
+                    const filterLocation = document.getElementById('filterLocation');
+                    if (filterWarehouse) filterWarehouse.value = '';
+                    if (filterLocation) filterLocation.value = '';
+                    currentPage = 1;
+                    await loadWarehouses();
+                    if (filterWarehouse) filterWarehouse.value = '';
+                    await loadLocations();
+                    if (filterLocation) filterLocation.value = '';
+                    await loadStock();
+                });
+            }
         }
         
         // 加载仓库列表
@@ -406,6 +426,7 @@
         
         // 加载库位列表
         async function loadLocations() {
+            const seq = ++locationLoadSeq;
             try {
                 const response = await fetch(`${API_BASE_URL}/locations/`, {
                     headers: getHeaders()
@@ -415,7 +436,9 @@
                     throw new Error('获取库位列表失败');
                 }
                 
-                locations = await response.json();
+                const rows = await response.json();
+                if (seq !== locationLoadSeq) return;  // 过期响应（已切仓）丢弃
+                locations = rows;
                 
                 // 更新库位下拉框
                 updateLocationSelector();
@@ -471,6 +494,7 @@
         
         // 加载库存数据
         async function loadStock() {
+            const seq = ++stockLoadSeq;
             try {
                 const response = await fetch(`${API_BASE_URL}/stock/`, {
                     headers: getHeaders()
@@ -480,7 +504,9 @@
                     throw new Error('获取库存数据失败');
                 }
                 
-                stocks = await response.json();
+                const rows = await response.json();
+                if (seq !== stockLoadSeq) return;  // 过期响应（已切仓）丢弃
+                stocks = rows;
                 filteredStocks = [...stocks];
                 
                 // 应用筛选

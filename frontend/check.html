@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-i9Cnhs5mcKfnc3F7R9q2xvOQ4sBjTTeZ1xmBY28bKho='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-1ZdPRexUAX7ThI6VO8orcyTXLZp5yU/2WhKLMEuKd5k='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>盘点管理 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -485,6 +485,15 @@
             loadCheckOrderStatistics(); // 加载统计数据
             loadCheckOrders(); // 加载盘点单列表
             setupCheckEventListeners();
+
+            // 评审第 7 轮 P2：切仓后按新仓库重载库位/统计/盘点单，回到第一页
+            if (typeof registerWarehouseSwitchHandler === 'function') {
+                registerWarehouseSwitchHandler(async () => {
+                    await loadLocationData();
+                    await loadCheckOrderStatistics();
+                    await loadCheckOrders(1);
+                });
+            }
         }
 
         // 加载库位数据
@@ -538,6 +547,7 @@
                 }
 
                 const result = await response.json();
+                if (seq !== checkOrdersLoadSeq) return;  // 切仓后丢弃旧仓响应
                 const orders = result.data || [];
 
                 // 统计数据
@@ -559,7 +569,9 @@
         }
 
         // 加载盘点单列表
+        let checkOrdersLoadSeq = 0;
         async function loadCheckOrders(page = 1) {
+            const seq = ++checkOrdersLoadSeq;
             currentPage = page;
             try {
                 const params = new URLSearchParams();

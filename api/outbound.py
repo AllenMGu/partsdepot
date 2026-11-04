@@ -289,6 +289,9 @@ async def get_outbound_orders(
         
         return result
         
+    except HTTPException:
+        # 评审第 7 轮 P2：未选仓(400)/越权(403)/停用(404) 等业务错误须原样返回
+        raise
     except Exception as e:
         logging.exception("获取出库单列表失败: %s", str(e))
         raise HTTPException(status_code=500, detail="获取出库单列表失败")

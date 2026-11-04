@@ -64,6 +64,10 @@ async def get_locations(
                 "create_time": loc.create_time
             })
         return result
+    except HTTPException:
+        # 评审第 7 轮 P2：未选仓(400)/越权(403)/停用(404) 等业务错误须原样返回，
+        # 不能被通用异常处理改写成 500
+        raise
     except Exception as e:
         # 记录错误日志
         logging.exception("获取库位列表出错: %s", str(e))

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-tbUUwbrEDrBUq9/e717Klnj69dd9O587nuy1ZNu/I40='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-cAyYo6Bm7fr8WqQRv23amctl21mvi5ZuxiJ2vZUi6r0='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>出库单管理 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -412,6 +412,15 @@
             loadOutboundOrders();
             setupOutboundEventListeners();
 
+            // 评审第 7 轮 P2：切仓后关闭其它仓库的单据详情（避免误操作），并刷新列表
+            if (typeof registerWarehouseSwitchHandler === 'function') {
+                registerWarehouseSwitchHandler(async () => {
+                    const modal = document.getElementById('orderDetailModal');
+                    if (modal) modal.classList.add('hidden');
+                    await loadOutboundOrders();
+                });
+            }
+
             // 检查URL参数是否有orderId，如果有则直接显示订单详情
             const urlParams = new URLSearchParams(window.location.search);
             const orderId = urlParams.get('orderId');
@@ -421,7 +430,9 @@
         }
         
         // 加载出库单列表
+        let outboundLoadSeq = 0;
         async function loadOutboundOrders() {
+            const seq = ++outboundLoadSeq;
             try {
                 const params = new URLSearchParams();
                 const status = document.getElementById('filterStatus').value;
@@ -440,7 +451,9 @@
                     throw new Error('获取出库单列表失败');
                 }
                 
-                orders = await response.json();
+                const rows = await response.json();
+                if (seq !== outboundLoadSeq) return;  // 切仓后丢弃旧仓响应
+                orders = rows;
                 filteredOrders = [...orders];
                 
                 // 应用搜索

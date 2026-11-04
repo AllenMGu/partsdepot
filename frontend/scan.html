@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-7yw6yVHdUOlhS/7iWhEd6b7cpkw8L55Mf6kc5TmamxY='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-IobYQ5JUgNe5OQDAphoQ2gSmXn8GM/WUZnvp6SDkVG8='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>扫码出入库 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -384,6 +384,8 @@
         const manualSubmitBtn = document.getElementById('manualSubmitBtn');
         const scanResult = document.getElementById('scanResult');
         const scanTypeText = document.getElementById('scanTypeText');
+        let goodsLoadSeq = 0;
+        let locationDataSeq = 0;
         const scanResultText = document.getElementById('scanResultText');
         const submitBtn = document.getElementById('submitBtn');
         const resetBtn = document.getElementById('resetBtn');
@@ -448,6 +450,7 @@
 
         // 加载货物数据
         async function loadGoodsData() {
+            const seq = ++goodsLoadSeq;
             try {
                 const response = await fetch(`${API_BASE_URL}/goods/`, {
                     headers: getHeaders()
@@ -457,7 +460,10 @@
                     throw new Error('获取货物数据失败');
                 }
 
-                goodsData = await response.json();
+                const rows = await response.json();
+                // 评审第 7 轮 P1：切仓后旧仓库响应必须丢弃，避免 A 仓货物残留在 B 仓页面
+                if (seq !== goodsLoadSeq) return;
+                goodsData = rows;
                 console.log('货物数据:', goodsData);
                 console.log('货物条码列表:', goodsData.map(g => g.barcode));
             } catch (error) {
@@ -467,6 +473,7 @@
 
         // 加载库位数据
         async function loadLocationData() {
+            const seq = ++locationDataSeq;
             try {
                 const response = await fetch(`${API_BASE_URL}/locations/`, {
                     headers: getHeaders()
@@ -476,7 +483,9 @@
                     throw new Error('获取库位数据失败');
                 }
 
-                locationData = await response.json();
+                const rows = await response.json();
+                if (seq !== locationDataSeq) return;
+                locationData = rows;
                 // 只保留当前仓库的库位数据
                 if (currentWarehouse) {
                     locationData = locationData.filter(location => location.warehouse_id === currentWarehouse.id);
@@ -1036,13 +1045,23 @@
             // 重置按钮
             resetBtn.addEventListener('click', resetForm);
 
-            // 仓库切换事件
-            window.addEventListener('warehouseChanged', async () => {
-                // 重新加载库位数据
-                await loadLocationData();
-                // 重置表单
-                resetForm();
-            });
+            // 仓库切换（评审第 7 轮 P1）：切仓必须先清空已扫描货物、库存提示与提交状态，
+            // 再按新仓库重载货物/库位；否则 A 仓扫过的旧货物名称可能残留，配合 B 仓库位
+            // 提交时后端按 B 仓条码处理，存在误操作风险（同条码可存在于不同仓库）。
+            if (typeof registerWarehouseSwitchHandler === 'function') {
+                registerWarehouseSwitchHandler(async () => {
+                    resetForm();
+                    await Promise.all([loadGoodsData(), loadLocationData()]);
+                    // 数据重载期间可能恢复展示，再清一次确保表单为空
+                    resetForm();
+                });
+            } else {
+                window.addEventListener('warehouseChanged', async () => {
+                    resetForm();
+                    await Promise.all([loadGoodsData(), loadLocationData()]);
+                    resetForm();
+                });
+            }
 
             // 翻页按钮事件
             prevPageBtn.addEventListener('click', handlePrevPage);

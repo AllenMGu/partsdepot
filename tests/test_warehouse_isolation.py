@@ -463,6 +463,32 @@ class WarehouseIsolationTest(unittest.TestCase):
         self._call("DELETE", f"/outbound-orders/{outbound['id']}", auth=auth)
         self._call("DELETE", f"/users/{op_id}")
 
+    def test_list_scope_error_codes(self):
+        # 评审第 7 轮 P2：列表接口的仓库作用域错误必须保留原始状态码——
+        # 未选仓 400 / 越权 403 / 停用或不存在 404（此前被接口内的通用 except 改写为 500）。
+        nowh_id = self._call("POST", "/users/", {
+            "username": "scope-nowh", "password": "password2", "full_name": "无仓库用户",
+            "role": "operator", "warehouse_ids": [],
+        })["id"]
+        nowh = self._login("scope-nowh", "password2")
+        self.assertIsNone(nowh["user"]["current_warehouse_id"])
+        nowh_auth = nowh["access_token"]
+        for path in ("/stock/", "/inbound-orders/", "/outbound-orders/", "/locations/",
+                     "/check-orders/", "/inventory/logs"):
+            self._call("GET", path, auth=nowh_auth, expected=400)
+        # 越权：仓库主管仅授权 wh1，显式查询 wh2 → 403（不是 500）
+        for path in ("/stock/", "/inbound-orders/", "/outbound-orders/", "/locations/", "/check-orders/"):
+            self._call("GET", f"{path}?warehouse_id={self.wh2}", auth=self.supervisor_auth, expected=403)
+        # 不存在的仓库 → 404
+        for path in ("/stock/", "/inbound-orders/", "/outbound-orders/", "/locations/", "/check-orders/"):
+            self._call("GET", f"{path}?warehouse_id=999999", expected=404)
+        # 已停用仓库 → 404
+        wh5 = self._call("POST", "/warehouses/", {"code": "S5", "name": "错误码测试"})["id"]
+        self._call("PUT", f"/warehouses/{wh5}", {"is_active": False})
+        for path in ("/stock/", "/inbound-orders/", "/outbound-orders/", "/locations/", "/check-orders/"):
+            self._call("GET", f"{path}?warehouse_id={wh5}", expected=404)
+        self._call("DELETE", f"/users/{nowh_id}")
+
 
 if __name__ == "__main__":
     unittest.main()
