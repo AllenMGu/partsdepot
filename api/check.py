@@ -14,7 +14,7 @@ from core.models import UserRole, Warehouse, UserWarehouse, User, Location, Good
 from core.schemas import CheckCreate, CheckOrderCreate, CheckOrderHeaderResponse, CheckOrderItemResponse, CheckOrderFullResponse, CheckOrderItemCreate
 from core.security import get_current_user
 from core.deps import get_db
-from core.access import require_operator, require_selected_warehouse
+from core.access import require_operator, require_selected_warehouse, scoped_warehouse_id
 from core.order_utils import lock_stock_row, lock_stock_rows_for_keys, lock_order_header, advisory_lock_stock_key
 
 router = APIRouter()
@@ -95,14 +95,9 @@ async def get_check_records(
         User, CheckRecord.operator_id == User.id
     )
 
-    if current_user.role != UserRole.ADMIN:
-        # 操作员仅可查看当前仓库盘点记录
-        if not current_user.current_warehouse_id:
-            return []
-        query = query.filter(CheckRecord.warehouse_id == current_user.current_warehouse_id)
-
-    if warehouse_id:
-        query = query.filter(CheckRecord.warehouse_id == warehouse_id)
+    # 复核问题（2026-11）：盘点记录统一按当前仓库返回（显式 warehouse_id 可用）
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    query = query.filter(CheckRecord.warehouse_id == wid)
 
     if start_date:
         start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
@@ -153,18 +148,9 @@ async def get_check_stats(
         CheckRecord.check_time < end_datetime
     )
 
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse_ids = [
-            uw.warehouse_id for uw in
-            db.query(UserWarehouse).filter(UserWarehouse.user_id == current_user.id).all()
-        ]
-        if user_warehouse_ids:
-            query = query.filter(CheckRecord.warehouse_id.in_(user_warehouse_ids))
-        else:
-            query = query.filter(CheckRecord.warehouse_id == -1)
-
-    if warehouse_id:
-        query = query.filter(CheckRecord.warehouse_id == warehouse_id)
+    # 复核问题（2026-11）：盘点统计同样只统计当前仓库（显式 warehouse_id 可用）
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    query = query.filter(CheckRecord.warehouse_id == wid)
 
     records = query.all()
     matched = sum(1 for record in records if abs(record.check_quantity - record.actual_quantity) < 0.0001)
@@ -204,18 +190,9 @@ async def get_check_diffs(
         User, CheckRecord.operator_id == User.id
     )
 
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse_ids = [
-            uw.warehouse_id for uw in
-            db.query(UserWarehouse).filter(UserWarehouse.user_id == current_user.id).all()
-        ]
-        if user_warehouse_ids:
-            query = query.filter(CheckRecord.warehouse_id.in_(user_warehouse_ids))
-        else:
-            query = query.filter(CheckRecord.warehouse_id == -1)
-
-    if warehouse_id:
-        query = query.filter(CheckRecord.warehouse_id == warehouse_id)
+    # 复核问题（2026-11）：差异报表同样只统计当前仓库（显式 warehouse_id 可用）
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    query = query.filter(CheckRecord.warehouse_id == wid)
 
     if start_datetime and end_datetime:
         query = query.filter(
@@ -338,20 +315,9 @@ async def get_check_orders(
 ):
     query = db.query(CheckOrderHeader).join(Warehouse, CheckOrderHeader.warehouse_id == Warehouse.id)
 
-    # 权限校验
-    if current_user.role != UserRole.ADMIN:
-        user_warehouse_ids = [
-            uw.warehouse_id for uw in
-            db.query(UserWarehouse).filter(UserWarehouse.user_id == current_user.id).all()
-        ]
-        if user_warehouse_ids:
-            query = query.filter(CheckOrderHeader.warehouse_id.in_(user_warehouse_ids))
-        else:
-            return []
-
-    # 过滤条件
-    if warehouse_id:
-        query = query.filter(CheckOrderHeader.warehouse_id == warehouse_id)
+    # 复核问题（2026-11）：盘点单列表统一按当前仓库返回（显式 warehouse_id 可用）
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    query = query.filter(CheckOrderHeader.warehouse_id == wid)
 
     if status:
         query = query.filter(CheckOrderHeader.status == status)

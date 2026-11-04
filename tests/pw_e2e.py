@@ -396,6 +396,37 @@ with sync_playwright() as p:
                     return r.status;
                 }""", pid)
 
+    # ================= 2c. 复核问题（2026-11）：切仓自动刷新 + 列表跟随当前仓库 =================
+    # 1) 库存页仅显示"当前仓库"数据（此前多仓授权用户会同时看到两个仓库）；
+    # 2) 右上角切换仓库后页面数据自动刷新（无需手动刷新浏览器）。
+    page.goto(BASE + "/stock.html")
+    page.wait_for_selector("#stockTableBody tr")
+    wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888001'))")
+    _rows_before = page.evaluate("() => Array.from(document.querySelectorAll('#stockTableBody tr')).map(tr => tr.innerText)")
+    _data_before = [t for t in _rows_before if "8888" in t]
+    check("切仓刷新：库存页初始只显示一号仓数据（含 8888001，不含 8888002）",
+          bool(_data_before) and all("8888001" in t or "8888003" in t for t in _data_before)
+          and not any("8888002" in t for t in _data_before)
+          and all("一号仓" in t for t in _data_before),
+          str(_rows_before))
+    page.click("#warehouseSelector")
+    page.wait_for_selector("#warehouseList div", timeout=5000)
+    page.locator("#warehouseList div", has_text="二号仓").first.click()
+    wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888002'))")
+    _rows_after = page.evaluate("() => Array.from(document.querySelectorAll('#stockTableBody tr')).map(tr => tr.innerText)")
+    _data_after = [t for t in _rows_after if "8888" in t]
+    check("切仓刷新：切换后库存页自动刷新为二号仓数据（含 8888002，不含 8888001）",
+          bool(_data_after) and any("8888002" in t for t in _data_after)
+          and not any("8888001" in t for t in _data_after)
+          and all("二号仓" in t for t in _data_after),
+          str(_rows_after))
+    check("切仓刷新：数据刷新未触发整页跳转（仍停留在库存页）", page.url.rstrip("/").endswith("/stock.html"), page.url)
+    # 切回一号仓（环境复原），并确认刷新回一号仓数据
+    page.click("#warehouseSelector")
+    page.wait_for_selector("#warehouseList div", timeout=5000)
+    page.locator("#warehouseList div", has_text="一号仓").first.click()
+    wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888001'))")
+
     # ================= 3. 申请管理：近期列表 + 详情弹窗 =================
     page.goto(BASE + "/request-admin.html")
     page.wait_for_selector("#recentBody tr")

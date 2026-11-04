@@ -94,6 +94,79 @@ class WarehouseIsolationTest(unittest.TestCase):
         finally:
             self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
 
+    def test_lists_follow_current_warehouse(self):
+        # 复核问题（2026-11）：多仓用户在页面切换到某仓库后，列表数据必须只属于
+        # 当前仓库——此前库存、库位、出入库单、盘点单、申请单按"授权仓库集合"返回，
+        # 切换仓库后仍同时看到两个仓库的数据。
+        both_id = self._call("POST", "/users/", {
+            "username": "scope-both", "password": "password2", "full_name": "双仓主管",
+            "role": "supervisor", "warehouse_ids": [self.wh1, self.wh2],
+        })["id"]
+        both = self._login("scope-both", "password2")
+        both_auth = both["access_token"]
+        self.assertEqual(both["user"]["current_warehouse_id"], self.wh1)
+        locs = {self.wh1: "S-L1", self.wh2: "S-L2"}
+        base = {}
+        for wid in (self.wh1, self.wh2):
+            self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={wid}")
+            base[wid] = sum(r["quantity"] for r in self._call("GET", "/stock/"))
+        try:
+            for wid, qty in ((self.wh1, 3), (self.wh2, 5)):
+                self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={wid}")
+                order = self._call("POST", "/inbound-orders/", {"supplier": f"列表测试入库-{wid}"})
+                self._call("POST", f"/inbound-orders/{order['id']}/items",
+                           {"goods_barcode": "SAME", "location_code": locs[wid], "quantity": qty})
+                self._call("POST", f"/inbound-orders/{order['id']}/submit")
+                out = self._call("POST", "/outbound-orders/", {"customer": f"列表测试出库-{wid}"})
+                self._call("POST", f"/outbound-orders/{out['id']}/items",
+                           {"goods_barcode": "SAME", "location_code": locs[wid], "quantity": 1})
+                self._call("POST", f"/outbound-orders/{out['id']}/submit")
+                self._call("POST", "/check-orders/", {"warehouse_id": wid})
+            for wid in (self.wh1, self.wh2):
+                resp = self.client.post("/api/requests/", json={
+                    "applicant_name": f"列表测试申请-{wid}", "description": "多仓列表范围",
+                    "warehouse_id": wid, "items": [{"barcode": "SAME", "quantity": 1}],
+                }, headers={"X-Real-IP": f"198.51.100.{60 + wid}"})
+                self.assertEqual(resp.status_code, 201, resp.text)
+
+            def assert_scoped(path, wid, extract=lambda rows: rows):
+                rows = extract(self._call("GET", path, auth=both_auth))
+                self.assertTrue(rows, f"{path} 在仓库 {wid} 应有数据")
+                for row in rows:
+                    self.assertEqual(row["warehouse_id"], wid, f"{path} 混入其它仓库：{row}")
+
+            # 当前 wh1：所有列表仅 wh1
+            assert_scoped("/stock/", self.wh1)
+            assert_scoped("/locations/", self.wh1)
+            assert_scoped("/inbound-orders/", self.wh1)
+            assert_scoped("/outbound-orders/", self.wh1)
+            assert_scoped("/check-orders/", self.wh1, lambda r: r["data"])
+            assert_scoped("/requests/", self.wh1)
+            stock1 = self._call("GET", "/stock/", auth=both_auth)
+            self.assertEqual(sum(r["quantity"] for r in stock1), base[self.wh1] + 2.0)  # 3 入 - 1 出
+            # 切到 wh2：所有列表仅 wh2
+            self._call("POST", f"/users/{both_id}/switch-warehouse?warehouse_id={self.wh2}", auth=both_auth)
+            assert_scoped("/stock/", self.wh2)
+            assert_scoped("/locations/", self.wh2)
+            assert_scoped("/inbound-orders/", self.wh2)
+            assert_scoped("/outbound-orders/", self.wh2)
+            assert_scoped("/check-orders/", self.wh2, lambda r: r["data"])
+            assert_scoped("/requests/", self.wh2)
+            stock2 = self._call("GET", "/stock/", auth=both_auth)
+            self.assertEqual(sum(r["quantity"] for r in stock2), base[self.wh2] + 4.0)  # 5 入 - 1 出
+            # 显式 warehouse_id 仍可查询已授权仓库（单据表单/导出等场景）
+            rows = self._call("GET", f"/stock/?warehouse_id={self.wh1}", auth=both_auth)
+            self.assertEqual({r["warehouse_id"] for r in rows}, {self.wh1})
+            # 管理员同样按当前仓库查看，不并列两个仓库
+            for wid in (self.wh1, self.wh2):
+                self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={wid}")
+                for path in ("/stock/", "/inbound-orders/", "/outbound-orders/"):
+                    for row in self._call("GET", path):
+                        self.assertEqual(row["warehouse_id"], wid, f"管理员 {path} 混入其它仓库")
+        finally:
+            self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+            self._call("DELETE", f"/users/{both_id}")
+
     def test_public_application_uses_selected_warehouse(self):
         headers = {"X-Real-IP": "198.51.100.22"}
         for wid, expected in [(self.wh1, "工程耗材"), (self.wh2, "行政用品")]:
@@ -155,8 +228,10 @@ class WarehouseIsolationTest(unittest.TestCase):
                        {"goods_barcode": "SAME", "location_code": "S-L1", "check_quantity": 1}, expected=400)
         finally:
             self._call("PUT", f"/warehouses/{self.wh1}", {"is_active": True})
-        # 停用期间当前仓库已被同步重指（评审第 6 轮 P2），启用后须显式切回 wh1
+        # 停用期间当前仓库已被同步重指/清空（评审第 6 轮 P2），启用后须显式切回 wh1
         self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+        self._call("POST", f"/users/{self.supervisor}/switch-warehouse?warehouse_id={self.wh1}")
+        self._call("POST", f"/users/{self.viewer}/switch-warehouse?warehouse_id={self.wh1}")
         self._call("POST", "/inventory/scan",
                    {"goods_barcode": "SAME", "location_code": "S-L1", "type": "入库", "quantity": 1})
 

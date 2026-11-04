@@ -257,13 +257,33 @@ async function switchWarehouse(warehouseId) {
 
         showToast('仓库切换成功', 'success');
 
-        // 通知各业务页面刷新数据
-        if (typeof loadLocations === 'function') loadLocations();
-        if (typeof loadGoods === 'function') loadGoods();
-        if (typeof loadStock === 'function') loadStock();
-        if (typeof loadInboundOrders === 'function') loadInboundOrders();
-        if (typeof loadOutboundOrders === 'function') loadOutboundOrders();
-        if (typeof loadCheckRecords === 'function') loadCheckRecords();
+        // 复核问题（2026-11）：切换仓库后必须自动刷新当前页数据。
+        // 各页面数据加载函数命名不同，逐一探测调用；页面未注册任何加载函数时整页刷新兜底。
+        const reloaders = [
+            'loadWarehouses',
+            'loadLocations', 'loadLocationData',
+            'loadGoods', 'loadGoodsData',
+            'loadStock',
+            'loadInboundOrders', 'loadOutboundOrders',
+            'loadCheckOrders', 'loadCheckOrderStatistics', 'loadCheckRecords',
+            'loadDashboardData',
+            'loadRecent', 'loadArchive',
+            'loadOperationLogs'
+        ];
+        let reloaded = false;
+        reloaders.forEach(function (fn) {
+            if (typeof window[fn] === 'function') {
+                try {
+                    window[fn]();
+                    reloaded = true;
+                } catch (e) {
+                    console.error('切换仓库后刷新失败:', fn, e);
+                }
+            }
+        });
+        if (!reloaded) {
+            location.reload();
+        }
     } catch (error) {
         console.error('切换仓库失败:', error);
         showToast('切换仓库失败', 'error');

@@ -14,7 +14,7 @@ from core.models import UserRole, InventoryType, Warehouse, UserWarehouse, User,
 from core.schemas import InventoryBatchCreate, InventoryCreate, StockResponse
 from core.security import get_current_user
 from core.deps import get_db
-from core.access import require_operator, require_selected_warehouse
+from core.access import require_operator, require_selected_warehouse, scoped_warehouse_id
 from core.order_utils import lock_stock_row, lock_stock_rows_for_keys, advisory_lock_stock_key, advisory_lock_idempotency_key, generate_order_no
 
 router = APIRouter()
@@ -452,8 +452,10 @@ async def get_stock(
         .join(Location, Stock.location_id == Location.id)
     )
 
-    if warehouse_id is not None:
-        query = query.filter(Stock.warehouse_id == warehouse_id)
+    # 复核问题（2026-11）：列表统一收敛到"当前仓库"，切仓后不再混入其它仓库数据；
+    # 显式 warehouse_id 仍可用（须有权限且启用），供单据表单/导出等场景。
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    query = query.filter(Stock.warehouse_id == wid)
 
     if location_id is not None:
         query = query.filter(Stock.location_id == location_id)
@@ -471,17 +473,6 @@ async def get_stock(
                 Location.name.ilike(like),
             )
         )
-
-    if current_user.role != UserRole.ADMIN:
-        # 获取用户有权限的仓库
-        user_warehouse_ids = [
-            uw.warehouse_id for uw in
-            db.query(UserWarehouse).filter(UserWarehouse.user_id == current_user.id).all()
-        ]
-        if user_warehouse_ids:
-            query = query.filter(Stock.warehouse_id.in_(user_warehouse_ids))
-        else:
-            return []
 
     query = query.group_by(
         Stock.warehouse_id,
@@ -546,15 +537,9 @@ async def get_inventory_logs(
         User, InventoryRecord.operator_id == User.id
     )
 
-    if current_user.role != UserRole.ADMIN:
-        # 操作员仅可查看当前仓库日志
-        if not current_user.current_warehouse_id:
-            return []
-        query = query.filter(InventoryRecord.warehouse_id == current_user.current_warehouse_id)
-
-    # 管理员可按仓库筛选全部日志；操作员传入warehouse_id也仅允许当前仓库
-    if warehouse_id:
-        query = query.filter(InventoryRecord.warehouse_id == warehouse_id)
+    # 复核问题（2026-11）：出入库记录同样只显示当前仓库（显式参数可用）
+    wid = scoped_warehouse_id(db, current_user, warehouse_id)
+    query = query.filter(InventoryRecord.warehouse_id == wid)
 
     if start_date:
         start_datetime = datetime.strptime(start_date, "%Y-%m-%d")

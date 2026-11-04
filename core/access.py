@@ -100,6 +100,19 @@ def repair_current_warehouse(db: Session, user: User) -> Optional[int]:
     return resolved
 
 
+def scoped_warehouse_id(db: Session, user: User, warehouse_id: Optional[int] = None) -> int:
+    """列表/统计类查询的仓库作用域：显式 warehouse_id 优先（须有权限且启用），
+    否则使用当前选中仓库。
+
+    复核问题（2026-11）：多仓授权用户在页面切换仓库后，库存/库位/出入库单/盘点单/
+    申请单等列表仍按"授权仓库集合"返回，切换后同时显示两个仓库的数据。统一在
+    服务端按"当前仓库"收敛作用域（管理员同样按当前仓库查看；显式传参仍可查询
+    任意已授权/启用的仓库，供单据表单、导出等场景使用）。
+    """
+    target = warehouse_id if warehouse_id is not None else user.current_warehouse_id
+    return require_warehouse(db, user, target)
+
+
 def require_selected_warehouse(db: Session, user: User, warehouse_id: Optional[int]) -> int:
     """写操作（单次扫码出入库、扫码盘点等）必须绑定用户当前选择的仓库。
 
