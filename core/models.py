@@ -83,7 +83,15 @@ class Location(Base):
 # 4. 货物表（每个仓库独立档案）
 class Goods(Base):
     __tablename__ = "goods"
-    __table_args__ = (UniqueConstraint('warehouse_id', 'barcode', name='uq_goods_warehouse_barcode'),)
+    __table_args__ = (
+        UniqueConstraint('warehouse_id', 'barcode', name='uq_goods_warehouse_barcode'),
+        CheckConstraint(
+            "(min_stock_quantity IS NULL OR (min_stock_quantity >= 0 AND "
+            "min_stock_quantity <= 1.7976931348623157e308)) "
+            "AND (NOT stock_alert_enabled OR min_stock_quantity IS NOT NULL)",
+            name="goods_valid_stock_alert",
+        ),
+    )
     id = Column(Integer, primary_key=True, index=True)
     warehouse_id = Column(Integer, ForeignKey("warehouses.id"), nullable=False, index=True, comment="所属仓库ID")
     barcode = Column(String(100), index=True, comment="仓库内唯一货物条码")
@@ -92,6 +100,21 @@ class Goods(Base):
     unit = Column(String(20), comment="单位")
     price = Column(Float, comment="单价")
     create_time = Column(DateTime, default=datetime.now)
+    stock_alert_enabled = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    min_stock_quantity = Column(Float)
+
+
+class GoodsStockAlertAudit(Base):
+    __tablename__ = "goods_stock_alert_audits"
+    id = Column(Integer, primary_key=True)
+    # Preserve history after goods, warehouses or user accounts are deleted.
+    goods_id = Column(Integer, nullable=False)
+    warehouse_id = Column(Integer, nullable=False)
+    operator_id = Column(Integer, nullable=False)
+    before_json = Column(Text)
+    after_json = Column(Text, nullable=False)
+    create_time = Column(DateTime, nullable=False, default=datetime.now)
+
 
 # 5. 库存表（关联仓库+库位+货物）
 class Stock(Base):

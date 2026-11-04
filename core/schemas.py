@@ -95,6 +95,8 @@ class LocationUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 class GoodsCreate(BaseModel):
+    stock_alert_enabled: bool = False
+    min_stock_quantity: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
     warehouse_id: Optional[int] = None  # 旧客户端省略时使用服务端当前仓库
     barcode: str
     name: str
@@ -103,6 +105,8 @@ class GoodsCreate(BaseModel):
     price: Optional[float] = Field(default=0.0, ge=0)
 
 class GoodsResponse(BaseModel):
+    stock_alert_enabled: bool = False
+    min_stock_quantity: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
     id: int
     warehouse_id: int
     barcode: str
@@ -116,6 +120,8 @@ class GoodsResponse(BaseModel):
         from_attributes = True
 
 class GoodsUpdate(BaseModel):
+    stock_alert_enabled: bool = False
+    min_stock_quantity: Optional[float] = Field(default=None, ge=0, allow_inf_nan=False)
     barcode: Optional[str] = None
     name: Optional[str] = None
     spec: Optional[str] = None
@@ -149,6 +155,7 @@ class CheckCreate(BaseModel):
     check_quantity: float = Field(ge=0)
 
 class StockResponse(BaseModel):
+    alert_status: Literal["unmonitored", "normal", "low", "out_of_stock"] = "unmonitored"
     id: int
     warehouse_id: int
     warehouse_name: str

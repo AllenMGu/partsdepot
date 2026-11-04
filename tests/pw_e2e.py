@@ -320,6 +320,10 @@ with sync_playwright() as p:
     page.click("#loginForm button[type=submit], #loginForm [type=submit]")
     page.wait_for_url("**/dashboard*.html", timeout=15000)
     check("登录：跳转仪表盘", "dashboard" in page.url)
+    dashboard = page.frame_locator("#spaViewFrame")
+    counts = dashboard.locator("#alertCounts", has_text="启用预警 2")
+    counts.wait_for()
+    check("仪表盘显示本仓启用、低库存和零库存统计", "低库存 1 · 零库存 1" in counts.inner_text())
 
     # ================= 2b. 评审 P2：管理员升降级后的前端仓库状态（真实 UI 登录） =================
     # 桌面 Web 与 H5 的仓库列表/当前仓库均来自登录响应的 user 快照：
@@ -402,6 +406,12 @@ with sync_playwright() as p:
     page.goto(BASE + "/stock.html")
     page.wait_for_selector("#stockTableBody tr")
     wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888001'))")
+    wait_js(page, "() => document.querySelector('#stockAlertRows').textContent.includes('8888002')")
+    check("预警清单包含无库存行的货物", "零库存 1" in page.locator("#stockAlertCounts").text_content())
+    page.select_option("#filterAlertStatus", "low")
+    check("库存预警筛选只保留低库存", "8888001" in page.locator("#stockTableBody").inner_text()
+          and "8888003" not in page.locator("#stockTableBody").inner_text())
+    page.select_option("#filterAlertStatus", "")
     _rows_before = page.evaluate("() => Array.from(document.querySelectorAll('#stockTableBody tr')).map(tr => tr.innerText)")
     _data_before = [t for t in _rows_before if "8888" in t]
     check("切仓刷新：库存页初始只显示一号仓数据（含 8888001，不含 8888002）",
@@ -409,10 +419,14 @@ with sync_playwright() as p:
           and not any("8888002" in t for t in _data_before)
           and all("一号仓" in t for t in _data_before),
           str(_rows_before))
+    page.select_option("#filterAlertStatus", "low")
     page.click("#warehouseSelector")
     page.wait_for_selector("#warehouseList div", timeout=5000)
     page.locator("#warehouseList div", has_text="二号仓").first.click()
     wait_js(page, "() => Array.from(document.querySelectorAll('#stockTableBody tr')).some(tr => tr.innerText.includes('8888002'))")
+    wait_js(page, "() => document.querySelector('#stockAlertCounts').textContent.includes('启用预警 0')")
+    check("切仓清空预警筛选和清单", page.locator("#filterAlertStatus").input_value() == ""
+          and page.locator("#stockAlertRows").text_content().strip() == "")
     _rows_after = page.evaluate("() => Array.from(document.querySelectorAll('#stockTableBody tr')).map(tr => tr.innerText)")
     _data_after = [t for t in _rows_after if "8888" in t]
     check("切仓刷新：切换后库存页自动刷新为二号仓数据（含 8888002，不含 8888001）",

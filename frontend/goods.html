@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-Bosmp1z9FadrbVd7fntu/btsoDdo1FpH4DPLCUDwRSw='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-G+o6+FCLxp7qqCjajDlbtoYFkgdrRuEpIH2SG+Ewbd0='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>货物管理 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -273,6 +273,11 @@
                             <input type="number" id="goodsPrice" class="w-full pl-8 pr-4 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-all-300" placeholder="请输入单价" step="0.01" min="0">
                         </div>
                     </div>
+                    <div class="mb-4">
+                        <label class="block text-sm mb-2"><input type="checkbox" id="goodsAlertEnabled"> 启用最低库存预警</label>
+                        <label for="goodsMinStock" class="block text-sm mb-1">最低库存（0 表示仅缺货时预警）</label>
+                        <input type="number" min="0" step="any" id="goodsMinStock" class="w-full px-3 py-2 border rounded-md">
+                    </div>
                 </form>
             </div>
             <div class="px-6 py-4 border-t border-gray-200 flex justify-end space-x-3">
@@ -293,7 +298,8 @@
                 <h3 class="text-lg font-semibold text-gray-800">导入货物</h3>
             </div>
             <div class="px-6 py-4">
-                <p class="text-gray-700 mb-4">请选择要导入的 Excel 文件（支持 .xlsx 格式）</p>
+                <p class="text-gray-700 mb-4">请选择要导入的 Excel 文件（支持 .xlsx 格式）。可选列：是否预警、最低库存。</p>
+                <button id="downloadGoodsTemplate" type="button" class="text-primary mb-4">下载货物模板</button>
                 <div class="mb-4">
                     <input type="file" id="importFile" accept=".xlsx, .xls" class="w-full">
                 </div>
@@ -412,6 +418,8 @@
         const goodsName = document.getElementById('goodsName');
         const goodsSpec = document.getElementById('goodsSpec');
         const goodsUnit = document.getElementById('goodsUnit');
+        const goodsAlertEnabled = document.getElementById('goodsAlertEnabled');
+        const goodsMinStock = document.getElementById('goodsMinStock');
         const goodsPrice = document.getElementById('goodsPrice');
         const cancelBtn = document.getElementById('cancelBtn');
         const saveBtn = document.getElementById('saveBtn');
@@ -917,6 +925,8 @@
                 goodsSpec.value = goods.spec || '';
                 goodsUnit.value = goods.unit;
                 goodsPrice.value = goods.price == null ? '' : Number(goods.price).toFixed(2);
+                goodsAlertEnabled.checked = goods.stock_alert_enabled;
+                goodsMinStock.value = goods.min_stock_quantity ?? '';
                 currentEditId = id;
                 
                 // 显示模态框
@@ -959,13 +969,22 @@
                 return;
             }
             
+            const minimum = goodsMinStock.value === '' ? null : goodsMinStock.valueAsNumber;
+            if (goodsMinStock.validity.badInput || (minimum === null && goodsAlertEnabled.checked)
+                || (minimum !== null && (!Number.isFinite(minimum) || minimum < 0))) {
+                showToast('请输入有效的最低库存', 'error');
+                goodsMinStock.focus();
+                return;
+            }
             try {
                 const goodsData = {
                     barcode: goodsBarcode.value.trim(),
                     name: goodsName.value.trim(),
                     spec: goodsSpec.value.trim(),
                     unit: goodsUnit.value.trim(),
-                    price: price
+                    price: price,
+                    stock_alert_enabled: goodsAlertEnabled.checked,
+                    min_stock_quantity: minimum
                 };
                 
                 let response;
@@ -1211,9 +1230,9 @@
         }
         
         // 导出货物数据
-        async function exportGoods() {
+        async function exportGoods(template = false) {
             try {
-                const response = await fetch(`${API_BASE_URL}/goods/export?warehouse_id=${encodeURIComponent(currentWarehouseId)}`, {
+                const response = await fetch(`${API_BASE_URL}/goods/export?warehouse_id=${encodeURIComponent(currentWarehouseId)}&template=${template === true}`, {
                     headers: {
                         ...getAuthHeaders()
                     }
@@ -1228,7 +1247,7 @@
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'goods_export.xlsx';
+                a.download = template === true ? 'goods_template.xlsx' : 'goods_export.xlsx';
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
@@ -1292,6 +1311,7 @@
 
         // 设置事件监听器
         function setupEventListeners() {
+            document.getElementById("downloadGoodsTemplate").addEventListener("click", () => exportGoods(true));
             // 导出按钮
             exportGoodsBtn.addEventListener('click', exportGoods);
 

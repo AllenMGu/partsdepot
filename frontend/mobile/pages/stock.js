@@ -7,6 +7,8 @@ window.M_PAGES["stock"] = function () {
   if (!M.AUTH.require()) return;
 
   var rawList = [];
+  var loadSeq = 0;
+  var alertLabels = { normal: "正常", low: "低库存", out_of_stock: "缺货", unmonitored: "不监控" };
   var elKw = document.getElementById("mStockKw");
   var elList = document.getElementById("mStockList");
   var elCount = document.getElementById("mStockCount");
@@ -16,16 +18,19 @@ window.M_PAGES["stock"] = function () {
   loadStock();
 
   function loadStock() {
+    var seq = ++loadSeq;
     elList.innerHTML = '<div class="m-empty">加载中…</div>';
     // 只按当前仓库查询；关键字筛选基于完整快照，便于清空后恢复列表。
     var w = M.AUTH.currentWarehouse();
     var params = [];
     if (w && w.id) params.push("warehouse_id=" + encodeURIComponent(w.id));
     M.api("GET", "/stock/" + (params.length ? "?" + params.join("&") : "")).then(function (rows) {
+      if (seq !== loadSeq) return;
       rawList = rows || [];
       elCount.textContent = "共 " + rawList.length + " 条";
       applyFilter();
     }).catch(function (err) {
+      if (seq !== loadSeq) return;
       elList.innerHTML = '<div class="m-empty">' + M.esc(err.message || "加载失败") + "</div>";
     });
   }
@@ -61,7 +66,7 @@ window.M_PAGES["stock"] = function () {
         (it.warehouse_name ? " · " + M.esc(it.warehouse_name) : "") + "</div></div>" +
         '<div class="m-qty-big m-mono m-mono">' + M.fmtNum(it.quantity) + "</div>" +
         "</div>" +
-        '<div class="m-item-sub m-mt8">更新 ' + M.fmtDT(it.update_time) + "</div>" +
+        '<div class="m-item-sub m-mt8">' + (alertLabels[it.alert_status] || alertLabels.unmonitored) + ' · 更新 ' + M.fmtDT(it.update_time) + "</div>" +
         "</div>";
     }).join("");
   }

@@ -52,6 +52,21 @@ def main():
             cur.execute("SELECT goods_id FROM stock WHERE warehouse_id=1")
             assert cur.fetchone()[0] == 10
             print("PASS | PostgreSQL 旧库迁移：无库存的 B 仓待处理申请仍获得独立货物档案")
+            alerts_sql = (Path(__file__).resolve().parents[1] / "migrations/20261104_stock_alerts.sql").read_text()
+            cur.execute(alerts_sql)
+            cur.execute("SELECT stock_alert_enabled, min_stock_quantity FROM goods ORDER BY id")
+            assert cur.fetchall() == [(False, None), (False, None)]
+            cur.execute("UPDATE goods SET stock_alert_enabled = true, min_stock_quantity = 0 WHERE id = 10")
+            cur.execute(alerts_sql)
+            cur.execute("SELECT stock_alert_enabled, min_stock_quantity FROM goods WHERE id = 10")
+            assert cur.fetchone() == (True, 0)
+            for invalid in ("NULL", "-1", "'NaN'", "'Infinity'"):
+                try:
+                    cur.execute(f"UPDATE goods SET min_stock_quantity = {invalid} WHERE id = 10")
+                except psycopg2.errors.CheckViolation:
+                    continue
+                raise AssertionError(f"非法最低库存未被拒绝：{invalid}")
+            print("PASS | PostgreSQL 预警迁移：旧档案默认关闭，可重复执行并保留配置")
     finally:
         with conn.cursor() as cur:
             cur.execute("SET search_path TO public")

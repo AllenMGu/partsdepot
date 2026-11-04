@@ -490,6 +490,8 @@ with sync_playwright() as p:
                     and "stock.html" in page2.evaluate("() => location.href"))
     check("仅 sessionStorage 有凭据时 H5 认可登录（不跳登录页）", ok,
           page2.evaluate("() => location.href"))
+    check("H5 库存行显示预警状态", wait_until(lambda: any(
+        state in page2.locator("#mStockList").inner_text() for state in ("低库存", "不监控"))))
     # H3. local 残留过期凭据 + session 有效 → 必须按"完整 pair"选 session
     #（旧实现 user 与 expiry 各自独立 local 优先，此处会 user(expired local)+expiry 配对错误 → 误判未登录）
     page2.evaluate("""() => {

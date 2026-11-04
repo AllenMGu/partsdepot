@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-juH3thTQAVhHJhjkj91IxC/NxvV1HmLieNDafuZFuj4='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-owwvmjo9IHICvrv1Yasdksezv242bFfbtd/9mYf7Ztk='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>库存查询 - 办公用品申请系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -196,6 +196,17 @@
                 </div>
             </div>
             
+            <details id="stock-alert-list" class="bg-white rounded-lg shadow p-6 mb-6">
+                <summary class="cursor-pointer font-semibold">当前仓库预警清单</summary>
+                <p class="text-sm text-gray-600 my-2" id="stockAlertCounts" aria-live="polite">—</p>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full text-sm text-left">
+                        <thead><tr><th>货物</th><th>规格</th><th>仓库总量</th><th>最低库存</th><th>缺口</th><th>状态</th></tr></thead>
+                        <tbody id="stockAlertRows"></tbody>
+                    </table>
+                </div>
+            </details>
+
             <!-- 库存查询 -->
             <div class="bg-white rounded-lg shadow overflow-hidden mb-6">
                 <div class="p-6">
@@ -213,6 +224,13 @@
                             <select id="filterWarehouse" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
                                 <option value="">所有仓库</option>
                                 <!-- 仓库选项将通过JS动态生成 -->
+                            </select>
+                            <select id="filterAlertStatus" aria-label="预警状态" class="px-3 py-2 border rounded-md">
+                                <option value="">所有预警状态</option>
+                                <option value="normal">正常</option>
+                                <option value="low">低库存</option>
+                                <option value="out_of_stock">缺货</option>
+                                <option value="unmonitored">不监控</option>
                             </select>
                             <select id="filterLocation" class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent">
                                 <option value="">所有库位</option>
@@ -351,7 +369,12 @@
         let locationLoadSeq = 0;
         
         // 页面初始化
+        const alertLabels = { normal: '正常', low: '低库存', out_of_stock: '缺货', unmonitored: '不监控' };
+
         function pageInit() {
+            if (window.location.hash === '#stock-alert-list') {
+                document.getElementById('stock-alert-list').open = true;
+            }
             loadWarehouses();
             loadLocations();
             loadStock();
@@ -365,7 +388,16 @@
                     const filterLocation = document.getElementById('filterLocation');
                     if (filterWarehouse) filterWarehouse.value = '';
                     if (filterLocation) filterLocation.value = '';
+                    ++stockLoadSeq;
+                    document.getElementById('filterAlertStatus').value = '';
+                    stocks = [];
+                    filteredStocks = [];
                     currentPage = 1;
+                    updateStockTable();
+                    renderStockAlerts();
+                    updateStatistics();
+                    updatePagination();
+                    updateFilteredTotalAmount();
                     await loadWarehouses();
                     if (filterWarehouse) filterWarehouse.value = '';
                     await loadLocations();
@@ -496,16 +528,20 @@
         async function loadStock() {
             const seq = ++stockLoadSeq;
             try {
-                const response = await fetch(`${API_BASE_URL}/stock/`, {
-                    headers: getHeaders()
-                });
-                
-                if (!response.ok) {
-                    throw new Error('获取库存数据失败');
-                }
-                
+                const warehouseId = currentUser && currentUser.current_warehouse_id;
+                const params = warehouseId ? '?warehouse_id=' + encodeURIComponent(warehouseId) : '';
+                const options = { headers: getHeaders() };
+                fetch(`${API_BASE_URL}/stock/alerts${params}`, options)
+                    .then(response => {
+                        if (!response.ok) throw new Error('预警加载失败');
+                        return response.json();
+                    })
+                    .then(data => { if (seq === stockLoadSeq) renderStockAlerts(data); })
+                    .catch(() => { if (seq === stockLoadSeq) renderStockAlerts(null, '预警加载失败'); });
+                const response = await fetch(`${API_BASE_URL}/stock/${params}`, options);
+                if (!response.ok) throw new Error('获取库存数据失败');
                 const rows = await response.json();
-                if (seq !== stockLoadSeq) return;  // 过期响应（已切仓）丢弃
+                if (seq !== stockLoadSeq) return;
                 stocks = rows;
                 filteredStocks = [...stocks];
                 
@@ -524,6 +560,7 @@
                 // 更新图表
                 updateCharts();
             } catch (error) {
+                if (seq !== stockLoadSeq) return;
                 console.error('加载库存数据失败:', error);
                 showToast('加载库存数据失败', 'error');
                 document.getElementById('stockTableBody').innerHTML = `
@@ -536,12 +573,30 @@
             }
         }
         
+        function renderStockAlerts(data, emptyText = '—') {
+            const counts = data?.counts;
+            document.getElementById('stockAlerts').textContent = counts ? counts.low + counts.out_of_stock : '—';
+            document.getElementById('stockAlertCounts').textContent = counts
+                ? `启用预警 ${counts.enabled} · 低库存 ${counts.low} · 零库存 ${counts.out_of_stock}`
+                : emptyText;
+            document.getElementById('stockAlertRows').innerHTML = (data?.alerts || []).map(item => `
+                <tr class="border-t">
+                    <td class="py-2">${escapeHTML(item.name)} · ${escapeHTML(item.barcode)}</td>
+                    <td>${escapeHTML(item.spec || '')}</td>
+                    <td>${item.quantity} ${escapeHTML(item.unit || '')}</td>
+                    <td>${item.min_stock_quantity}</td>
+                    <td>${item.shortage}</td>
+                    <td>${alertLabels[item.status]}</td>
+                </tr>`).join('');
+        }
+
         // 应用筛选
         function applyFilters() {
             const searchTerm = document.getElementById('searchStock').value.toLowerCase();
             const warehouseId = document.getElementById('filterWarehouse').value;
             const locationId = document.getElementById('filterLocation').value;
             
+            const alertFilter = document.getElementById('filterAlertStatus').value;
             filteredStocks = stocks.filter(stock => {
                 const matchesSearch = 
                     stock.goods_name.toLowerCase().includes(searchTerm) ||
@@ -552,7 +607,8 @@
                 
                 const matchesLocation = !locationId || Number(stock.location_id) === Number(locationId);
                 
-                return matchesSearch && matchesWarehouse && matchesLocation;
+                return matchesSearch && matchesWarehouse && matchesLocation
+                    && (!alertFilter || stock.alert_status === alertFilter);
             });
             
             currentPage = 1;
@@ -611,6 +667,7 @@
                         </td>
                         <td class="px-6 py-4">
                             <div class="text-sm font-medium text-gray-900">${stock.quantity}</div>
+                            <div class="text-xs text-gray-600">${alertLabels[stock.alert_status] || alertLabels.unmonitored}</div>
                         </td>
                         <td class="px-6 py-4">
                             <div class="text-sm text-gray-900">${stock.goods_price == null ? '—' : '¥' + unitPrice.toFixed(2)}</div>
@@ -667,8 +724,7 @@
             document.getElementById('totalValue').textContent = `¥${totalValue.toFixed(2)}`;
             
             // 计算库存预警（这里简化为库存小于10的记录数）
-            const stockAlerts = filteredStocks.filter(stock => stock.quantity < 10).length;
-            document.getElementById('stockAlerts').textContent = stockAlerts;
+
         }
         
         // 更新图表
@@ -1008,6 +1064,12 @@
         
         // 设置事件监听器
         function setupStockEventListeners() {
+            document.getElementById('filterAlertStatus').addEventListener('change', () => {
+                applyFilters();
+                updateStockTable();
+                updatePagination();
+                updateStatistics();
+            });
             // 动态按钮事件委托（CSP 禁止内联事件处理，改用 data-act 委托）
             document.getElementById('stockTableBody').addEventListener('click', function(e) {
                 const btn = e.target.closest('button[data-act]');
