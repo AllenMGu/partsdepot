@@ -35,6 +35,8 @@ def _warehouse_name(db, warehouse_id: Optional[int]) -> str:
 
 
 def _reference(req: Request) -> str:
+    if getattr(req, "reference", None):
+        return req.reference
     ts = req.create_time
     date_part = ts.strftime("%Y%m%d") if ts else "00000000"
     return f"APP-{date_part}-{req.id:04d}"

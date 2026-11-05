@@ -225,6 +225,47 @@ class RequestNotifyTest(unittest.TestCase):
         self.assertEqual(sent[0]["to"], ["notify-applicant@corp.example.com"])
         self.assertIn("已通过", sent[0]["subject"])
 
+    def test_request_reference_daily_sequence(self):
+        # 评审/反馈：申请编号应为 APP-日期-当日流水（每天从 0001 开始），
+        # 且列表返回的 reference 与创建时一致。
+        import re
+        from datetime import datetime
+
+        from api.requests import next_request_reference
+
+        r1 = self._submit({
+            "applicant_name": "编号测试一", "department": "质量管理", "description": "编号测试一",
+            "warehouse_id": self.wh,
+        })
+        r2 = self._submit({
+            "applicant_name": "编号测试二", "department": "质量管理", "description": "编号测试二",
+            "warehouse_id": self.wh,
+        })
+        self.assertEqual(r1.status_code, 201, r1.text)
+        self.assertEqual(r2.status_code, 201, r2.text)
+        ref1, ref2 = r1.json()["reference"], r2.json()["reference"]
+        today = datetime.now().strftime("%Y%m%d")
+        self.assertRegex(ref1, r"^APP-\d{8}-\d{4}$")
+        self.assertEqual(ref1.rsplit("-", 1)[0], "APP-" + today)
+        self.assertEqual(int(ref2.rsplit("-", 1)[1]), int(ref1.rsplit("-", 1)[1]) + 1)
+        # 列表接口返回同一编号
+        rows = self.client.get("/api/requests/", headers={"Authorization": "Bearer " + self.admin_auth}).json()
+        by_id = {row["id"]: row for row in rows}
+        self.assertEqual(by_id[r1.json()["id"]]["reference"], ref1)
+        # 跨天：不同日期前缀，序号各自从 1 起（直接调用生成器，不落库）
+        db = SessionLocal()
+        try:
+            a = next_request_reference(db, datetime(2030, 1, 2, 9, 0))
+            b = next_request_reference(db, datetime(2030, 1, 2, 10, 0))
+            c = next_request_reference(db, datetime(2030, 1, 3, 9, 0))
+        finally:
+            db.rollback()
+            db.close()
+        self.assertTrue(a.startswith("APP-20300102-"))
+        self.assertEqual(int(b.rsplit("-", 1)[1]), int(a.rsplit("-", 1)[1]) + 1)
+        self.assertTrue(c.startswith("APP-20300103-"))
+        self.assertEqual(c, "APP-20300103-0001")
+
     def test_mail_failure_does_not_break_request_submission(self):
         def boom(recipients, subject, body):
             raise RuntimeError("smtp down")
