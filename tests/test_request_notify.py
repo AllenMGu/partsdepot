@@ -40,6 +40,8 @@ class RequestNotifyTest(unittest.TestCase):
             db.add_all([
                 warehouse_admin,
                 User(username="notify-global-admin", role=UserRole.ADMIN, is_ldap_user=True),
+                # 申请人姓名匹配用例：姓名与申请单 applicant_name 完全一致
+                User(username="notify-applicant", full_name="顾明", role=UserRole.VIEWER, is_ldap_user=True),
             ])
             db.flush()
             db.add(UserWarehouse(user_id=warehouse_admin.id, warehouse_id=cls.wh))
@@ -196,6 +198,31 @@ class RequestNotifyTest(unittest.TestCase):
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(len(sent), 1, sent)
         self.assertEqual(sent[0]["to"], ["lisi@corp.example.com"])
+        self.assertIn("已通过", sent[0]["subject"])
+
+    def test_approved_request_matches_applicant_name_to_ad_email(self):
+        # 申请表不收集邮箱时：申请人姓名与系统 AD 用户 full_name 精确匹配且唯一，
+        # 审批状态通知应发到该用户的 AD 邮箱（顾明 → notify-applicant）。
+        sent = []
+
+        def fake_send(recipients, subject, body):
+            sent.append({"to": list(recipients), "subject": subject})
+            return True, ""
+
+        resp = self._submit({
+            "applicant_name": "顾明", "department": "质量管理", "description": "姓名匹配申请人邮箱",
+            "warehouse_id": self.wh,
+        })
+        self.assertEqual(resp.status_code, 201, resp.text)
+        req_id = resp.json()["id"]
+        sent.clear()  # 忽略新申请通知
+        with patch("core.notify.ldap_lookup_email", side_effect=lambda u: f"{u}@corp.example.com"), \
+             patch("core.notify.mail.send_mail", side_effect=fake_send):
+            r = self.client.post(f"/api/requests/{req_id}/status", json={"status": "approved"},
+                                 headers={"Authorization": "Bearer " + self.admin_auth})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertEqual(len(sent), 1, sent)
+        self.assertEqual(sent[0]["to"], ["notify-applicant@corp.example.com"])
         self.assertIn("已通过", sent[0]["subject"])
 
     def test_mail_failure_does_not_break_request_submission(self):
