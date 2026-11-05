@@ -391,6 +391,7 @@ class RequestItemResponse(BaseModel):
 
 class RequestResponse(BaseModel):
     id: int
+    reference: Optional[str] = None
     applicant_name: str
     department: Optional[str] = None
     contact: str
@@ -412,6 +413,7 @@ class RequestResponse(BaseModel):
 
 class RequestArchiveResponse(BaseModel):
     id: int
+    reference: Optional[str] = None
     original_id: int
     applicant_name: str
     department: Optional[str] = None

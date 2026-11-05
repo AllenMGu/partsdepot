@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-0VVzYZbOvWoQfMFUxMbRetLBRu5Pu/IiYHOU0cjQQQ4='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'sha256-j7t3fYA7ySyv9/iW5e8kjmDkJOWrKGUufm4akHErVAc='; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>申请管理 - 备品备件管理系统</title>
     <link href="assets/css/tailwind.css" rel="stylesheet">
     <link href="assets/css/font-awesome.min.css" rel="stylesheet">
@@ -564,14 +564,16 @@
                 } catch (error) { notify(error.message, 'error'); }
             }
 
-            function buildRef(createTime, id) {
+            function buildRef(createTime, id, reference) {
+                // 编号以服务端返回的 reference 为准（APP-日期-当日流水）；旧数据缺字段时回退
+                if (reference) return reference;
                 return 'APP-' + fmtTime(createTime).slice(0, 10).replace(/-/g, '') + '-' + String(id).padStart(4, '0');
             }
 
             function openDetail(kind, row) {
                 if (!row) return;
                 const isRecent = kind === 'recent';
-                const ref = buildRef(row.create_time, isRecent ? row.id : row.original_id);
+                const ref = buildRef(row.create_time, isRecent ? row.id : row.original_id, row.reference);
                 const items = Array.isArray(row.items) ? row.items : [];
                 detailCtx = {
                     kind: kind, id: isRecent ? row.id : row.original_id, ref: ref,
@@ -794,7 +796,7 @@
                     return;
                 }
                 rows.forEach(function (r) {
-                    const ref = 'APP-' + fmtTime(r.create_time).slice(0, 10).replace(/-/g, '') + '-' + String(r.id).padStart(4, '0');
+                    const ref = buildRef(r.create_time, r.id, r.reference);
                     let actions;
                     if (r.status === 'pending') {
                         actions = '<button data-act="approved" data-id="' + r.id + '" class="text-sm text-green-600 hover:text-green-800">通过</button>'
@@ -899,7 +901,7 @@
                     tbody.innerHTML = '<tr><td colspan="12" class="px-6 py-10 text-center text-gray-400 text-sm">该页暂无归档记录</td></tr>';
                 }
                 rows.forEach(function (a) {
-                    const ref = 'APP-' + fmtTime(a.create_time).slice(0, 10).replace(/-/g, '') + '-' + String(a.original_id).padStart(4, '0');
+                    const ref = buildRef(a.create_time, a.original_id, a.reference);
                     const tr = document.createElement('tr');
                     tr.className = 'hover:bg-gray-50 cursor-pointer';
                     tr.title = '点击查看归档申请单详情（物品明细表）';

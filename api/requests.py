@@ -60,6 +60,44 @@ RATE_MAX_GLOBAL = 60            # 全局窗口内最多 60 次（防伪造 XFF �
 _rate_lock = threading.Lock()
 _rate_hits: dict = {}           # key(ip或__global__) -> [monotonic 时间戳]
 
+def next_request_reference(db: Session, when: Optional[datetime] = None) -> str:
+    """生成申请编号 APP-YYYYMMDD-NNNN：序号按天从 0001 重新计数。
+
+    当日流水持久化在 config 表（request_ref_seq_YYYYMMDD），删除/归档申请不会回退；
+    首次使用某天时以 requests / requests_archive 当天最大序号兜底，避免编号重复。
+    """
+    when = when or datetime.now()
+    date_part = when.strftime("%Y%m%d")
+    key = f"request_ref_seq_{date_part}"
+    prefix = f"APP-{date_part}-"
+    row = db.query(Config).filter(Config.key == key).with_for_update().first()
+    if row is None:
+        # 当天首单并发：先占位；唯一键冲突则回滚保存点后重取该行
+        savepoint = db.begin_nested()
+        try:
+            db.add(Config(key=key, value="0", description=f"申请编号当日流水（{date_part}）"))
+            db.flush()
+            savepoint.commit()
+        except IntegrityError:
+            savepoint.rollback()
+        row = db.query(Config).filter(Config.key == key).with_for_update().first()
+    current = int(row.value) if row is not None and str(row.value or "").isdigit() else 0
+    for model in (Request, RequestArchive):
+        ref = db.query(func.max(model.reference)).filter(model.reference.like(prefix + "%")).scalar()
+        if ref:
+            try:
+                current = max(current, int(str(ref).rsplit("-", 1)[1]))
+            except (ValueError, IndexError):
+                pass
+    seq = current + 1
+    if row is not None:
+        row.value = str(seq)
+        row.update_time = datetime.now()
+    else:
+        db.add(Config(key=key, value=str(seq), description=f"申请编号当日流水（{date_part}）"))
+    return f"{prefix}{seq:04d}"
+
+
 def _client_ip(request: FastAPIRequest) -> str:
     """来源 IP：优先 nginx 设置的 X-Real-IP（= $remote_addr，客户端无法伪造），
     其次 X-Forwarded-For 最后一个值（nginx $proxy_add_x_forwarded_for 追加的真实 IP），
@@ -289,7 +327,10 @@ def submit_request(
             row = locked[(it.barcode or "").strip()]
             resolved_items.append(((it.barcode or "").strip(), row.name, row.spec, row.unit, it.quantity))
 
+    now = datetime.now()
+    reference = next_request_reference(db, now)
     new_request = Request(
+        reference=reference,
         applicant_name=payload.applicant_name.strip(),
         department=(payload.department or "").strip() or None,
         contact=payload.contact.strip(),
@@ -298,6 +339,7 @@ def submit_request(
         attachment_note=(payload.attachment_note or "").strip() or None,
         warehouse_id=payload.warehouse_id,
         status=RequestStatus.PENDING.value,
+        create_time=now,
     )
     db.add(new_request)
     db.flush()  # 取得 id 后挂明细
@@ -314,7 +356,6 @@ def submit_request(
     db.commit()
     db.refresh(new_request)
 
-    reference = f"APP-{new_request.create_time:%Y%m%d}-{new_request.id:04d}"
     logging.info("收到公共申请 %s（申请人：%s，货物 %d 行）", reference, new_request.applicant_name, len(resolved_items))
     # 邮件提醒：请求内准备内容，后台只做 LDAP/SMTP（不访问数据库），失败不影响提交
     queue_request_created(db, background_tasks, new_request.id)
@@ -381,6 +422,7 @@ def _archive_once(db: Session, cutoff: datetime, batch: str, now: datetime) -> i
     for r in rows:
         arc = RequestArchive(
             original_id=r.id,
+            reference=r.reference,
             applicant_name=r.applicant_name,
             department=r.department,
             contact=r.contact,
@@ -506,6 +548,7 @@ def _warehouse_name_map(db: Session, warehouse_ids: list) -> dict:
 def _request_payload(r: Request, items: list, warehouse_name: Optional[str] = None) -> dict:
     return {
         "id": r.id,
+        "reference": r.reference or f"APP-{r.create_time:%Y%m%d}-{r.id:04d}",
         "applicant_name": r.applicant_name,
         "department": r.department,
         "contact": r.contact,
@@ -526,6 +569,7 @@ def _request_payload(r: Request, items: list, warehouse_name: Optional[str] = No
 def _request_payload_archive(a: RequestArchive, items: list, warehouse_name: Optional[str] = None) -> dict:
     return {
         "id": a.id,
+        "reference": a.reference or f"APP-{a.create_time:%Y%m%d}-{a.original_id:04d}",
         "original_id": a.original_id,
         "applicant_name": a.applicant_name,
         "department": a.department,
@@ -868,7 +912,7 @@ def _apply_approval(db: Session, req: Request, current_user: User) -> None:
         names[g.id] = g.name or it.name or it.barcode
         gprice[g.id] = g.price
 
-    reference = f"APP-{req.create_time:%Y%m%d}-{req.id:04d}"
+    reference = req.reference or f"APP-{req.create_time:%Y%m%d}-{req.id:04d}"
     # 所有出库路径统一为“库存锁 → 号段锁”：扫码出库先锁库存再生成单号，审批也必须
     # 使用相同顺序，否则两者并发时会形成“审批持号段等库存、扫码持库存等号段”的死锁。
     all_rows = lock_stock_rows_for_goods(db, warehouse_id, required.keys())
