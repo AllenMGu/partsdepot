@@ -58,6 +58,30 @@ def _recipient_groups(db, warehouse_id: Optional[int]) -> List[List[str]]:
     return [supervisors, warehouse_admins, other_admins]
 
 
+def _applicant_usernames(db, req: Request) -> List[str]:
+    """按申请人姓名精确匹配系统内的 AD 用户（姓名唯一时返回登录名）。
+
+    申请表默认不收集邮箱；若申请人姓名与系统用户 full_name 完全一致且唯一，
+    审批状态通知可直接发到该用户的 AD 邮箱。重名/未匹配时返回空，继续按
+    仓库主管回退，避免误发。
+    """
+    name = (req.applicant_name or "").strip()
+    if not name:
+        return []
+    rows = (
+        db.query(User)
+        .filter(User.full_name == name, User.is_active.is_(True), User.is_ldap_user.is_(True))
+        .all()
+    )
+    usernames = [u.username for u in rows]
+    if len(usernames) > 1:
+        logging.info("申请人姓名 %s 匹配到多个 AD 用户 %s，改为通知仓库主管", name, usernames)
+        return []
+    if usernames:
+        logging.info("申请人姓名 %s 匹配到 AD 用户 %s，审批通知发其 AD 邮箱", name, usernames[0])
+    return usernames
+
+
 def _items_text(db, req: Request) -> str:
     rows = (
         db.query(RequestItem)
@@ -134,11 +158,16 @@ def prepare_request_status(db, request_id: int, status: str, handler: str = "") 
     if EMAIL_RE.match(contact):
         payload["addresses"] = [contact]
     else:
-        recipient_groups = _recipient_groups(db, req.warehouse_id)
-        if not any(recipient_groups):
-            logging.info("申请 %s 无申请人邮箱且无主管/管理员 LDAP 账号，跳过邮件", request_id)
-            return None
-        payload["recipient_groups"] = recipient_groups
+        applicants = _applicant_usernames(db, req)
+        if applicants:
+            # 复用 recipient_groups 的投递逻辑：仅此一组，不再回退管理员
+            payload["recipient_groups"] = [applicants]
+        else:
+            recipient_groups = _recipient_groups(db, req.warehouse_id)
+            if not any(recipient_groups):
+                logging.info("申请 %s 无申请人邮箱且无主管/管理员 LDAP 账号，跳过邮件", request_id)
+                return None
+            payload["recipient_groups"] = recipient_groups
     return payload
 
 
