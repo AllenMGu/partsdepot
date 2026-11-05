@@ -82,9 +82,13 @@ echo "==> 运行仓库隔离回归测试（独立进程 + 独立临时 SQLite，
 ISO_RC=0
 "$PY" -m unittest discover -s tests -p test_warehouse_isolation.py -v || ISO_RC=$?
 
-if [ $SUITE_RC -eq 0 ] && [ $UNIT_RC -eq 0 ] && [ $ISO_RC -eq 0 ]; then
+echo "==> 运行申请邮件提醒回归测试（独立进程 + 独立临时 SQLite，不触碰目标测试库）"
+NOTIFY_RC=0
+"$PY" -m unittest tests.test_request_notify -v || NOTIFY_RC=$?
+
+if [ $SUITE_RC -eq 0 ] && [ $UNIT_RC -eq 0 ] && [ $ISO_RC -eq 0 ] && [ $NOTIFY_RC -eq 0 ]; then
   echo "==> 全部回归测试通过"
 else
-  echo "==> 存在失败（HTTP 套件 rc=$SUITE_RC，进程内 rc=$UNIT_RC，隔离回归 rc=$ISO_RC）"
+  echo "==> 存在失败（HTTP 套件 rc=$SUITE_RC，进程内 rc=$UNIT_RC，隔离回归 rc=$ISO_RC，邮件提醒 rc=$NOTIFY_RC）"
 fi
-exit $(( SUITE_RC != 0 || UNIT_RC != 0 || ISO_RC != 0 ))
+exit $(( SUITE_RC != 0 || UNIT_RC != 0 || ISO_RC != 0 || NOTIFY_RC != 0 ))

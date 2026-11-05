@@ -14,7 +14,7 @@
   ],
   "lazyCodeLoading": "requiredComponents",
   "window": {
-    "navigationBarTitleText": "办公用品申请系统",
+    "navigationBarTitleText": "备品备件管理系统",
     "navigationBarBackgroundColor": "#ffffff",
     "navigationBarTextStyle": "black",
     "backgroundTextStyle": "light"

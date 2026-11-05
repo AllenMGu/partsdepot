@@ -30,3 +30,22 @@ if not SECRET_KEY:
     raise RuntimeError("Missing required environment variable: SECRET_KEY")
 if not DATABASE_URL:
     raise RuntimeError("Missing required environment variable: DATABASE_URL")
+
+# ===== 邮件通知（SMTP）=====
+# 配置优先级：环境变量 > 数据库 config 表（见 core.mail.load_smtp_config_from_db）。
+# SMTP_HOST 为空时邮件通知自动跳过（不影响申请/审批主流程）。
+SMTP_HOST = os.getenv("SMTP_HOST", "").strip()
+try:
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "587") or 587)
+except ValueError:
+    SMTP_PORT = 587
+SMTP_SECURITY = os.getenv("SMTP_SECURITY", "starttls").strip().lower()  # starttls / ssl / none
+SMTP_USER = os.getenv("SMTP_USER", "").strip()
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "").strip()
+SMTP_FROM = os.getenv("SMTP_FROM", "").strip()
+try:
+    SMTP_TIMEOUT = int(os.getenv("SMTP_TIMEOUT", "15") or 15)
+except ValueError:
+    SMTP_TIMEOUT = 15
+# 邮件正文中的系统访问地址（如 http://10.80.101.39:8000），留空则不附带链接
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").strip().rstrip("/")

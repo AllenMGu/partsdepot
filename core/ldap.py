@@ -134,6 +134,48 @@ def ldap_authenticate(username: str, password: str):
         logging.error(f"LDAP认证过程异常: {str(e)}")
         return False, None
 
+# ===== 邮件通知：按用户名查询 AD 邮箱 =====
+def ldap_lookup_email(username: str) -> str:
+    """按登录名查询 AD 的 mail 属性（邮件提醒用）。未配置/未找到返回空串，不抛异常。
+
+    复用 LDAP 运行配置（管理员绑定），匹配规则与 ldap_authenticate 保持一致：
+    sAMAccountName / uid / cn / mail / 邮箱前缀 任一与用户名完全相等即命中。
+    """
+    if not (LDAP_SERVER and LDAP_BASE_DN and LDAP_USER_SEARCH_FILTER):
+        return ""
+    if not (LDAP_ADMIN_DN and LDAP_ADMIN_PASSWORD):
+        return ""
+    try:
+        server = ldap3.Server(LDAP_SERVER, get_info=ldap3.NONE)
+        conn = ldap3.Connection(server, user=LDAP_ADMIN_DN, password=LDAP_ADMIN_PASSWORD, auto_bind=True)
+        escaped = escape_filter_chars(username)
+        try:
+            search_filter = LDAP_USER_SEARCH_FILTER.format(escaped)
+        except (IndexError, KeyError, ValueError):
+            search_filter = LDAP_USER_SEARCH_FILTER
+        conn.search(LDAP_BASE_DN, search_filter,
+                    attributes=['cn', 'mail', 'sAMAccountName', 'uid'])
+        normalized = username.strip().lower()
+        for entry in conn.entries:
+            candidates = []
+            for attr in ("sAMAccountName", "uid", "cn"):
+                val = getattr(entry, attr, None)
+                if val is not None and getattr(val, "value", None):
+                    candidates.append(str(val.value))
+            mail_attr = getattr(entry, "mail", None)
+            mail_value = str(mail_attr.value) if mail_attr is not None and getattr(mail_attr, "value", None) else ""
+            if mail_value:
+                candidates.append(mail_value)
+                if "@" in mail_value:
+                    candidates.append(mail_value.split("@", 1)[0])
+            if any(c.strip().lower() == normalized for c in candidates):
+                return mail_value
+        return ""
+    except Exception as e:
+        logging.error("查询 AD 邮箱失败（%s）：%s", username, e)
+        return ""
+
+
 # ===== 原 main.py 块: ldap 三条路由 =====
 # 获取LDAP配置
 @router.get("/ldap/config", summary="获取当前LDAP配置")
