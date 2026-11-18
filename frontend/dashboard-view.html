@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-nwUpBZYFtV7zkYtqRUaSOXIZrZuGhObaYppe/9VZCxs='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-QIA2sR7L38Q9Gw581H/AWqPJZq78xuxEJ1Ta54lc348='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>仪表盘 - 备品备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -645,8 +645,12 @@
                         orderTime >= monthStart && orderTime < monthEnd;
                 });
                 
-                const inboundCount = inboundMonthly.reduce((sum, order) => sum + order.item_count, 0);
-                const outboundCount = outboundMonthly.reduce((sum, order) => sum + order.item_count, 0);
+                // 反馈（2026-11）：本月入库/出库量应为“实际数量合计”，不是明细行数
+                const orderQty = (order) => Number(
+                    (order.total_quantity !== undefined && order.total_quantity !== null)
+                        ? order.total_quantity : (order.item_count || 0)) || 0;
+                const inboundCount = inboundMonthly.reduce((sum, order) => sum + orderQty(order), 0);
+                const outboundCount = outboundMonthly.reduce((sum, order) => sum + orderQty(order), 0);
                 
                 document.getElementById('monthlyInbound').textContent = inboundCount.toLocaleString();
                 document.getElementById('monthlyOutbound').textContent = outboundCount.toLocaleString();
@@ -729,13 +733,17 @@
                 const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
                 const monthEnd = new Date(monthDate.getFullYear(), monthDate.getMonth() + 1, 1);
 
+                const orderQty = (order) => Number(
+                    (order.total_quantity !== undefined && order.total_quantity !== null)
+                        ? order.total_quantity : (order.item_count || 0)) || 0;
+
                 const inboundSum = inboundOrders
                     .filter(order => order.warehouse_id === currentWarehouseId)
                     .filter(order => {
                         const orderTime = new Date(order.create_time);
                         return orderTime >= monthStart && orderTime < monthEnd;
                     })
-                    .reduce((sum, order) => sum + order.item_count, 0);
+                    .reduce((sum, order) => sum + orderQty(order), 0);
 
                 const outboundSum = outboundOrders
                     .filter(order => order.warehouse_id === currentWarehouseId)
@@ -743,7 +751,7 @@
                         const orderTime = new Date(order.create_time);
                         return orderTime >= monthStart && orderTime < monthEnd;
                     })
-                    .reduce((sum, order) => sum + order.item_count, 0);
+                    .reduce((sum, order) => sum + orderQty(order), 0);
 
                 inboundData.push(inboundSum);
                 outboundData.push(outboundSum);

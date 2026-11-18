@@ -451,6 +451,30 @@ class WarehouseIsolationTest(unittest.TestCase):
         self._call("POST", f"/check-orders/{order['id']}/complete", auth=auth)
         self._call("DELETE", f"/users/{op_id}")
 
+    def test_order_list_returns_total_quantity(self):
+        # 反馈（2026-11）：仪表盘“本月入库/出库量”应为明细数量合计，不是明细行数；
+        # 列表接口返回 total_quantity（item_count 语义不变）。
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+        inbound = self._call("POST", "/inbound-orders/", {"supplier": "数量合计测试"})
+        self._call("POST", f"/inbound-orders/{inbound['id']}/items",
+                   {"goods_barcode": "SAME", "location_code": "S-L1", "quantity": 2})
+        self._call("POST", f"/inbound-orders/{inbound['id']}/items",
+                   {"goods_barcode": "SAME", "location_code": "S-L1", "quantity": 3})
+        self._call("POST", f"/inbound-orders/{inbound['id']}/submit")
+        row = next(r for r in self._call("GET", "/inbound-orders/") if r["id"] == inbound["id"])
+        self.assertEqual(row["item_count"], 2)
+        self.assertEqual(row["total_quantity"], 5.0)
+
+        out = self._call("POST", "/outbound-orders/", {"customer": "数量合计测试"})
+        self._call("POST", f"/outbound-orders/{out['id']}/items",
+                   {"goods_barcode": "SAME", "location_code": "S-L1", "quantity": 1})
+        self._call("POST", f"/outbound-orders/{out['id']}/items",
+                   {"goods_barcode": "SAME", "location_code": "S-L1", "quantity": 2})
+        self._call("POST", f"/outbound-orders/{out['id']}/submit")
+        row = next(r for r in self._call("GET", "/outbound-orders/") if r["id"] == out["id"])
+        self.assertEqual(row["item_count"], 2)
+        self.assertEqual(row["total_quantity"], 3.0)
+
     def test_outbound_item_auto_selects_location_from_stock(self):
         # 反馈（2026-11）：出库单库位不应强制手选——省略 location_code 时按库存自动
         # 选择库位（优先满足数量且库存最多的库位），并沿用"库存不足"校验。
