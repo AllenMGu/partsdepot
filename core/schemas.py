@@ -213,6 +213,7 @@ class InboundOrderHeaderResponse(BaseModel):
     submit_time: Optional[datetime] = None
     complete_time: Optional[datetime] = None
     item_count: int = 0
+    total_quantity: float = 0  # 明细数量合计（仪表盘按实际数量统计）
     
     class Config:
         from_attributes = True
@@ -262,6 +263,7 @@ class OutboundOrderHeaderResponse(BaseModel):
     submit_time: Optional[datetime] = None
     complete_time: Optional[datetime] = None
     item_count: int = 0
+    total_quantity: float = 0  # 明细数量合计（仪表盘按实际数量统计）
     
     class Config:
         from_attributes = True

@@ -304,7 +304,9 @@ async def get_outbound_orders(
                 "create_time": order.create_time,
                 "submit_time": order.submit_time,
                 "complete_time": order.complete_time,
-                "item_count": len(order.items)
+                "item_count": len(order.items),
+                # 明细数量合计（仪表盘“本月出库量”按实际数量统计，而不是明细行数）
+                "total_quantity": float(sum((it.quantity or 0) for it in order.items))
             })
         
         return result

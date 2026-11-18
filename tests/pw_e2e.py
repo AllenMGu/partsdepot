@@ -889,6 +889,24 @@ with sync_playwright() as p:
         page.keyboard.press("Escape")
         page.wait_for_selector("#detailModal", state="hidden")
 
+    # ---------- 仪表盘：本月入库/出库量应为实际数量合计（反馈 2026-11） ----------
+    page.goto(BASE + "/dashboard-view.html")
+    page.wait_for_selector("#monthlyOutbound", timeout=15000)
+    page.wait_for_timeout(1500)
+    _ui_in = page.locator("#monthlyInbound").inner_text().replace(",", "").strip()
+    _ui_out = page.locator("#monthlyOutbound").inner_text().replace(",", "").strip()
+    _month = time.strftime("%Y-%m")
+    _cur = page.evaluate("() => (typeof currentWarehouseId !== 'undefined' ? currentWarehouseId : null)")
+
+    def _sum_qty(rows):
+        return sum(float(o.get("total_quantity") or 0) for o in (rows or [])
+                   if str(o.get("warehouse_id")) == str(_cur) and str(o.get("create_time", ""))[:7] == _month)
+
+    _exp_in = _sum_qty((api_call("GET", "api/inbound-orders/")["data"] or []))
+    _exp_out = _sum_qty((api_call("GET", "api/outbound-orders/")["data"] or []))
+    check("仪表盘：本月入库量 = 明细数量合计", abs(float(_ui_in) - _exp_in) < 1e-6, f"ui={_ui_in} exp={_exp_in}")
+    check("仪表盘：本月出库量 = 明细数量合计", abs(float(_ui_out) - _exp_out) < 1e-6, f"ui={_ui_out} exp={_exp_out}")
+
     # ---------- 出库单：库位按库存自动带出（反馈 2026-11） ----------
     # 草稿出库单打开"添加明细"，输入条码后库位应自动带出（不再要求手选），并显示该库位库存。
     _draft_id = page.evaluate("""async () => {
