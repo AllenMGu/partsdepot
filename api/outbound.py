@@ -100,12 +100,32 @@ async def add_outbound_order_item(
         if not goods:
             raise HTTPException(status_code=404, detail="货物不存在")
         
-        location = db.query(Location).filter(Location.location_code == item.location_code).first()
-        if not location:
-            raise HTTPException(status_code=404, detail="库位不存在")
-        
-        if location.warehouse_id != order.warehouse_id:
-            raise HTTPException(status_code=400, detail="库位不属于出库单仓库")
+        location_code = (item.location_code or "").strip()
+        if location_code:
+            location = db.query(Location).filter(Location.location_code == location_code).first()
+            if not location:
+                raise HTTPException(status_code=404, detail="库位不存在")
+            if location.warehouse_id != order.warehouse_id:
+                raise HTTPException(status_code=400, detail="库位不属于出库单仓库")
+        else:
+            # 复核反馈（2026-11）：出库单库位不再要求手选——按当前仓库该货物的库存
+            # 自动带出：优先选择库存量足够且最多的库位；没有足够库存时选库存最多的
+            # 库位（后续统一以"库存不足"拒绝，避免误选空库位）。
+            rows = (
+                db.query(Stock, Location)
+                .join(Location, Location.id == Stock.location_id)
+                .filter(
+                    Stock.warehouse_id == order.warehouse_id,
+                    Stock.goods_id == goods.id,
+                    Stock.quantity > 0,
+                )
+                .order_by(Stock.quantity.desc(), Location.location_code.asc(), Location.id.asc())
+                .all()
+            )
+            if not rows:
+                raise HTTPException(status_code=400, detail="该货物在当前仓库没有库存，无法自动选择库位")
+            enough = [row for row in rows if (row[0].quantity or 0) >= item.quantity]
+            location = (enough or rows)[0][1]
         
         # 检查库存是否足够
         stock = db.query(Stock).filter(

@@ -889,6 +889,36 @@ with sync_playwright() as p:
         page.keyboard.press("Escape")
         page.wait_for_selector("#detailModal", state="hidden")
 
+    # ---------- 出库单：库位按库存自动带出（反馈 2026-11） ----------
+    # 草稿出库单打开"添加明细"，输入条码后库位应自动带出（不再要求手选），并显示该库位库存。
+    _draft_id = page.evaluate("""async () => {
+        const r = await fetch('/api/outbound-orders/', {method:'POST', headers:{'content-type':'application/json'},
+            body: JSON.stringify({customer:'自动库位E2E'})});
+        const d = await r.json();
+        return d.id || null;
+    }""")
+    check("出库单自动库位：创建草稿单", bool(_draft_id), _draft_id)
+    if _draft_id:
+        try:
+            page.goto(BASE + "/outbound.html?orderId=" + str(_draft_id))
+            page.wait_for_selector('#orderDetailActions button[data-act="add-item"]', timeout=15000)
+            page.click('#orderDetailActions button[data-act="add-item"]')
+            page.wait_for_selector("#addItemModal:not(.hidden)", timeout=5000)
+            page.fill("#goodsBarcode", "8888001")
+            wait_js(page, "() => (document.getElementById('locationCode')||{}).value === 'A1'", timeout_ms=10000)
+            _auto = page.evaluate("""() => ({
+                loc: (document.getElementById('locationCode')||{}).value || '',
+                hint: (document.getElementById('locationStockHint')||{}).textContent || ''
+            })""")
+            check("出库单自动库位：输入条码后按库存自动带出库位（A1）", _auto["loc"] == "A1", str(_auto))
+            check("出库单自动库位：显示当前库位可用库存", "可用库存" in _auto["hint"], str(_auto))
+        finally:
+            page.evaluate("""async (id) => { await fetch('/api/outbound-orders/' + id, {method:'DELETE'}); }""", _draft_id)
+
+    # 返回申请管理页，后续双仓审批段落依赖 #recentBody
+    page.goto(BASE + "/request-admin.html")
+    page.wait_for_selector("#recentBody tr", timeout=15000)
+
     # ---------- 双仓审批（评审 P1：审批扣减仓库 = 申请仓库 = 页面展示仓库） ----------
     # 取 -0002 申请单 id（二号仓 密封圈 x50）
     r3_id = page.evaluate("""() => {

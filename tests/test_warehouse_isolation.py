@@ -451,6 +451,29 @@ class WarehouseIsolationTest(unittest.TestCase):
         self._call("POST", f"/check-orders/{order['id']}/complete", auth=auth)
         self._call("DELETE", f"/users/{op_id}")
 
+    def test_outbound_item_auto_selects_location_from_stock(self):
+        # 反馈（2026-11）：出库单库位不应强制手选——省略 location_code 时按库存自动
+        # 选择库位（优先满足数量且库存最多的库位），并沿用"库存不足"校验。
+        self._call("POST", f"/users/{self.admin_id}/switch-warehouse?warehouse_id={self.wh1}")
+        inbound = self._call("POST", "/inbound-orders/", {"supplier": "自动库位测试"})
+        self._call("POST", f"/inbound-orders/{inbound['id']}/items",
+                   {"goods_barcode": "SAME", "location_code": "S-L1", "quantity": 4})
+        self._call("POST", f"/inbound-orders/{inbound['id']}/submit")
+        out = self._call("POST", "/outbound-orders/", {"customer": "自动库位测试"})
+        # 省略库位：自动带出有库存的库位
+        item = self._call("POST", f"/outbound-orders/{out['id']}/items",
+                          {"goods_barcode": "SAME", "quantity": 2})
+        self.assertEqual(item["location_code"], "S-L1")
+        self.assertEqual(item["quantity"], 2.0)
+        # 超过该仓总库存：自动选库位后仍按库存不足拒绝
+        self._call("POST", f"/outbound-orders/{out['id']}/items",
+                   {"goods_barcode": "SAME", "quantity": 999}, expected=400)
+        # 显式传库位仍正常工作
+        item2 = self._call("POST", f"/outbound-orders/{out['id']}/items",
+                           {"goods_barcode": "SAME", "location_code": "S-L1", "quantity": 1})
+        self.assertEqual(item2["location_code"], "S-L1")
+        self._call("DELETE", f"/outbound-orders/{out['id']}")
+
     def test_deactivating_warehouse_repairs_current_warehouse(self):
         # 评审第 6 轮 P2：管理员直接停用仓库时，须同步修复"当前仓库指向该仓"的用户，
         # 避免重新登录后仓库列表已过滤停用仓、当前仓库却仍指向它；无启用授权仓库

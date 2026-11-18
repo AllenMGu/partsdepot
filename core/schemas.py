@@ -223,7 +223,7 @@ class InboundOrderDetailResponse(InboundOrderHeaderResponse):
 # 出库单相关模型
 class OutboundOrderItemCreate(BaseModel):
     goods_barcode: str
-    location_code: str
+    location_code: Optional[str] = ""  # 省略/为空时后端按库存自动选择（优先满足数量的库位）
     quantity: float = Field(gt=0)
     unit_price: Optional[float] = Field(default=None, ge=0)
     remark: Optional[str] = ""

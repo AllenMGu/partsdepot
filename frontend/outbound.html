@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-cAyYo6Bm7fr8WqQRv23amctl21mvi5ZuxiJ2vZUi6r0='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://cdn.sheetjs.com https://cdn.jsdelivr.net https://unpkg.com 'sha256-j2bTqTnsNjN1vtyzK3wWaTcPtK1FYV5cRsPGxw0zw4A='; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; form-action 'self'">
     <title>出库单管理 - 备品备件管理系统</title>
     <!-- Tailwind CSS v3 -->
     <link href="assets/css/tailwind.css" rel="stylesheet">
@@ -350,6 +350,7 @@
                                     <div class="font-medium text-green-800" id="locationName"></div>
                                 </div>
                             </div>
+                            <div id="locationStockHint" class="text-xs text-green-700 mt-1 hidden"></div>
                         </div>
                     </div>
                 </div>
@@ -978,30 +979,88 @@
             }
         }
 
-        // 自动填充库位编码
-        async function autoFillLocationCode() {
+        // 查询某货物在当前仓库各库位的可用库存（按数量倒序）
+        async function fetchStockRows(goodsBarcode, warehouseId = goodsWarehouseId()) {
             try {
-                // 调用API获取库位列表
-                const response = await fetch(`${API_BASE_URL}/locations/?warehouse_id=${goodsWarehouseId()}`, {
+                const response = await fetch(`${API_BASE_URL}/stock/?warehouse_id=${warehouseId}&goods_barcode=${encodeURIComponent(goodsBarcode)}`, {
                     headers: getHeaders()
                 });
+                if (!response.ok) return [];
+                const rows = await response.json();
+                if (!Array.isArray(rows)) return [];
+                return rows
+                    .filter(r => r.warehouse_id === warehouseId && r.goods_barcode === goodsBarcode && (parseFloat(r.quantity) || 0) > 0)
+                    .sort((a, b) => (parseFloat(b.quantity) || 0) - (parseFloat(a.quantity) || 0)
+                        || String(a.location_code).localeCompare(String(b.location_code)));
+            } catch (error) {
+                console.error('查询库位库存失败:', error);
+                return [];
+            }
+        }
 
-                if (!response.ok) {
-                    throw new Error('获取库位信息失败');
+        // 指定库位的可用库存
+        async function getLocationStock(goodsBarcode, locationCode) {
+            if (!locationCode) return 0;
+            const rows = await fetchStockRows(goodsBarcode);
+            const row = rows.find(r => r.location_code === locationCode);
+            return row ? (parseFloat(row.quantity) || 0) : 0;
+        }
+
+        // 更新“当前库位可用库存”提示
+        async function updateLocationStockHint(locationCode) {
+            const hint = document.getElementById('locationStockHint');
+            if (!hint) return;
+            const barcode = document.getElementById('goodsBarcode').value.trim();
+            if (!locationCode || !barcode) {
+                hint.classList.add('hidden');
+                hint.textContent = '';
+                return;
+            }
+            const rows = await fetchStockRows(barcode);
+            const row = rows.find(r => r.location_code === locationCode);
+            if (!row) {
+                hint.classList.add('hidden');
+                hint.textContent = '';
+                return;
+            }
+            hint.textContent = `当前库位可用库存：${parseFloat(row.quantity) || 0}`;
+            hint.classList.remove('hidden');
+        }
+
+        // 按库存自动带出库位：优先满足数量的库位，其次库存最多的库位
+        async function autoFillLocationCode() {
+            try {
+                const barcode = document.getElementById('goodsBarcode').value.trim();
+                const warehouseId = goodsWarehouseId();
+                const select = document.getElementById('locationCode');
+                if (!barcode || !warehouseId || !select) return;
+                if (select.options.length <= 1) await loadLocationsByWarehouse(warehouseId);
+                if (warehouseId !== goodsWarehouseId()) return;
+                const rows = await fetchStockRows(barcode, warehouseId);
+                if (warehouseId !== goodsWarehouseId()) return;
+                if (!rows.length) {
+                    select.value = '';
+                    document.getElementById('locationInfo').classList.add('hidden');
+                    updateLocationStockHint('');
+                    return;
                 }
-
-                const locationList = await response.json();
-
-                if (locationList.length > 0) {
-                    // 选择第一个可用库位
-                    const defaultLocation = locationList[0];
-                    document.getElementById('locationCode').value = defaultLocation.location_code;
-                    locationCache.set(defaultLocation.location_code, defaultLocation);
-                    showLocationInfo(defaultLocation);
+                const qty = parseFloat(document.getElementById('quantity').value) || 0;
+                const enough = rows.filter(r => (parseFloat(r.quantity) || 0) >= qty);
+                const best = (enough.length ? enough : rows)[0];
+                select.value = best.location_code;
+                let loc = locationCache.get(best.location_code);
+                if (!loc) {
+                    loc = {
+                        location_code: best.location_code,
+                        name: best.location_name || best.location_code,
+                        warehouse_id: warehouseId
+                    };
+                    locationCache.set(best.location_code, loc);
                 }
+                showLocationInfo(loc);
+                updateLocationStockHint(best.location_code);
             } catch (error) {
                 console.error('自动填充库位失败:', error);
-                // 库位自动填充失败不显示错误，允许用户手动选择
             }
         }
         
@@ -1026,10 +1085,10 @@
                 return;
             }
 
-            // 验证出库数量不大于可用库存
-            const availableStock = await getAvailableStock(goodsBarcode);
-            if (quantity > availableStock) {
-                showToast(`出库数量不能大于可用库存(${availableStock})`, 'error');
+            // 验证出库数量不大于“所选库位”的可用库存（出库按库位扣减）
+            const locationStock = await getLocationStock(goodsBarcode, locationCode);
+            if (quantity > locationStock) {
+                showToast(`出库数量不能大于该库位可用库存(${locationStock})`, 'error');
                 return;
             }
 
@@ -1627,8 +1686,10 @@
             document.getElementById('locationCode').addEventListener('change', function() {
                 if (this.value.trim()) {
                     validateLocation(this.value.trim());
+                    updateLocationStockHint(this.value.trim());
                 } else {
                     document.getElementById('locationInfo').classList.add('hidden');
+                    updateLocationStockHint('');
                 }
             });
         }
